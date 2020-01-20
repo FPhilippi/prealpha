@@ -1,0 +1,13 @@
+ "BMIMNTf2_XYZ_1step.lmp" ### trajectory filename
+ "./Example_drudes/molecular.inp" ### inputfile for module MOLECULAR
+ "./Example_drudes/" ### path to trajectory
+ "./Example_drudes/" ### path to other input files
+ "./Example_drudes/output/" ### output folder
+ show_drude ### print detailed information about drude assignments
+ dump_example ### write xyz files for all the molecule types
+ sequential_read T ### read one timestep after the other
+ trajectory_type lmp ### which format the (input) trajectory has
+ quit
+ 
+ This is the general input file.
+ It controls the behaviour of the trajectory analyser.

@@ -1,0 +1,12 @@
+ "BMIMNTf2_VEL_1step.lmp" ### trajectory filename
+ "./Example_drudes/molecular_VEL.inp" ### inputfile for module MOLECULAR
+ "./Example_drudes/" ### path to trajectory
+ "./Example_drudes/" ### path to other input files
+ "./Example_drudes/output/" ### output folder
+ show_drude ### print detailed information about drude assignments
+ drude_temp 1 1 ### calculating instantaneous temperatures for the first step
+ trajectory_type lmp ### which format the (input) trajectory has
+ quit
+ 
+ This is the general input file.
+ It controls the behaviour of the trajectory analyser.
