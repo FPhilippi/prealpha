@@ -1,0 +1,6 @@
+ 1 ### number of timesteps in trajectory
+ 2 ### number of different types of molecules. Followed by list of molecules.
+ +1 35 512 ### There are 512 molecules per step with charge +1 and 35 atoms each, including drude particles
+ -1 24 512 ### There are 512 molecules per step with charge -1 and 24 atoms each, including drude particles
+ masses 1 ### The following line specifies a custom mass.
+ X  0.400 ### By that, the support for drude particles is turned on.
