@@ -3,6 +3,7 @@
  "./Example_drudes/" ### path to trajectory
  "./Example_drudes/" ### path to other input files
  "./Example_drudes/output/" ### output folder
+ show_settings ### prints some details about variables - including required memory
  show_drude ### print detailed information about drude assignments
  dump_example ### write xyz files for all the molecule types
  remove_drudes 1 1 ### writes a trajectory file without drude particles for step 1
