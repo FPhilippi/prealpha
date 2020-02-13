@@ -1,4 +1,4 @@
-! RELEASED ON 04_Feb_2020 AT 09:23
+! RELEASED ON 13_Feb_2020 AT 19:48
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -72,6 +72,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  INTEGER :: TIME_SCALING_FACTOR=TIME_SCALING_FACTOR_DEFAULT !integer value to scale the timelines.
  INTEGER :: HEADER_LINES=HEADER_LINES_DEFAULT!number of fixed lines in general.inp, without the optional 'sequential read'.
  INTEGER :: GLOBAL_ITERATIONS=GLOBAL_ITERATIONS_DEFAULT!number of time the whole program (including global initialisation and finalisation) is repeated.
+ INTEGER :: error_count=0 !number of warnings and errors encountered
  CHARACTER(LEN=128),DIMENSION(:),ALLOCATABLE :: GENERAL_INPUT_FILENAMES !the general input filenames passed from the command line.
  CHARACTER(LEN=3) :: TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!type of the trajectory, e.g. lmp or xyz
  CHARACTER(LEN=128) :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT
@@ -175,6 +176,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !89 using sequential read
  !90 t-value not available
  !91 this feature requires assigned drude particles
+ !92 box volume will be overwritten
+ !93 boundaries not sensible.
+ !94 Error count exceeds maximum
  REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
@@ -182,13 +186,15 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
  PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real,student_t_value
- PRIVATE :: q
+ PRIVATE :: q !that's not a typo!
+ PRIVATE :: error_count
  CONTAINS
 
   SUBROUTINE report_error(local_error_code,exit_status)!Routine for error handling. Severe Errors cause the program to stop.
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: local_error_code
   INTEGER,INTENT(IN),OPTIONAL :: exit_status
+   error_count=error_count+1
    ERROR_CODE=local_error_code
    IF ((VERBOSE_OUTPUT).AND.(PRESENT(exit_status))) WRITE(*,'("  #  EXIT STATUS ",I0," was passed to report_error")') exit_status
    IF (ERROR_OUTPUT) THEN
@@ -507,12 +513,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
       IF (exit_status<0) WRITE(*,*) " #  end of file encountered!"
      ENDIF
     CASE (85)
-     WRITE(*,*) " #  SEVERE ERROR 84: Cannot read trajectory head. Check format of trajectory and molecular input file."
+     WRITE(*,*) " #  SEVERE ERROR 85: Cannot read trajectory head. Check format of trajectory and molecular input file."
      IF (PRESENT(exit_status)) THEN
       IF (exit_status<0) WRITE(*,*) " #  end of file encountered!"
      ENDIF
      WRITE(*,*) "--> use correct number of steps or switch to reading the whole trajectory."
      CALL finalise_global()
+     STOP
     CASE (86)
      WRITE(*,*) " #  WARNING 86: Couldn't find core for drude particle (see EXIT STATUS)."
      WRITE(*,*) " #  This drude particle will be ignored in some analyses (e.g. temperature)."
@@ -537,11 +544,24 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (91)
      WRITE(*,*) " #  ERROR 91: Drude particles are not assigned to their respective cores."
      WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (92)
+     WRITE(*,*) " #  WARNING 92: Box volume will be overwritten."
+    CASE (93)
+     WRITE(*,*) " #  WARNING 93: lower bound is not smaller than higher bound, box volume is not changed."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
    ENDIF
+   IF (error_count>MAXITERATIONS) THEN
+    WRITE(*,*) " #  SEVERE ERROR 94: Error count exceeds maximum."
+    CALL finalise_global()
+    STOP
+   ENDIF
   END SUBROUTINE report_error
+
+  INTEGER FUNCTION give_error_count()
+   give_error_count=error_count
+  END FUNCTION give_error_count
 
   ! THE FOLLOWING PART IS REQUIRED BY THE MODULE "ANGLES"
   FUNCTION crossproduct(a,b) !This function returns the crossproduct of the vectors a and b.
@@ -1043,8 +1063,21 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
  PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles
  PUBLIC :: give_smallest_distance,give_number_of_neighbours,wrap_vector,give_smallest_distance_squared,compute_drude_properties
- PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes
+ PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
  CONTAINS
+
+  !The following subroutine sets the cubic box limits
+  SUBROUTINE set_cubic_box(lower,upper)
+  IMPLICIT NONE
+  REAL(KIND=STORAGE_PRECISION),INTENT(IN) :: lower,upper
+   box_dimensions(1,:)=lower
+   box_dimensions(2,:)=upper
+   !initialise box size
+   box_size(:)=box_dimensions(2,:)-box_dimensions(1,:)
+   maximum_distance_squared=box_size(2)**2+SQRT(box_size(1)**2+box_size(3)**2)
+   maximum_distance=SQRT(maximum_distance_squared)
+   BOX_VOLUME_GIVEN=.TRUE.
+  END SUBROUTINE set_cubic_box
 
   !The following subroutine computes the squared radius of gyration (rgy_sq) of a given molecule,
   !as well as the furthest distance of any atom from the centre of mass of the molecule.
@@ -1375,7 +1408,6 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2))
   END FUNCTION give_smallest_atom_distance
 
-  !TODO TO DO UNSTABLE CHECK
   !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs - as well as the corresponding translation vector.
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
   &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
@@ -1469,7 +1501,6 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
   INTEGER :: molecule_type_index_counter,molecule_index_counter,natoms
    cutoff_squared=cutoff**2
-   !TODO TO DO UNSTABLE
    IF (PRESENT(neighbour_atoms)) neighbour_atoms=0
    IF (PRESENT(neighbour_molecules)) neighbour_molecules=0
    DO molecule_type_index_counter=1,number_of_molecule_types,1
@@ -3514,7 +3545,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       molecule(n)%atom_position(:)=molecule(n)%atom_position(:)-center_of_mass%atom_position(:)
      END DO
      !write molecule to the specified unit
-     !TODO TO DO not elegant, change order of if statements
+     !TO DO not elegant, change order of if statements
      IF (PRESENT(outputunit)) THEN
       IF (PRESENT(addhead)) THEN
        IF (addhead) THEN
@@ -4085,8 +4116,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       OPEN(UNIT=3,FILE=TRIM(fstring))
       WRITE(3,'("rgy_sq maxdist")')
      ENDIF
-     !Parallelise this!
-     !TODO TO DO UNSTABLE
+     !TO DO Parallelise this? Actually not necessary - is quite fast, and converges quickly
      !First, compute global average of maxdist, rgy, and rgy_squared.
      DO timestep=startstep,endstep,1
       !iterate over molecule indices
@@ -5841,7 +5871,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      &,TRIM(FILENAME_AUTOCORRELATION_INPUT),"'"
      WRITE(3,*)
      WRITE(3,*) "Diffusion properties from integrated velocity correlation functions:"
-     WRITE(3,*) "reference: https://aip.scitation.org/doi/10.1063/1.466191"
+     WRITE(3,*) "reference: dx.doi.org/10.1103/PhysRevE.50.1162"
      WRITE(3,16) "Ds_a ",integral_a," equation  (8)"
      WRITE(3,16) "Ds_b ",integral_b," equation  (8)"
      WRITE(3,16) "D0_ab",D0," equation  (7)"
@@ -7023,7 +7053,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 04_Feb_2020"
+ PRINT *, "   Date of Release: 13_Feb_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -7253,10 +7283,20 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    IF (ios/=0) CALL report_error(46,exit_status=ios)
    WRITE(8,'("100000 steps.")')
    WRITE(8,'("2 different types of molecules.")')
-   WRITE(8,'("-1 15 ",I0," NTf2")') ionpairs
    WRITE(8,'("+1 25 ",I0," BMIM")') ionpairs
+   WRITE(8,'("-1 15 ",I0," NTf2")') ionpairs
    CLOSE(UNIT=8)
-    
+   OPEN(UNIT=8,FILE="BMIMTFSI_drudes.inp",IOSTAT=ios)
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'("100000 steps.")')
+   WRITE(8,'("2 different types of molecules.")')
+   WRITE(8,'("+1 25 ",I0," BMIM")') ionpairs
+   WRITE(8,'("-1 24 ",I0," NTf2")') ionpairs
+   WRITE(8,'("masses 1")')
+   WRITE(8,'("X  0.400")')
+   WRITE(8,'("constraints 1")')
+   WRITE(8,'("1 15")')
+   CLOSE(UNIT=8)
    PRINT *,"Printed with 100000 steps."
   END SUBROUTINE hackprint
 
@@ -7482,6 +7522,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    The third and fourth integers are the molecule type index and the molecule index, respectively."
    PRINT *,"    The real number defines the cutoff for centre-of-mass distance for exporting molecules"
    PRINT *,"    Note that the properly wrapped mirror images of the closest encounters are given."
+   PRINT *," - 'cubic_box_edge':"
+   PRINT *,"    this keyword expects two real values, the lower and upper bounds of the simulation box."
+   PRINT *,"    i.e. cubic_box_edge 0.0 100.0 corresponds to a cubic box with side length 100.0 Angströms"
+   PRINT *,"    useful if e.g. dump_cut is used with a xyz trajectory."
    PRINT *," - 'convert':"
    PRINT *,"    converts the given trajectory to a centre-of-mass trajectory (per specified molecule type)."
    PRINT *,"    i.e. only the centres of mass for the molecules are printed instead of the atoms."
@@ -7845,6 +7889,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    FILENAME_TRAJECTORY=TRIM(user_input_string(128))
    !Try to get type from extension.
    valid_trajectory_type_extension=.TRUE.
+   BOX_VOLUME_GIVEN=.FALSE.
    SELECT CASE (FILENAME_TRAJECTORY(LEN(TRIM(FILENAME_TRAJECTORY))-3:LEN(TRIM(FILENAME_TRAJECTORY))))
    CASE (".lmp",".LMP")
     PRINT *,"assuming lammps trajectory based on file extension."
@@ -7877,8 +7922,24 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   SUBROUTINE generate_general_input()
   IMPLICIT NONE
   INTEGER :: ios
+  REAL :: lower,upper
+  LOGICAL :: manual_box_edge
    !get the trajectory filename
    CALL trajectory_filename_input()
+   manual_box_edge=.FALSE.
+   !take care of the custom box volume
+   IF (.NOT.(BOX_VOLUME_GIVEN)) THEN
+    PRINT *,"Box boundaries are not available from this type of trajectory file."
+    PRINT *,"Would you like to specify them manually? (y/n)"
+    PRINT *,"(only cubic boxes supported here)"
+    manual_box_edge=user_input_logical()
+    IF (manual_box_edge) THEN
+     PRINT *,"Please enter lower boundary."
+     lower=user_input_real(-2000.0,+1000.0)
+     PRINT *,"Please enter upper boundary."
+     upper=user_input_real(lower,+2000.0)
+    ENDIF
+   ENDIF
    !Get the paths
    PRINT *,"Do you want to specify the paths were the files are located? (y/n)"
    IF (user_input_logical()) THEN
@@ -7918,6 +7979,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    WRITE(8,*) '"',TRIM(PATH_OUTPUT),'"'," ### output folder"
    WRITE(8,'(A,I0,A)') " time_scaling ",TIME_SCALING_FACTOR,&
    &" ### factor to scale the timestep with to arrive at a useful time unit."
+   IF (manual_box_edge) WRITE(8,'(A,2E14.8,A)') " cubic_box_edge ",lower,upper," ### lower and upper cubic box boundaries."
    CLOSE(UNIT=8)
    PRINT *,"Does your trajectory contain velocities (y) or cartesian coordinates (n)?"
    IF (user_input_logical()) THEN
@@ -8488,7 +8550,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   IMPLICIT NONE
   LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
    IF ((wrapping_is_sensible).AND.(BOX_VOLUME_GIVEN)) THEN
-    PRINT *,"Do you want to wrap the molecules you specified back into the box?"
+    PRINT *,"Do you want to wrap the molecules you specified back into the box? (y/n)"
     PRINT *,"This could be useful if you want to export a snapshot."
     WRAP_TRAJECTORY=user_input_logical()
     IF (WRAP_TRAJECTORY) THEN
@@ -8674,6 +8736,7 @@ INTEGER :: ios,n
   INTEGER :: inputinteger,startstep,endstep,inputinteger2
   LOGICAL :: inputlogical
   REAL(KIND=WORKING_PRECISION) :: inputreal
+  REAL :: lower,upper
    DO n=1,MAXITERATIONS,1
     READ(7,IOSTAT=ios,FMT=*) inputstring
     IF (ios<0) THEN
@@ -8688,11 +8751,12 @@ INTEGER :: ios,n
      EXIT
     ENDIF
     IF (TRIM(inputstring)=="autocorrelation") inputstring="correlation"!support for older nomenclature
-    !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
     IF (TRIM(inputstring)=="dihedral") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="reorientation") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="rmm-vcf") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="show_drude_settings") inputstring="show_drude"!support for synonyms
+    IF (TRIM(inputstring)=="show_drudes") inputstring="show_drude"!support for synonyms
+    !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
     SELECT CASE (TRIM(inputstring))
     CASE ("quit")
      WRITE(*,*) "exiting analysis."
@@ -8799,6 +8863,22 @@ INTEGER :: ios,n
       CALL dump_cut(inputlogical,startstep,endstep,inputinteger,inputinteger2,inputreal)
      ELSE
       CALL report_error(41)
+     ENDIF
+    CASE ("cubic_box_edge")
+     IF (BOX_VOLUME_GIVEN) CALL report_error(92)
+     BACKSPACE 7
+     READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
+     IF (ios/=0) THEN
+      CALL report_error(19,exit_status=ios)
+      EXIT
+     ENDIF
+     IF (lower>upper) THEN
+      CALL report_error(93)
+     ELSE
+      CALL set_cubic_box(lower,upper)
+      WRITE(*,'(" Box boundaries set to:")') 
+      WRITE(*,'("   lower bound: ",E12.6)') lower
+      WRITE(*,'("   upper bound: ",E12.6)') upper
      ENDIF
     CASE ("convert") !Module DEBUG
      BACKSPACE 7
