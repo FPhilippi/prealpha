@@ -1,4 +1,4 @@
-! RELEASED ON 13_Feb_2020 AT 19:48
+! RELEASED ON 17_Feb_2020 AT 17:23
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -50,6 +50,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  INTEGER,PARAMETER :: HEADER_LINES_DEFAULT=5
  INTEGER,PARAMETER :: MAXITERATIONS=500
  INTEGER,PARAMETER :: GLOBAL_ITERATIONS_DEFAULT=1
+ REAL,PARAMETER :: CUTOFF_INTERMOLECULAR_DEFAULT=2.0
+ REAL,PARAMETER :: VDW_RATIO_INTERMOLECULAR_DEFAULT=2.8 !good values usually 2.2-3.4
  INTEGER :: q !nobody uses 'q' anywhere else, hopefully.
  INTEGER :: ALPHABET(26*2+3+10)=(/ (q,q=IACHAR("a"),IACHAR("a")+25,1),(q,q=IACHAR("A"),IACHAR("A")+25,1),IACHAR("_"),&
  &IACHAR("/"),IACHAR("."),(q,q=IACHAR("0"),IACHAR("0")+9,1) /)!The 'benign' alphabet, re-initialised in 'initialise_global'
@@ -73,6 +75,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  INTEGER :: HEADER_LINES=HEADER_LINES_DEFAULT!number of fixed lines in general.inp, without the optional 'sequential read'.
  INTEGER :: GLOBAL_ITERATIONS=GLOBAL_ITERATIONS_DEFAULT!number of time the whole program (including global initialisation and finalisation) is repeated.
  INTEGER :: error_count=0 !number of warnings and errors encountered
+ REAL :: CUTOFF_INTERMOLECULAR=CUTOFF_INTERMOLECULAR_DEFAULT ! Everything bigger than that is considered intermolecular
+ REAL :: VDW_RATIO_INTERMOLECULAR=VDW_RATIO_INTERMOLECULAR_DEFAULT ! same as the cutoff, just defined using the covalence radii
  CHARACTER(LEN=128),DIMENSION(:),ALLOCATABLE :: GENERAL_INPUT_FILENAMES !the general input filenames passed from the command line.
  CHARACTER(LEN=3) :: TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!type of the trajectory, e.g. lmp or xyz
  CHARACTER(LEN=128) :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT
@@ -179,13 +183,16 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !92 box volume will be overwritten
  !93 boundaries not sensible.
  !94 Error count exceeds maximum
+ !95 Cannot perform molecule recognition
+ !96 Atoms for one of the molecular units were separated.
  REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: boltzmann=1.380649E-23!boltzmann constant in joules per kelvin
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
- PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real,student_t_value
+ PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real
+ PUBLIC :: student_t_value,covalence_radius
  PRIVATE :: q !that's not a typo!
  PRIVATE :: error_count
  CONTAINS
@@ -452,7 +459,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  ERROR 68: No valid inputfiles. Allowed characters are: "
      WRITE(*,*) " #  ",CHAR(ALPHABET(:))
      FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
-     WRITE(*,*) "--> general input file will be named '",TRIM(FILENAME_GENERAL_INPUT),"'"
+     WRITE(*,*) "--> analysis skipped."
     CASE (69)
      WRITE(*,*) " #   ERROR 69: the specified molecule index doesn't exist."
      WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
@@ -548,6 +555,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 92: Box volume will be overwritten."
     CASE (93)
      WRITE(*,*) " #  WARNING 93: lower bound is not smaller than higher bound, box volume is not changed."
+    CASE (95)
+     WRITE(*,*) " #  ERROR 95: Molecule recognition failed."
+     WRITE(*,*) " #  check path, format, and filename of given trajectory!"
+     WRITE(*,*)
+    CASE (96)
+     WRITE(*,*) " #  ERROR 96: Atoms of one of the molecular units (see EXIT STATUS) were separated in the trajectory."
+     WRITE(*,*) " #  ensure that trajectory is sorted, and that the used cutoff is meaningful for your system!"
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
@@ -650,7 +664,11 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,'(" Please enter a real number.")')
     ELSE
      IF ((inputreal<low).OR.(inputreal>high)) THEN
-      WRITE(*,'(" Please enter a real number between ",F5.1," and ",F5.1)') low,high
+      IF ((low<0.001).OR.(high>999.9)) THEN
+       WRITE(*,'(" Please enter a real number between ",E16.8," and ",E16.8)') low,high
+      ELSE
+       WRITE(*,'(" Please enter a real number between ",F5.1," and ",F5.1)') low,high
+      ENDIF
      ELSE
       EXIT
      ENDIF
@@ -824,6 +842,32 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    END SELECT
 
   END FUNCTION student_t_value
+
+  REAL FUNCTION covalence_radius(element_name)
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: element_name
+   !IF you change this part, THEN change Module_Molecular, too!
+   SELECT CASE (TRIM(element_name))
+   CASE ("H")
+    covalence_radius=0.33
+   CASE ("F")
+    covalence_radius=0.71
+   CASE ("N")
+    covalence_radius=0.71
+   CASE ("O")
+    covalence_radius=0.73
+   CASE ("C")
+    covalence_radius=0.77
+   CASE ("S")
+    covalence_radius=1.02
+   CASE ("P")
+    covalence_radius=1.06
+   CASE ("Li")
+    covalence_radius=1.34
+   CASE DEFAULT
+    covalence_radius=1.00
+   END SELECT
+  END FUNCTION covalence_radius
 
   SUBROUTINE timing_parallel_sections(start)
   IMPLICIT NONE
@@ -1050,6 +1094,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  INTEGER :: number_of_molecule_types=0 !number of different molecules, usually two (cation and anion)
  INTEGER :: total_number_of_atoms=0 !number of atoms per timestep
  INTEGER :: number_of_drude_particles=0 !number of drude particles per box
+ INTEGER :: ndrudes_check=0 !number of drude particles specified in the molecular input file
  TYPE(molecule),DIMENSION(:),ALLOCATABLE :: molecule_list !list of molecules, usually two members: cation and anion. Has to be same order as in lammps trajectory. The different molecule types / members are usually referred to as 'molecule_type_index' in subroutines.
  PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
  PUBLIC :: give_dihedrals,initialise_dihedrals,give_number_of_molecule_types,give_number_of_atoms_per_molecule
@@ -1058,7 +1103,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PRIVATE :: box_dimensions,drude_mass,number_of_molecule_types,total_number_of_atoms,number_of_steps,box_size
  PRIVATE :: report_trajectory_properties,dihedrals_initialised,dihedral_member_indices,number_of_dihedrals,wrap_snap
  PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_masses,wrap_full,custom_constraints
- PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned
+ PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
  PUBLIC :: assign_drudes
  PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
  PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles
@@ -1397,6 +1442,105 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    give_smallest_distance=SQRT(give_smallest_distance_squared&
    &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2))
   END FUNCTION give_smallest_distance
+
+  !This subroutine computes the smallest and largest distance within all molecules of the given type and timestep.
+  SUBROUTINE give_intramolecular_distances(timestep,molecule_type_index,smallest,largest)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index
+  REAL,INTENT(OUT) :: smallest,largest
+  REAL :: current_squared
+  INTEGER :: molecule_index,atom_index_1,atom_index_2
+   !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
+   smallest=maximum_distance_squared
+   largest=0.0
+   DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+    DO atom_index_1=1,molecule_list(molecule_type_index)%number_of_atoms-1,1
+     DO atom_index_2=atom_index_1+1,molecule_list(molecule_type_index)%number_of_atoms,1
+      current_squared=give_smallest_atom_distance_squared&
+      &(timestep,timestep,molecule_type_index,molecule_type_index,molecule_index,molecule_index,atom_index_1,atom_index_2)
+      IF (current_squared>largest) largest=current_squared
+      IF (current_squared<smallest) smallest=current_squared
+     ENDDO
+    ENDDO
+   ENDDO
+   smallest=SQRT(smallest)
+   largest=SQRT(largest)
+  END SUBROUTINE give_intramolecular_distances
+
+  !This subroutine computes the smallest intermolecular distance of the given type and timestep to any other molecule.
+  SUBROUTINE give_intermolecular_contact_distance(timestep,molecule_type_index_1,smallest)
+  IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_thread_num()
+  !$  INTEGER :: OMP_get_thread_num
+  !$  END FUNCTION OMP_get_thread_num
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index_1
+  REAL,INTENT(OUT) :: smallest
+  INTEGER :: molecule_index_1
+  REAL :: smallest_local
+   !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
+   !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(smallest_local)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE (*,'(A,I0,A)') "     ### Parallel execution on ",OMP_get_num_threads()," threads (intermolecular contact distance)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
+   !$OMP END SINGLE
+   smallest=maximum_distance_squared
+   smallest_local=maximum_distance_squared
+   !outer loop: goes over all the molecules of this molecule type...
+   !$OMP DO
+   DO molecule_index_1=1,molecule_list(molecule_type_index_1)%total_molecule_count,1
+    CALL particular_molecule_contact_distance(molecule_index_1,smallest_local)
+   ENDDO
+   !$OMP END DO
+   !$ IF (DEVELOPERS_VERSION) WRITE(*,'("  ! thread ",I0,", smallest value: ",F0.3,A)') OMP_get_thread_num(),SQRT(smallest_local)
+   !CRITICAL directive to properly update the final value
+   !$OMP CRITICAL
+   IF (smallest_local<smallest) smallest=smallest_local
+   !$OMP END CRITICAL
+   !$OMP END PARALLEL
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,ADVANCE="NO",FMT='("     ### End of parallelised section, took ")')
+   !$  CALL timing_parallel_sections(.FALSE.)
+   !$ ENDIF
+   smallest=SQRT(smallest)
+   CONTAINS
+
+    SUBROUTINE particular_molecule_contact_distance(molecule_index,smallest_inout)
+    IMPLICIT NONE
+    INTEGER :: molecule_index,molecule_index_2,atom_index_1,atom_index_2,molecule_type_index_2
+    REAL :: current_squared
+    REAL,INTENT(INOUT) :: smallest_inout
+     !and in the inner loop, over all the atoms of this particular molecule.
+     DO atom_index_1=1,molecule_list(molecule_type_index_1)%number_of_atoms,1
+      !thus here, molecule_index and atom_index_1 will take every possible value for any atom in molecule_type_index_1!
+      !For each of these atoms, check all molecules *other* than the current one:
+      DO molecule_type_index_2=1,number_of_molecule_types,1
+       !This loop iterates over all molecules of the other type...
+       DO molecule_index_2=1,molecule_list(molecule_type_index_2)%total_molecule_count,1
+        IF ((molecule_type_index_2==molecule_type_index_1).AND.(molecule_index_2==molecule_index)) THEN
+         !they are the same! abort!
+         EXIT
+        ELSE
+         !now, finally, go through the atoms of that second molecule.
+         DO atom_index_2=1,molecule_list(molecule_type_index_2)%number_of_atoms,1
+          current_squared=give_smallest_atom_distance_squared&
+          &(timestep,timestep,molecule_type_index_1,molecule_type_index_2,&
+          &molecule_index,molecule_index_2,atom_index_1,atom_index_2)
+          IF (current_squared<smallest_inout) smallest_inout=current_squared
+         ENDDO  
+        ENDIF
+       ENDDO
+      ENDDO
+     ENDDO
+    END SUBROUTINE particular_molecule_contact_distance
+
+  END SUBROUTINE give_intermolecular_contact_distance
 
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance&
   &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
@@ -1779,13 +1923,13 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    IF (PRESENT(wrapshift)) wrapshift(:)=0.0d0
    DO xyzcounter=1,3,1
     DO
-     IF (input_vector(xyzcounter)<=box_dimensions(1,xyzcounter)) THEN
+     IF (input_vector(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
       !input vector is outside of box (smaller)
       input_vector(xyzcounter)=input_vector(xyzcounter)+box_size(xyzcounter)
       IF (PRESENT(wrapshift)) wrapshift(xyzcounter)=wrapshift(xyzcounter)+box_size(xyzcounter)
       CYCLE
      ELSE
-      IF (input_vector(xyzcounter)>=box_dimensions(2,xyzcounter)) THEN
+      IF (input_vector(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
        !input vector is outside of box (bigger)
        input_vector(xyzcounter)=input_vector(xyzcounter)-box_size(xyzcounter)
        IF (PRESENT(wrapshift)) wrapshift(xyzcounter)=wrapshift(xyzcounter)-box_size(xyzcounter)
@@ -2023,6 +2167,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,'("    ",A," ",L1)') "custom_constraints        ",custom_constraints
    WRITE(*,'("    ",A," ",L1)') "custom_masses             ",custom_masses
    WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
+   WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
+   WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
    WRITE(*,'("    ",A," ",I0)') "total_number_of_atoms     ",total_number_of_atoms
    WRITE(*,'("    ",A," ",I0)') "number_of_molecule_types  ",number_of_molecule_types
    WRITE(*,'("    ",A," ",I0)') "number_of_drude_particles ",number_of_drude_particles
@@ -2998,7 +3144,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
     SUBROUTINE read_molecular_input_file_drudes()
     IMPLICIT NONE
-    INTEGER :: inputinteger,ndrudes_check
+    INTEGER :: inputinteger
      drudes_assigned=.FALSE.
      ndrudes_check=0
      WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'drudes'"
@@ -3053,7 +3199,6 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
           !test if drudes_assigned still true. If not, print error message.
           IF (drudes_assigned) THEN
            WRITE(*,'("done.")')
-           IF (ndrudes_check/=number_of_drude_particles) CALL report_error(88)
           ELSE
            WRITE(*,'("failed.")') 
            CALL report_error(87)
@@ -3317,6 +3462,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        ENDDO
       ENDIF
      ENDDO
+     IF ((ndrudes_check/=0).AND.(number_of_drude_particles>0)) THEN
+      IF (ndrudes_check/=number_of_drude_particles) CALL report_error(88)
+     ENDIF
      REWIND 3
      CALL report_trajectory_properties() !report all the useful general properties
     END SUBROUTINE load_trajectory_header_information
@@ -3420,6 +3568,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
   REAL(KIND=SP) FUNCTION atomic_weight(element_name) !this function returns the atomic weight for a given element.
   IMPLICIT NONE
+  !If you change this part, then also change Module_SETTINGS
   CHARACTER(LEN=*),INTENT(IN) :: element_name
    SELECT CASE (TRIM(element_name))
    CASE ("H")
@@ -3464,7 +3613,56 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
  PRIVATE test_dihedrals
  CONTAINS
 
-  !Subroutine to center the molecule provided in the specified unit in xyz format.
+  !This SUBROUTINE reports the smallest and largest intramolecular distance and the smallest intermolecular distance for all molecule types in the given timestep
+  SUBROUTINE contact_distance(startstep_in,molecule_type_index_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: startstep_in,molecule_type_index_in
+  INTEGER :: timestep,molecule_type_index
+  REAL :: smallest,largest
+   !availability of box volume check in calling routine.
+   timestep=startstep_in
+   IF (timestep<1) THEN
+    CALL report_error(57,exit_status=timestep)
+    timestep=1
+   ENDIF
+   IF (timestep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=timestep)
+    timestep=give_number_of_timesteps()
+   ENDIF
+   IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_in)
+    RETURN
+   ENDIF
+   IF (molecule_type_index_in<1) THEN
+    WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances at timestep for all molecule types.",I0)') timestep
+    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+     WRITE(*,'("   Molecule type index ",I0," out of ",I0,".")') molecule_type_index,give_number_of_molecule_types()
+     CALL print_distances()
+    ENDDO
+   ELSE
+    molecule_type_index=molecule_type_index_in
+    WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances for molecule type ",I0," at timestep ",I0,".")')&
+    &,molecule_type_index,timestep
+    CALL print_distances()
+   ENDIF
+
+   CONTAINS
+
+    SUBROUTINE print_distances()
+    IMPLICIT NONE
+     CALL give_intramolecular_distances(timestep,molecule_type_index,smallest,largest)
+     IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
+     WRITE(*,'("   Largest intramolecular distance:  ",F0.3)') largest
+     IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
+     WRITE(*,'("   Smallest intramolecular distance: ",F0.3)') smallest
+     CALL give_intermolecular_contact_distance(timestep,molecule_type_index,smallest)
+     IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
+     WRITE(*,'("   Smallest intermolecular distance: ",F0.3)') smallest
+    END SUBROUTINE print_distances
+
+  END SUBROUTINE contact_distance
+
+  !SUBROUTINE to center the molecule provided in the specified unit in xyz format.
   !If addhead is .TRUE. THEN a line with the number of atoms and a blank line are added. note that 'addhead' defaults to .FALSE.!
   !If the outputunit is present, THEN it is opened with "append"!
   SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header)
@@ -4035,7 +4233,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     WRITE(*,FMT='(" Calculating radius of gyration for all molecule types.")')
     WRITE(*,'(" Taking ensemble average from step ",I0," to ",I0,".")') startstep,endstep
     DO molecule_type_index=1,give_number_of_molecule_types(),1
-     WRITE(*,'("   molecule type index ",I0," out of ",I0,".")') molecule_type_index,give_number_of_molecule_types()
+     WRITE(*,'("   Molecule type index ",I0," out of ",I0,".")') molecule_type_index,give_number_of_molecule_types()
      CALL print_gyradius()
     ENDDO
    ELSE
@@ -4088,7 +4286,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
      ENDIF
     END SUBROUTINE finalise_gyradius
 
-    !This subroutine writes <Rgy²>, <Rgy>, and <maxdist> to the screen, including standard deviations.
+    !This SUBROUTINE writes <Rgy²>, <Rgy>, and <maxdist> to the screen, including standard deviations.
     SUBROUTINE print_gyradius()
     IMPLICIT NONE
     REAL(KIND=GENERAL_PRECISION) :: rgy_sq,maxdist,globalav_rgy_sq,globalav_rgy,globalav_maxdist
@@ -4182,7 +4380,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
 
   END SUBROUTINE report_gyradius
 
-  !This subroutine writes a subroutine with removed drude particles. This requires assigned drude particles!
+  !This SUBROUTINE writes a SUBROUTINE with removed drude particles. This requires assigned drude particles!
   SUBROUTINE remove_drudes(startstep_in,endstep_in)
   IMPLICIT NONE
   INTEGER :: startstep,endstep,stepcounter,molecule_type_index,molecule_index
@@ -4230,7 +4428,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    CLOSE(UNIT=4)
   END SUBROUTINE
 
-  !This subroutine reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
+  !This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
   SUBROUTINE report_drude_temperature(startstep_in,endstep_in)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
@@ -7010,6 +7208,538 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
 
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
+!This Module performs low-level command line tasks.
+MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
+ USE SETTINGS
+    IMPLICIT NONE
+ INTEGER :: safety_shift_default=200 !how many atoms to check in the molecule recognition. Ideally the maximum number of atoms in a molecule.
+ PUBLIC :: molecule_recognition
+ CONTAINS
+
+  SUBROUTINE molecule_recognition(trajectory_command_line)! This subroutine builds the rotation matrix. Not accessible globally.
+  IMPLICIT NONE
+   !$ INTERFACE
+   !$  FUNCTION OMP_get_max_threads()
+   !$  INTEGER :: OMP_get_max_threads
+   !$  END FUNCTION OMP_get_max_threads
+   !$  SUBROUTINE OMP_set_num_threads(number_of_threads)
+   !$  INTEGER,INTENT(IN) :: number_of_threads
+   !$  END SUBROUTINE OMP_set_num_threads
+   !$ END INTERFACE
+  REAL :: box_dimensions(2,3),box_size(3)!low and high for x,y,z and difference between high and low
+  REAL :: maximum_distance_squared
+  CHARACTER(LEN=2),DIMENSION(:),ALLOCATABLE :: list_of_elements !--> Turned on support for  2-letter elements!
+  REAL,DIMENSION(:,:),ALLOCATABLE :: coordinates !first dimension nlines_total, second dimension the three coordinates
+  TYPE :: single_molecule
+   CHARACTER(LEN=128) :: sum_formula
+   INTEGER :: number_of_atoms=0 ! = number of atoms PER SINGLE MOLECULE, not total!
+   INTEGER :: total_molecule_count=0 ! = number of molecules of this type in the box
+   LOGICAL :: ignore=.FALSE. ! = TRUE, when this one has been identified as duplicate, and merged to the previous one.
+   LOGICAL,DIMENSION(:),ALLOCATABLE :: member(:) ! = collects all the members belonging to this molecule group
+  END TYPE single_molecule
+  LOGICAL,DIMENSION(:),ALLOCATABLE :: atom_assigned! = collects all the atoms that have been assigned so far
+  TYPE(single_molecule),DIMENSION(:),ALLOCATABLE :: molecule_list(:) !list of molecules. There is a maximum of (nlines_total) different molecule types, each of them having a number_of_atoms and total_molecule_count
+  CHARACTER(LEN=128) :: trajectory_command_line
+  LOGICAL :: file_exists,connected
+  LOGICAL(KIND=1),DIMENSION(:,:),ALLOCATABLE :: connectivity(:,:) !I know, it's still a 16-fold waste of RAM, which is why it's only in the developers version.
+  INTEGER :: ios,lines,nlines_total,molecule_types,number_of_drude_particles,threadnum,i
+    !$ IF (DEVELOPERS_VERSION) THEN
+    !$ threadnum=OMP_get_max_threads()
+    !$ WRITE(*,'("  ! number of threads set to ",I0)') threadnum
+    !$ CALL OMP_set_num_threads(threadnum)
+    !$ ENDIF
+   PRINT *,"Trying to perform molecule recognition on trajectory file:"
+   WRITE(*,'(A,A,A)') ' "',TRIM(trajectory_command_line),'"'
+   PRINT *,"Expecting a sorted, unwrapped lammps trajectory with cartesian coordinates!"
+   PRINT *,"(Specify 'element xu yu zu' and 'sort ID' in lammps)"
+   trajectory_command_line=ADJUSTL(trajectory_command_line)
+   INQUIRE(FILE=TRIM(trajectory_command_line),EXIST=file_exists)
+   IF (file_exists) THEN
+    INQUIRE(UNIT=3,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=3)
+    OPEN(UNIT=3,FILE=TRIM(trajectory_command_line),ACTION='READ',IOSTAT=ios)
+    IF (ios/=0) THEN
+     CALL report_error(95,exit_status=ios)
+     RETURN
+    ENDIF
+    !trajectory file has been specified correctly. Start reading it.
+    REWIND 3
+    DO lines=1,9,1
+     SELECT CASE (lines)
+     CASE (4)
+      READ(3,IOSTAT=ios,FMT=*) nlines_total
+     CASE (6)
+      READ(3,IOSTAT=ios,FMT=*) box_dimensions(:,1)
+     CASE (7)
+      READ(3,IOSTAT=ios,FMT=*) box_dimensions(:,2)
+     CASE (8)
+      READ(3,IOSTAT=ios,FMT=*) box_dimensions(:,3)
+     CASE DEFAULT
+      READ(3,IOSTAT=ios,FMT=*)
+     END SELECT
+     IF (ios/=0) THEN
+      CALL report_error(95)
+      RETURN
+     ENDIF
+    ENDDO
+    !initialise box size
+    box_size(:)=box_dimensions(2,:)-box_dimensions(1,:)
+    maximum_distance_squared=box_size(2)**2+SQRT(box_size(1)**2+box_size(3)**2)
+    WRITE(*,ADVANCE="NO",FMT='(" Expecting ",I0," atoms.")') nlines_total
+    CALL initialise_molecule_recognition()
+    IF (number_of_drude_particles/=0) &
+    &WRITE(*,'(" Found ",I0," drude particles - be aware of correct sorting!")') number_of_drude_particles
+    IF (ERROR_CODE==95) RETURN
+    CALL recognise_molecules()
+    CALL finalise_molecule_recognition()
+   ELSE
+    CALL report_error(95)
+   ENDIF
+   
+   CONTAINS
+
+    SUBROUTINE initialise_molecule_recognition()
+    IMPLICIT NONE
+    INTEGER :: allocstatus
+     PRINT *,"Initialising."
+     ALLOCATE(list_of_elements(nlines_total),STAT=allocstatus)
+     IF (allocstatus/=0) THEN
+      CALL report_error(95,exit_status=allocstatus)
+      RETURN
+     ENDIF
+     ALLOCATE(atom_assigned(nlines_total),STAT=allocstatus)
+     IF (allocstatus/=0) THEN
+      CALL report_error(95,exit_status=allocstatus)
+      RETURN
+     ENDIF
+     atom_assigned(:)=.FALSE.
+     ALLOCATE(molecule_list(nlines_total),STAT=allocstatus)
+     IF (allocstatus/=0) THEN
+      CALL report_error(95,exit_status=allocstatus)
+      RETURN
+     ENDIF
+     ALLOCATE(coordinates(nlines_total,3),STAT=allocstatus)
+     IF (allocstatus/=0) THEN
+      CALL report_error(95,exit_status=allocstatus)
+      RETURN
+     ENDIF
+     IF (DEVELOPERS_VERSION) THEN
+      ALLOCATE(connectivity(nlines_total,nlines_total),STAT=allocstatus)
+      IF (allocstatus/=0) THEN
+       CALL report_error(95,exit_status=allocstatus)
+       RETURN
+      ENDIF
+     ENDIF
+     number_of_drude_particles=0
+     DO lines=1,nlines_total,1
+      ALLOCATE(molecule_list(lines)%member(nlines_total),STAT=allocstatus)
+      IF (allocstatus/=0) THEN
+       CALL report_error(95,exit_status=allocstatus)
+       CLOSE(UNIT=3)
+       RETURN
+      ENDIF
+      molecule_list(lines)%member(:)=.FALSE.
+      READ(3,IOSTAT=ios,FMT=*) list_of_elements(lines),coordinates(lines,:)
+      CALL wrap_vector(coordinates(lines,:))
+      IF (ADJUSTL(TRIM(list_of_elements(lines)))=="X") number_of_drude_particles=number_of_drude_particles+1
+      IF (ios/=0) THEN
+       CALL report_error(95)
+       CLOSE(UNIT=3)
+       RETURN
+      ENDIF
+     ENDDO
+     !UNIT 3 no longer required!
+     CLOSE(UNIT=3)
+    END SUBROUTINE initialise_molecule_recognition
+
+    !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
+    REAL FUNCTION give_smallest_atom_distance_squared(pos_1,pos_2)
+    IMPLICIT NONE
+    INTEGER :: a,b,c
+    REAL :: pos_1(3),pos_2(3),shift(3),distance_clip
+     !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
+     give_smallest_atom_distance_squared=maximum_distance_squared
+     !Now, check all mirror images
+     DO a=-1,1,1! a takes the values (-1, 0, 1)
+      DO b=-1,1,1! b takes the values (-1, 0, 1)
+       DO c=-1,1,1! c takes the values (-1, 0, 1)
+        shift(1)=FLOAT(a)
+        shift(2)=FLOAT(b)
+        shift(3)=FLOAT(c)
+        shift=shift*box_size
+        !shift is now the translation vector to the mirror image.
+        distance_clip=SUM(((pos_2+shift)-pos_1)**2)
+        IF (distance_clip<give_smallest_atom_distance_squared) THEN
+         !a distance has been found that's closer than the current best - amend that.
+         give_smallest_atom_distance_squared=distance_clip
+        ENDIF
+         ENDDO
+      ENDDO
+     ENDDO
+    END FUNCTION give_smallest_atom_distance_squared
+
+    SUBROUTINE wrap_vector(input_vector)
+    IMPLICIT NONE
+    REAL,INTENT(INOUT) :: input_vector(3)
+    INTEGER :: xyzcounter
+     DO xyzcounter=1,3,1
+      DO
+       IF (input_vector(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
+        !input vector is outside of box (smaller)
+        input_vector(xyzcounter)=input_vector(xyzcounter)+box_size(xyzcounter)
+        CYCLE
+       ELSE
+        IF (input_vector(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
+         !input vector is outside of box (bigger)
+         input_vector(xyzcounter)=input_vector(xyzcounter)-box_size(xyzcounter)
+         CYCLE
+        ELSE
+         !input vector is inside box!
+         EXIT
+        ENDIF
+       ENDIF
+      ENDDO
+     ENDDO
+    END SUBROUTINE wrap_vector
+
+    !The following set of functions provides the values of important variables to other routines. This serves the purpose of keeping variables local.
+    SUBROUTINE assign_sum_formula(molecule_type_index,first_element)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index,first_element
+    INTEGER :: outer,inner,n
+    LOGICAL :: element_unused(molecule_list(molecule_type_index)%number_of_atoms)!has this atom been used up yet?
+    CHARACTER(LEN=2) :: current_element
+     element_unused(:)=.TRUE.
+     molecule_list(molecule_type_index)%sum_formula=""
+     DO outer=1,molecule_list(molecule_type_index)%number_of_atoms,1
+      current_element=TRIM(list_of_elements(first_element+outer-1))
+      !Print the element in outer, if not yet done:
+      IF (element_unused(outer)) THEN
+       !append the new element
+       molecule_list(molecule_type_index)%sum_formula=&
+       &TRIM(molecule_list(molecule_type_index)%sum_formula)//TRIM(current_element)
+       !count how many are there, and label them as used
+       n=1
+       DO inner=(outer+1),molecule_list(molecule_type_index)%number_of_atoms,1
+        IF (TRIM(current_element)==TRIM(list_of_elements(first_element+inner-1))) THEN
+         element_unused(inner)=.FALSE.
+         n=n+1
+        ENDIF
+       ENDDO
+       !append the number
+       IF (n>1) THEN
+        WRITE(molecule_list(molecule_type_index)%sum_formula,'(A,I0)')&
+        &TRIM(molecule_list(molecule_type_index)%sum_formula),n
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE assign_sum_formula
+
+    SUBROUTINE recognise_molecules()
+    USE DEBUG
+    IMPLICIT NONE
+    !$ INTERFACE
+    !$  FUNCTION OMP_get_num_threads()
+    !$  INTEGER :: OMP_get_num_threads
+    !$  END FUNCTION OMP_get_num_threads
+    !$ END INTERFACE
+    INTEGER :: molecule_type_counter,linecounter1,linecounter2,linecounter3,merged_molecule_types,newest_molecule_type
+    INTEGER :: written_atoms
+    LOGICAL :: file_exists,write_xyz_files
+    CHARACTER(LEN=128) :: working_directory,xyz_filename
+     WRITE(*,'(" Starting cutoff-based molecule recognition.")')
+     IF (DEVELOPERS_VERSION) THEN
+      CALL initialise_connectivity()
+      !$OMP SINGLE
+      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+      !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (brute force recognition)"
+      !$  CALL timing_parallel_sections(.TRUE.)
+      !$ ENDIF
+      !$OMP END SINGLE
+     ENDIF
+     molecule_types=0
+     DO linecounter1=1,nlines_total,1
+      !look for an atom which is *not* part of a molecule yet!
+      IF (.NOT.(atom_assigned(linecounter1))) THEN
+       molecule_types=molecule_types+1
+       molecule_list(molecule_types)%total_molecule_count=1
+       molecule_list(molecule_types)%member(linecounter1)=.TRUE.
+       atom_assigned(linecounter1)=.TRUE.
+       !for each atom, get all those that belong to the same molecule
+       IF (DEVELOPERS_VERSION) THEN
+        CALL assign_atoms_to_molecules_parallelised(molecule_types,linecounter1)
+       ELSE
+        CALL assign_atoms_to_molecules(molecule_types,linecounter1,linecounter1)
+       ENDIF
+      ENDIF
+     ENDDO
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION).AND.(DEVELOPERS_VERSION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='("     ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+     WRITE(*,'(" Found ",I0," molecules. Checking for consistency.")') molecule_types
+     DO molecule_type_counter=1,molecule_types,1
+      DO linecounter1=1,nlines_total,1
+       IF (molecule_list(molecule_type_counter)%member(linecounter1)) EXIT
+      ENDDO
+      molecule_list(molecule_type_counter)%number_of_atoms=1
+      DO linecounter2=linecounter1+1,nlines_total,1
+       IF (.NOT.(molecule_list(molecule_type_counter)%member(linecounter2))) EXIT
+       molecule_list(molecule_type_counter)%number_of_atoms=molecule_list(molecule_type_counter)%number_of_atoms+1
+      ENDDO
+      IF (.NOT.(molecule_list(molecule_type_counter)%member(linecounter2))) linecounter2=linecounter2-1
+      DO linecounter3=linecounter2+1,nlines_total,1
+       IF (molecule_list(molecule_type_counter)%member(linecounter3)) THEN
+        CALL report_error(96,exit_status=molecule_type_counter)
+        CALL report_error(95)
+        RETURN
+       ENDIF
+      ENDDO
+      CALL assign_sum_formula(molecule_type_counter,linecounter1)
+     ENDDO
+     WRITE(*,'(" Organising molecules into types based on sum formula and order of trajectory file.")')
+     merged_molecule_types=1
+     newest_molecule_type=1
+     molecule_list(1)%ignore=.FALSE.
+     DO molecule_type_counter=2,molecule_types,1
+      IF (molecule_list(molecule_type_counter)%sum_formula==molecule_list(newest_molecule_type)%sum_formula) THEN
+       !merge both!
+       molecule_list(newest_molecule_type)%total_molecule_count=molecule_list(newest_molecule_type)%total_molecule_count+1
+       molecule_list(molecule_type_counter)%ignore=.TRUE.
+      ELSE
+       !new molecule type found!
+       molecule_list(molecule_type_counter)%ignore=.FALSE.
+       newest_molecule_type=molecule_type_counter
+       merged_molecule_types=merged_molecule_types+1
+      ENDIF
+     ENDDO
+     WRITE(*,'(" Merged molecules into ",I0," types.")') merged_molecule_types
+     working_directory=""
+     DO i=LEN(TRIM(trajectory_command_line)),1,-1
+      IF (IACHAR("/")==IACHAR(trajectory_command_line(i:i)))THEN
+       working_directory=TRIM(trajectory_command_line(1:i))
+       WRITE(*,'(A,A,A)') ' Write into directory "',TRIM(working_directory),'"'
+       EXIT
+      ENDIF
+     ENDDO
+     write_xyz_files=.TRUE.
+     DO molecule_type_counter=1,merged_molecule_types,1
+      WRITE(xyz_filename,'(A,I0,A)') TRIM(working_directory)//"MolRec_Type_",molecule_type_counter,".xyz"
+      INQUIRE(FILE=TRIM(xyz_filename),EXIST=file_exists)
+      IF (file_exists) THEN
+       write_xyz_files=.FALSE.
+       EXIT
+      ENDIF
+     ENDDO
+     IF (write_xyz_files) THEN
+      newest_molecule_type=1
+      PRINT *,"Writing example files 'MolRec_Type_N.xyz' for each molecule type."
+      DO molecule_type_counter=1,molecule_types,1
+       IF (.NOT.(molecule_list(molecule_type_counter)%ignore)) THEN
+        WRITE(xyz_filename,'(A,I0,A)') TRIM(working_directory)//"MolRec_Type_",newest_molecule_type,".xyz"
+        IF (connected) CALL report_error(27,exit_status=3)
+        OPEN(UNIT=3,FILE=TRIM(xyz_filename))
+        !write temporary xyz file in SCRATCH unit
+        REWIND 3
+        WRITE(3,*) molecule_list(molecule_type_counter)%number_of_atoms
+        WRITE(3,*)
+        written_atoms=0
+        DO linecounter1=1,nlines_total,1
+         IF (molecule_list(molecule_type_counter)%member(linecounter1)) THEN
+          written_atoms=written_atoms+1
+          WRITE(3,*) list_of_elements(linecounter1),coordinates(linecounter1,:)
+          IF (written_atoms==molecule_list(molecule_type_counter)%number_of_atoms) EXIT
+         ENDIF
+        ENDDO
+        CALL center_xyz(3,.TRUE.,custom_header=&
+        &"Example molecule '"//TRIM(molecule_list(molecule_type_counter)%sum_formula)//"'")
+        CLOSE(UNIT=3)
+        newest_molecule_type=newest_molecule_type+1
+       ENDIF
+      ENDDO
+     ELSE
+      PRINT *,"A file of the type 'MolRec_Type_N.xyz' already exists - no structures will be written."
+     ENDIF
+     INQUIRE(FILE=TRIM(FILENAME_MOLECULAR_INPUT),EXIST=file_exists)
+     IF (file_exists) THEN
+      PRINT *,"Molecular input file with name '"//TRIM(FILENAME_MOLECULAR_INPUT)//"' already exists."
+      PRINT *,"Please use the following lines until the 'quit' statement as your molecular input file:"
+      WRITE(*,*) "  1 ### number of timesteps in trajectory - please adjust!"
+      WRITE(*,'("   ",I0," ### number of different types of molecules.")') merged_molecule_types
+      DO molecule_type_counter=1,molecule_types,1
+       IF (.NOT.(molecule_list(molecule_type_counter)%ignore)) THEN
+        WRITE(*,'("   0 ",I0," ",I0," ### ",I0,A,I0," atoms each.")')&
+        &molecule_list(molecule_type_counter)%number_of_atoms,molecule_list(molecule_type_counter)%total_molecule_count,&
+        &molecule_list(molecule_type_counter)%total_molecule_count,&
+        &" molecules with the formula '"//TRIM(molecule_list(molecule_type_counter)%sum_formula)//"' per step with ",&
+        &molecule_list(molecule_type_counter)%number_of_atoms
+       ENDIF
+      ENDDO
+      IF (number_of_drude_particles/=0) THEN
+       WRITE(*,*) "  masses 1 ### The following line specifies a custom mass."
+       WRITE(*,*) "  X  0.400 ### By that, the support for drude particles is turned on."
+      ENDIF
+      WRITE(*,*) "  quit"
+     ELSE
+      !write molecular input file
+      PRINT *,"Writing molecular input file '"//TRIM(FILENAME_MOLECULAR_INPUT)//"'."
+      INQUIRE(UNIT=8,OPENED=connected)
+      IF (connected) CALL report_error(27,exit_status=8)
+      OPEN(UNIT=8,FILE=TRIM(working_directory)//TRIM(FILENAME_MOLECULAR_INPUT),IOSTAT=ios)
+      IF (ios/=0) THEN
+       CALL report_error(95,exit_status=ios)
+      ELSE
+       WRITE(8,*) "1 ### number of timesteps in trajectory - please adjust!"
+       WRITE(8,'(" ",I0," ### number of different types of molecules.")') merged_molecule_types
+       DO molecule_type_counter=1,molecule_types,1
+        IF (.NOT.(molecule_list(molecule_type_counter)%ignore)) THEN
+         WRITE(8,'(" 0 ",I0," ",I0," ### ",I0,A,I0," atoms each.")')&
+         &molecule_list(molecule_type_counter)%number_of_atoms,molecule_list(molecule_type_counter)%total_molecule_count,&
+         &molecule_list(molecule_type_counter)%total_molecule_count,&
+         &" molecules with the formula '"//TRIM(molecule_list(molecule_type_counter)%sum_formula)//"' per step with ",&
+         &molecule_list(molecule_type_counter)%number_of_atoms
+        ENDIF
+       ENDDO
+       IF (number_of_drude_particles/=0) THEN
+        WRITE(8,*) "masses 1 ### The following line specifies a custom mass."
+        WRITE(8,*) "X  0.400 ### By that, the support for drude particles is turned on."
+       ENDIF
+       WRITE(8,*) "quit"
+       CLOSE(UNIT=8)
+      ENDIF
+     ENDIF
+     PRINT *,"Charges and number of timesteps need to be adjusted manually."
+    END SUBROUTINE recognise_molecules
+
+    !find all atoms connected to each other by close contacts.
+    !firstline is the very first atom - everything before that must be included somewhere!
+    !currentline contains atom whose neighbours are to be included.
+    RECURSIVE SUBROUTINE assign_atoms_to_molecules(molecule_type_index,firstline,currentline)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index,firstline,currentline
+    INTEGER :: new_members,linecounter1,maximum
+     maximum=firstline+safety_shift_default
+     IF (maximum>nlines_total) maximum=nlines_total
+     new_members=0
+     DO linecounter1=firstline+1,maximum,1
+      IF (.NOT.(atom_assigned(linecounter1))) THEN
+       IF (give_smallest_atom_distance_squared&
+       &(coordinates(linecounter1,:),coordinates(currentline,:))<squared_cutoff(linecounter1,currentline)) THEN
+        !The atom in linecounter1 is connected to currentline!
+        new_members=new_members+1
+        molecule_list(molecule_type_index)%member(linecounter1)=.TRUE.
+        atom_assigned(linecounter1)=.TRUE.
+        !Advance recursion
+        CALL assign_atoms_to_molecules(molecule_type_index,firstline,linecounter1)
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE assign_atoms_to_molecules
+
+    REAL FUNCTION squared_cutoff(line1,line2)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: line1,line2
+     squared_cutoff=(covalence_radius(list_of_elements(line1))+covalence_radius(list_of_elements(line2)))&
+     &*VDW_RATIO_INTERMOLECULAR
+    END FUNCTION squared_cutoff
+
+    !find all atoms connected to each other by close contacts.
+    !Brute force version for all contacts - parallelised.
+    SUBROUTINE initialise_connectivity()
+    IMPLICIT NONE
+    !$ INTERFACE
+    !$  FUNCTION OMP_get_num_threads()
+    !$  INTEGER :: OMP_get_num_threads
+    !$  END FUNCTION OMP_get_num_threads
+    !$ END INTERFACE
+    INTEGER :: linecounter1,linecounter2
+     !$OMP SINGLE
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (brute force connectivity)"
+     !$  CALL timing_parallel_sections(.TRUE.)
+     !$ ENDIF
+     !$OMP END SINGLE
+     !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(linecounter2)
+     !$OMP DO
+     DO linecounter1=1,nlines_total,1
+      DO linecounter2=linecounter1+1,nlines_total,1
+       IF (give_smallest_atom_distance_squared&
+       &(coordinates(linecounter1,:),coordinates(linecounter2,:))<squared_cutoff(linecounter1,linecounter2)) THEN
+        connectivity(linecounter1,linecounter2)=.TRUE.
+        connectivity(linecounter2,linecounter1)=.TRUE.
+       ELSE
+        connectivity(linecounter1,linecounter2)=.FALSE.
+        connectivity(linecounter2,linecounter1)=.FALSE.
+       ENDIF
+      ENDDO
+     ENDDO
+     !$OMP END DO
+     !$OMP END PARALLEL
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+    END SUBROUTINE initialise_connectivity
+
+    !find all atoms connected to each other by close contacts.
+    !Brute force version.
+    RECURSIVE SUBROUTINE assign_atoms_to_molecules_parallelised(molecule_type_index,firstline)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index,firstline
+    INTEGER :: new_members,linecounter1,linecounter2
+     new_members=0
+     !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(linecounter2)
+     !$OMP DO
+     DO linecounter1=firstline,nlines_total,1
+      IF (molecule_list(molecule_type_index)%member(linecounter1)) THEN
+       !the atom/line belonging to linecounter1 belongs to this molecule. Let's check everything else!
+       DO linecounter2=1,nlines_total,1
+        IF (.NOT.(atom_assigned(linecounter2))) THEN
+         IF (connectivity(linecounter1,linecounter2)) THEN
+          !New member found - linecounter2!
+          !$OMP CRITICAL
+          molecule_list(molecule_type_index)%member(linecounter2)=.TRUE.
+          atom_assigned(linecounter2)=.TRUE.
+          !$OMP END CRITICAL
+          !$OMP ATOMIC
+          new_members=new_members+1
+         ENDIF
+        ENDIF
+       ENDDO
+      ENDIF
+     ENDDO
+     !$OMP END DO
+     !$OMP END PARALLEL
+     IF (new_members/=0) CALL assign_atoms_to_molecules_parallelised(molecule_type_index,firstline)
+    END SUBROUTINE assign_atoms_to_molecules_parallelised
+
+    SUBROUTINE finalise_molecule_recognition()
+    IMPLICIT NONE
+    INTEGER :: deallocstatus
+     PRINT *,"finalising molecule recognition."
+     IF (DEVELOPERS_VERSION) THEN
+      DEALLOCATE(connectivity,STAT=deallocstatus)
+      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     ENDIF
+     DO lines=1,nlines_total,1
+      DEALLOCATE(molecule_list(lines)%member,STAT=deallocstatus)
+      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     ENDDO
+     DEALLOCATE(list_of_elements,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     DEALLOCATE(atom_assigned,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     DEALLOCATE(molecule_list,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     DEALLOCATE(coordinates,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     WRITE(*,*)
+    END SUBROUTINE finalise_molecule_recognition
+
+  END SUBROUTINE molecule_recognition
+
+END MODULE RECOGNITION
+!--------------------------------------------------------------------------------------------------------------------------------!
 !This is the main program unit. the MOLECULAR, DEBUG and ANGLES modules are general purpose, everything else is invoked as specified in general.inp
 RECURSIVE SUBROUTINE initialise_global()
 USE MOLECULAR
@@ -7053,7 +7783,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 13_Feb_2020"
+ PRINT *, "   Date of Release: 17_Feb_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -7514,6 +8244,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    If the logical is 'T', then the molecule is centred to its centre-of-mass."
    PRINT *,"    The first and second integers specify the first and last timestep to write."
    PRINT *,"    The third and fourth integers are the molecule type index and the molecule index, respectively."
+   PRINT *," - 'contact_distance':"
+   PRINT *,"    Reports the smallest intra- and intermolecular distances and the largest intramolecular distance."
+   PRINT *,"    This keyword expects two integers as input: the timestep to analyse and the molecule type index."
+   PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
    PRINT *," - 'dump_cut':"
    PRINT *,"    like dump_single - but the surrounding molecules are also written."
    PRINT *,"    This keyword expects a logical, followed by four integers and one real in the same line:"
@@ -7979,7 +8713,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    WRITE(8,*) '"',TRIM(PATH_OUTPUT),'"'," ### output folder"
    WRITE(8,'(A,I0,A)') " time_scaling ",TIME_SCALING_FACTOR,&
    &" ### factor to scale the timestep with to arrive at a useful time unit."
-   IF (manual_box_edge) WRITE(8,'(A,2E14.8,A)') " cubic_box_edge ",lower,upper," ### lower and upper cubic box boundaries."
+   IF (manual_box_edge) WRITE(8,'(A,2E16.8,A)') " cubic_box_edge ",lower,upper," ### lower and upper cubic box boundaries."
    CLOSE(UNIT=8)
    PRINT *,"Does your trajectory contain velocities (y) or cartesian coordinates (n)?"
    IF (user_input_logical()) THEN
@@ -8237,7 +8971,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 16 - Print information about drude particles."
     PRINT *," 17 - Compute ensemble average of radius of gyration."
     PRINT *," 18 - Write trajectory with drude particles merged into cores."
-    SELECT CASE (user_input_integer(0,18))
+    PRINT *," 19 - Calculate close contact distances (inter- and intramolecular)."
+    SELECT CASE (user_input_integer(0,19))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -8501,6 +9236,30 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A," ### write trajectory without drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
+    CASE (19)
+     PRINT *,"It is necessary to provide the timestep to be analysed."
+     PRINT *,"Please enter this timestep as integer:"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"Would you like to compute the contact distances for just one molecule type (y), or for every type (n)?"
+     IF (user_input_logical()) THEN
+      PRINT *,"Please enter the index of the molecule type you wish to observe."
+      molecule_type_index=user_input_integer(1,maxmol)
+     ELSE
+      molecule_type_index=-1
+     ENDIF
+     parallelisation_possible=.TRUE.
+     IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
+      PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+      IF (user_input_logical()) parallelisation_requested=.TRUE.
+     ENDIF
+     IF (parallelisation_requested) THEN
+      CALL append_string("parallel_operation T ### turn on parallel operation")
+      WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+      CALL append_string(fstring)
+     ENDIF
+     WRITE(fstring,'(" contact_distance ",I0," ",I0)') startstep,molecule_type_index
+     WRITE(fstring,'(A," ### compute largest/smallest intramolecular and smallest intermolecular distances")') TRIM(fstring)
+     CALL append_string(fstring)
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -8756,6 +9515,12 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="rmm-vcf") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="show_drude_settings") inputstring="show_drude"!support for synonyms
     IF (TRIM(inputstring)=="show_drudes") inputstring="show_drude"!support for synonyms
+    IF (TRIM(inputstring)=="drude_temperature") inputstring="drude_temp"!support for synonyms
+    IF (TRIM(inputstring)=="remove_drude") inputstring="remove_drudes"!support for synonyms
+    IF (TRIM(inputstring)=="exit") inputstring="quit"!support for synonyms
+    IF (TRIM(inputstring)=="read_sequential") inputstring="sequential_read"!support for synonyms
+    IF (TRIM(inputstring)=="time_scaling_factor") inputstring="time_scaling"!support for synonyms
+    IF (TRIM(inputstring)=="parallel_execution") inputstring="parallel_operation"!support for synonyms
     !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
     SELECT CASE (TRIM(inputstring))
     CASE ("quit")
@@ -8825,6 +9590,18 @@ INTEGER :: ios,n
       CALL remove_drudes(startstep,endstep)
      ELSE
       CALL report_error(91)
+     ENDIF
+    CASE ("contact_distance") !Module DEBUG
+     IF (BOX_VOLUME_GIVEN) THEN
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ENDIF
+      CALL contact_distance(inputinteger,inputinteger2)
+     ELSE
+      CALL report_error(41)
      ENDIF
     CASE ("dump_single") !Module DEBUG
      BACKSPACE 7
@@ -9034,6 +9811,7 @@ INTEGER :: ios,n
     CALL timing()
    ENDDO
    !note that an EXIT condition in this loop effectively equals the soft stop in some error reports.
+
   END SUBROUTINE read_body
 
   !the following subroutine prints the settings and how to influence them.
@@ -9054,6 +9832,7 @@ INTEGER :: ios,n
    WRITE(*,16) "TIME_SCALING_FACTOR ",TIME_SCALING_FACTOR
    WRITE(*,16) "HEADER_LINES_GINPUT ",HEADER_LINES
    WRITE(*,16) "CURRENT_ERROR_CODE  ",ERROR_CODE
+   WRITE(*,16) "ERROR_COUNT         ",give_error_count()
    WRITE(*,*) '   OUTPUT_PREFIX        "',TRIM(OUTPUT_PREFIX),'"'
    WRITE(*,*) '   TRAJECTORY_TYPE      "',TRIM(TRAJECTORY_TYPE),'"'
    WRITE(*,*) '   INFO_IN_TRAJECTORY   "',TRIM(INFORMATION_IN_TRAJECTORY),'"'
@@ -9087,16 +9866,18 @@ END SUBROUTINE run_analysis
 
 SUBROUTINE initialise_command_line_arguments()
 USE SETTINGS
+USE RECOGNITION
 IMPLICIT NONE
-CHARACTER(LEN=128) :: inputstring
+CHARACTER(LEN=128) :: inputstring,trajstring
 INTEGER :: allocstatus,file_counter,i,charnum
-LOGICAL :: valid_filename,file_exists
+LOGICAL :: valid_filename,file_exists,command_line_used
  IF (COMMAND_ARGUMENT_COUNT()>0) THEN
   GLOBAL_ITERATIONS=0
   !The maximum of sensible members in the GENERAL_INPUT_FILENAMES list is the number of passed arguments.
   ALLOCATE(GENERAL_INPUT_FILENAMES(COMMAND_ARGUMENT_COUNT()),STAT=allocstatus)
   IF (allocstatus/=0) CALL report_error(66,exit_status=allocstatus)
   !Iterate over the input arguments
+  command_line_used=.FALSE.
   DO file_counter=1,COMMAND_ARGUMENT_COUNT(),1
    CALL GET_COMMAND_ARGUMENT(file_counter,inputstring)
    inputstring=ADJUSTL(inputstring)
@@ -9114,6 +9895,15 @@ LOGICAL :: valid_filename,file_exists
      OPEN(UNIT=6,FILE=TRIM(REDIRECTED_OUTPUT))
      WRITE(*,*) " # UNIT 6 REDIRECTED TO '",TRIM(REDIRECTED_OUTPUT),"'"
     ENDIF
+   CASE ("-r")
+    IF (LEN(TRIM(inputstring))>2) THEN
+     trajstring=TRIM(inputstring(3:))
+    ENDIF
+    valid_filename=.FALSE.
+    WRITE(*,*) " # CALLING MOLECULE RECOGNITION MODULE"
+    WRITE(*,*)
+    CALL molecule_recognition(trajstring)
+    command_line_used=.TRUE.
    CASE DEFAULT
     !Check if there are some weird characters
     valid_filename=.TRUE.
@@ -9131,11 +9921,9 @@ LOGICAL :: valid_filename,file_exists
     GENERAL_INPUT_FILENAMES(GLOBAL_ITERATIONS)=TRIM(inputstring)
    ENDIF
   ENDDO
-  IF (GLOBAL_ITERATIONS==0) THEN
-   !Error handling '68' also resets the filename.
+  IF ((GLOBAL_ITERATIONS==0).AND.(.NOT.(command_line_used))) THEN
    CALL report_error(68)
-   GLOBAL_ITERATIONS=1
-   GENERAL_INPUT_FILENAMES(1)=FILENAME_GENERAL_INPUT
+   WRITE(*,*)
   ELSEIF (GLOBAL_ITERATIONS>1) THEN
    PRINT *," ** The following general input files will be used successively:"
    DO file_counter=1,GLOBAL_ITERATIONS,1
@@ -9224,7 +10012,13 @@ END INTERFACE
   &TRIM(GENERAL_INPUT_FILENAMES(global_iteration_counter)),"'"
   IF ((GLOBAL_ITERATIONS>1).AND.(global_iteration_counter<GLOBAL_ITERATIONS))&
   &WRITE(*,*) " ** changing to next general input file"
+  IF (GLOBAL_ITERATIONS>1) WRITE(*,*)
  ENDDO
+ IF (give_error_count()==0) THEN
+  Print *,"No warnings or errors encountered."
+ ELSE
+  WRITE(*,'(" Encountered ",I0," errors/warnings globally.")') give_error_count()
+ ENDIF
  WRITE(*,*)
  CALL finalise_command_line_arguments()
 END
