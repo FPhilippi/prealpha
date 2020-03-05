@@ -1,0 +1,20 @@
+ trajectory.xyz ### trajectory filename
+ "Example_BMIMTFSI/molecular.inp" ### inputfile for module MOLECULAR
+ "./Example_BMIMTFSI/" ### path to trajectory
+ "./" ### path to other input files
+ "./Example_BMIMTFSI/output/" ### output folder
+ cubic_box_edge 0.0 63.9223
+ sequential_read F
+ dump_dimers T 1 1 2
+ gyradius -1 1 1
+ quit <-- delete this 'quit' statement for the distance analysis!
+ parallel_operation T
+ set_threads 64
+ contact_distance 1 -1
+ quit
+ 
+ Invoke me with prealpha!
+ 
+ ./prealpha generalxyz.inp
+ 
+ Thank you :)
