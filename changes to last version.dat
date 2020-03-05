@@ -1,0 +1,113 @@
+05.03.2020:
+	new keyword 'dump_dimers'
+26.02.2020:
+	increased length for filenames
+23.02.2020:
+	dump_cut references to the centre of mass of the reference molecule in the first step. much more convenient.
+17.02.2020:
+	New command line feature: '-r', which enables molecule recognition from a sorted lammps trajectory.
+15.02.2020:
+	Included new keyword 'contact_distance'
+13.02.2020:
+	Fixed issue with cubic_box_edge
+08.02.2020:
+	Program stops after encountering too many errors (currently, too many=500)
+05.02.2020:
+	added the druded molecular input file to the developers version hack mode.
+	Also, added cubic_box_edge to manual user input.
+05.02.2020:
+	included the possibility to manually set box dimensions (for xyz files)
+	via the new keyword 'cubic_box_edge'
+04.02.2020:
+	performance fixes
+29.01.2020:
+	new keyword: remove_drudes, which writes a trajectory with the drude particles merged into cores (mass-weighted)
+27.01.2020:
+	fixed bug in diffusion module / user input
+21.01.2020:
+	bug fixes
+20.01.2020:
+	bug fixes
+19.01.2020:
+	Introduced radius of gyration
+14.01.2020:
+	Fixed issue in manual user input
+	solved issue with f2003 compatibility
+	I/O is now flushed after every analysis and before reading the trajectory
+12.12.2019:
+	Minor adjustments (mostly nicer output)
+11.12.2019:
+	Introduced feature to compute the effective temperature for centre of mass, whole trajectory, and drude particles.
+06.12.2019:
+	Added assignment of drude particles - both manual and automatic.
+16.11.2019:
+	Added missing question in user_reorientation_input
+	cleaned up VERBOSE_OUTPUT in all modules
+15.11.2019:
+	Included copyright information and reference to GNU General Public License, version 3
+14.11.2019:
+	improved error handling when reading the whole trajectory at once (can deal with EOF while reading header now)
+	also, added some descriptions for the reorientational time correlation feature.
+12.11.2019:
+	Added feature: reorientational time correlation function / vector orientation dynamics.
+28.10.2019:
+	Added the keyword 'dump_cut', which writes a trajectory of a certain molecule including its neighbours.
+	(within a specified cutoff, and including periodic boundary conditions).
+04.10.2019:
+	Added 'export' to the dihedral autocorrelation module.
+02.10.2019:
+	Added flag '-d', which redirects the standard output (unit 6) to an output file.
+	The standard output file is 'output.dat', but this can be changed by just appending the filename to the flag:
+	'-dmyoutput' thus produces an output file 'myoutput', '-doutput.dat' is equal to the default.
+01.10.2019:
+	Added inofficial parallel conversion tool to developers version. Performance gain is pretty much nonexistent.
+26.09.2019:
+	changes in the temperature module, included function for the total temperature, included drudes
+25.09.2019:
+	changed the temperature calculation (constraints correction is now reported separately).
+	In the developers version, TLAMMPS, TN as well as the two corrections are also reported.
+03.09.2019:
+	minor bugfixes, release information is now included in the output to ease identification of issues in retrospect.
+23.08.2019:
+	minor bugfixes. 'convert' now writes lower and upper box bounds, not just upper.
+12.08.2019:
+	load_trajectory_header_information now checks whether the element names in the first step are consistent.
+	fixed bug (wrong sum formulae)
+	introduced support for wrapping of molecules into the box. (using centre of mass, not cutting molecules.)
+10.08.2019:
+	Changed to fortran 2003 standard
+	Added the keyword 'dump_single', which allows one to write a trajectory for one specific molecule.
+08.08.2019:
+	It is now possible to read (multiple!) general input files from the command line.
+	Furthermore, the subroutine report_trajectory_properties now also prints the sum formulae.
+07.08.2019:
+	Fixed bug which would give the wrong check temperature in module 'Autocorrelation'
+	(though results are not biased)
+	trajectory type can now be recognised based on file extension '.xyz' or '.lmp'
+	in addition to custom masses, constraints can now be specified (for correct temperature output).
+	Also changed custom masses and constraints input to free format.
+06.08.2019:
+	included error handling for the 'temperature' keyword.
+	cleared up some output.
+	Turned on support for drude particle by means of specification of a custom mass for 'X'
+05.08.2019:
+	custom masses might now be specified as optional lines in the molecular input file.
+04.08.2019:
+	minor changes, like a more readable temperature output
+03.08.2019:
+	For velocity trajectories, the keyword 'temperature' is now available, which computes kinetic temperatures, including a drift correction.
+30.07.2019:
+	Decreased the accuracy in convert to single precision,
+	minor bugfixes
+29.07.2019:
+	Added keyword 'convert', which produces a new trajectory containing only the centre of mass for every molecule.
+	changed trajectory types to lowercase ('xyz' and 'lmp')
+	turned on support for different trajectory types
+	Temperature is predicted from the velocity correlation functions as a check.
+25.07.2019:
+	Increased accuracy of VCF output.
+18.07.2019:
+	Added the sampling_interval switch to the self-contributions.
+	checks the trajectory header whether velocities or cartesians are present
+16.07.2019:
+	first (sort of) useful version.

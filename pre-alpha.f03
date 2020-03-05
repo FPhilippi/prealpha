@@ -1,4 +1,4 @@
-! RELEASED ON 17_Feb_2020 AT 17:23
+! RELEASED ON 05_Mär_2020 AT 11:00
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -77,15 +77,15 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  INTEGER :: error_count=0 !number of warnings and errors encountered
  REAL :: CUTOFF_INTERMOLECULAR=CUTOFF_INTERMOLECULAR_DEFAULT ! Everything bigger than that is considered intermolecular
  REAL :: VDW_RATIO_INTERMOLECULAR=VDW_RATIO_INTERMOLECULAR_DEFAULT ! same as the cutoff, just defined using the covalence radii
- CHARACTER(LEN=128),DIMENSION(:),ALLOCATABLE :: GENERAL_INPUT_FILENAMES !the general input filenames passed from the command line.
+ CHARACTER(LEN=1024),DIMENSION(:),ALLOCATABLE :: GENERAL_INPUT_FILENAMES !the general input filenames passed from the command line.
  CHARACTER(LEN=3) :: TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!type of the trajectory, e.g. lmp or xyz
- CHARACTER(LEN=128) :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT
-    CHARACTER(LEN=128) :: FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
-    CHARACTER(LEN=128) :: FILENAME_MOLECULAR_INPUT="molecular.inp"
- CHARACTER(LEN=128) :: FILENAME_AUTOCORRELATION_INPUT="autocorrelation.inp"
- CHARACTER(LEN=128) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
- CHARACTER(LEN=128) :: REDIRECTED_OUTPUT="output.dat"
- CHARACTER(LEN=64) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
+ CHARACTER(LEN=1024) :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT
+    CHARACTER(LEN=1024) :: FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
+    CHARACTER(LEN=1024) :: FILENAME_MOLECULAR_INPUT="molecular.inp"
+ CHARACTER(LEN=1024) :: FILENAME_AUTOCORRELATION_INPUT="autocorrelation.inp"
+ CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
+ CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
+ CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
  CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
@@ -185,6 +185,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !94 Error count exceeds maximum
  !95 Cannot perform molecule recognition
  !96 Atoms for one of the molecular units were separated.
+ !97 need at least two different molecules for dimers
  REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
@@ -364,6 +365,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 40: This module requires *velocities* as input instead of cartesian coordinates."
     CASE (41)
      WRITE(*,*) " #  ERROR 41: Box volume required, but not available."
+     WRITE(*,*) "--> Try setting the box volume using the keyword 'cubic_box_edge'."
     CASE (42)
      WRITE(*,*) " #  WARNING 42: Invalid number of threads requested (see 'EXIT STATUS')."
      WRITE(*,*) "--> Program will continue, number_of_threads is set to its maximum."
@@ -562,6 +564,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (96)
      WRITE(*,*) " #  ERROR 96: Atoms of one of the molecular units (see EXIT STATUS) were separated in the trajectory."
      WRITE(*,*) " #  ensure that trajectory is sorted, and that the used cutoff is meaningful for your system!"
+    CASE (97)
+     WRITE(*,*) " #  ERROR 91: Cannot dump dimers - need two different molecules!"
+     WRITE(*,*) " #  (either two different molecule types, or two different molecules of one type)"
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
@@ -852,6 +858,14 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     covalence_radius=0.33
    CASE ("F")
     covalence_radius=0.71
+   CASE ("B")
+    covalence_radius=0.82
+   CASE ("Cl")
+    covalence_radius=0.99
+   CASE ("Br")
+    covalence_radius=1.14
+   CASE ("I")
+    covalence_radius=1.33
    CASE ("N")
     covalence_radius=0.71
    CASE ("O")
@@ -1611,7 +1625,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     CALL wrap_vector(pos_2,wrapshift(:))
     !"shift" is now the vector to translate the reference molecule into the box by wrapping.
     !"wrapshift" is the same for the second, observed molecule.
-    !now, store in wrapshift the vector to bring the second to the first molecule:
+    !now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
     wrapshift(:)=wrapshift(:)-shift(:)
    ENDIF
    !Now, check all mirror images
@@ -1763,7 +1777,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IMPLICIT NONE
     INTEGER :: allocstatus,n,m,counter
     LOGICAL :: connected
-    CHARACTER(LEN=128) :: fstring
+    CHARACTER(LEN=1024) :: fstring
      INQUIRE(UNIT=3,OPENED=connected)
      IF (connected) CALL report_error(27,exit_status=3)
      WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_parallel.lmp"
@@ -2361,7 +2375,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   END SUBROUTINE goto_timestep
 
   !The following set of functions provides the values of important variables to other routines. This serves the purpose of keeping variables local.
-  CHARACTER(LEN=128) FUNCTION give_sum_formula(molecule_type_index)
+  CHARACTER(LEN=1024) FUNCTION give_sum_formula(molecule_type_index)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: molecule_type_index
   INTEGER :: outer,inner,n
@@ -2481,7 +2495,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   INTEGER,INTENT(IN) :: timestep,molecule_index
   LOGICAL,INTENT(IN),OPTIONAL :: dump_xyz
   LOGICAL :: writexyz,connected
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    IF (READ_SEQUENTIAL) CALL goto_timestep(timestep)
    writexyz=.FALSE.
    IF (PRESENT(dump_xyz)) THEN
@@ -2522,7 +2536,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   LOGICAL,INTENT(IN) :: tip_fragment
   INTEGER :: natoms,first_atom_index
   REAL(KIND=WORKING_PRECISION) ::  mass
-  CHARACTER(LEN=128) :: fragment_formula
+  CHARACTER(LEN=1024) :: fragment_formula
    !for fragment: report mass, number of atoms, sum formula
    IF (tip_fragment) THEN
     natoms=number_of_tip_atoms
@@ -3575,6 +3589,14 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     atomic_weight=01.008
    CASE ("F")
     atomic_weight=18.998
+   CASE ("B")
+    atomic_weight=10.81
+   CASE ("Cl")
+    atomic_weight=35.45
+   CASE ("Br")
+    atomic_weight=79.904
+   CASE ("I")
+    atomic_weight=126.904
    CASE ("N")
     atomic_weight=(14.007-drude_mass) !IF you change this part, THEN change Module_Main, too!
    CASE ("O")
@@ -3612,6 +3634,118 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
  PUBLIC remove_drudes
  PRIVATE test_dihedrals
  CONTAINS
+
+  !This molecule writes the dimers for a given timestep_in, i.e.
+  !all closest molecules of type molecule_type_index_2 around all molecules of type molecule_type_index_1.
+  SUBROUTINE dump_dimers(timestep_in,combine_to_single_traj,molecule_type_index_1,molecule_type_index_2)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep_in,molecule_type_index_1,molecule_type_index_2
+  LOGICAL,INTENT(IN) :: combine_to_single_traj
+  INTEGER :: startstep,molecule_index_1,natoms,molecule_index_2
+  CHARACTER(LEN=1024) :: fstring,header
+  REAL(KIND=WORKING_PRECISION) :: shift(3)
+  LOGICAL :: connected
+   !First, do the fools-proof checks
+   startstep=timestep_in
+   IF (molecule_type_index_1>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_1)
+    RETURN
+   ELSEIF (molecule_type_index_1<1) THEN
+    CALL report_error(33,exit_status=molecule_type_index_1)
+    RETURN
+   ENDIF
+   IF (molecule_type_index_2>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_2)
+    RETURN
+   ELSEIF (molecule_type_index_2<1) THEN
+    CALL report_error(33,exit_status=molecule_type_index_2)
+    RETURN
+   ENDIF
+   IF ((give_number_of_molecules_per_step(molecule_type_index_2)==1)&
+   &.AND.(molecule_type_index_2==molecule_type_index_1)) THEN
+    CALL report_error(97)
+    RETURN
+   ENDIF
+   IF (startstep<1) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=1
+   ELSEIF (startstep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=give_number_of_timesteps()
+   ENDIF
+   natoms=give_number_of_atoms_per_molecule(molecule_type_index_1)+give_number_of_atoms_per_molecule(molecule_type_index_2)
+   !First, do the fools-proof checks
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   !If merged into one file: open the unit here.
+   IF (combine_to_single_traj) THEN
+    WRITE(fstring,'(A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"dimers_type_",&
+    &molecule_type_index_2,"_around_type_",molecule_type_index_1,"_step_",startstep,".xyz"
+    OPEN(UNIT=4,FILE=TRIM(fstring))
+    INQUIRE(UNIT=10,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=10)
+    OPEN(UNIT=10,STATUS="SCRATCH")
+   ENDIF
+   DO molecule_index_1=1,give_number_of_molecules_per_step(molecule_type_index_1),1
+    molecule_index_2=0
+    shift(:)=0.0
+    CALL find_closest_partner()
+    CALL write_closest()
+   ENDDO
+   IF (combine_to_single_traj) THEN
+    CLOSE(UNIT=4)
+    CLOSE(UNIT=10)
+   ENDIF
+
+  CONTAINS
+
+   SUBROUTINE find_closest_partner()
+   IMPLICIT NONE
+   REAL :: smallest_distance_squared,current_distance_squared
+   REAL(KIND=WORKING_PRECISION) :: current_shift(3)
+   INTEGER :: counter
+   smallest_distance_squared=maximum_distance_squared
+    DO counter=1,give_number_of_molecules_per_step(molecule_type_index_2),1
+     !Check if the molecules are *exactly* the same! could happen because we might also want to dump dimers in, e.g., pure methanol.
+     IF ((molecule_index_1==counter).AND.(molecule_type_index_1==molecule_type_index_2)) CYCLE
+     current_distance_squared=give_smallest_distance_squared&
+     &(startstep,startstep,molecule_type_index_1,molecule_type_index_2,molecule_index_1,counter,current_shift(:))
+     IF (current_distance_squared<smallest_distance_squared) THEN
+      !found new best
+      molecule_index_2=counter
+      smallest_distance_squared=current_distance_squared
+      shift(:)=current_shift(:)
+     ENDIF
+    ENDDO
+   END SUBROUTINE find_closest_partner
+
+   !When this subroutine is invoked, the two molecule type indices and molecule indices *are* the dimer pair!
+   SUBROUTINE write_closest()
+   IMPLICIT NONE
+    WRITE(header,'("Dimer: index ",I0," of type ",I0," around index ",I0," of type ",I0,".")')&
+    &molecule_index_2,molecule_type_index_2,molecule_index_1,molecule_type_index_1
+    IF (combine_to_single_traj) THEN
+     REWIND 10
+     WRITE(10,'(I0)') natoms
+     WRITE(10,*)
+     CALL write_molecule(10,startstep,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
+     CALL write_molecule(10,startstep,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
+     CALL center_xyz(10,addhead=.TRUE.,outputunit=4,custom_header=header)
+    ELSE
+     !Write separate files... might be quite a few.
+     WRITE(fstring,'(A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"dimer_around_type-index_",&
+     &molecule_type_index_1,"-",molecule_index_1,"_step_",startstep,".xyz"
+     OPEN(UNIT=4,FILE=TRIM(fstring))
+     WRITE(4,'(I0)') natoms
+     WRITE(4,*)
+     CALL write_molecule(4,startstep,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
+     CALL write_molecule(4,startstep,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
+     CALL center_xyz(4,addhead=.TRUE.,custom_header=header)
+     CLOSE(UNIT=4)
+    ENDIF
+   END SUBROUTINE write_closest
+
+  END SUBROUTINE dump_dimers
 
   !This SUBROUTINE reports the smallest and largest intramolecular distance and the smallest intermolecular distance for all molecule types in the given timestep
   SUBROUTINE contact_distance(startstep_in,molecule_type_index_in)
@@ -3849,7 +3983,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: timestep
   INTEGER :: n,molecule_type_index
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
   LOGICAL,INTENT(IN) :: separate_files
   LOGICAL :: connected
    !First, do the fools-proof check
@@ -3889,7 +4023,8 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   INTEGER,INTENT(IN) :: startstep_in,endstep_in,molecule_type_index,molecule_index
   REAL(KIND=WORKING_PRECISION),INTENT(IN) :: cutoff
   LOGICAL,INTENT(IN) :: use_com
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
+  REAL(KIND=WORKING_PRECISION),SAVE :: origin(3)=0.0d0
   LOGICAL :: connected
   INTEGER :: stepcounter
   INTEGER :: startstep,endstep,number_neighbours,number_of_neighbouring_atoms
@@ -3925,13 +4060,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     endstep=startstep
    ENDIF
    !While searching the neighbours, the found atoms will be written into the scratch file in unit 10.
-   !Only IF centering and wrapping was requested will they be rewritten properly into the scratch file in unit 3.
-   !THEN, final output will be unit 4 - which is filled from unit 3 or directly from unit 10, depending on the value of use_com.
-   IF (use_com) THEN
-    INQUIRE(UNIT=3,OPENED=connected)
-    IF (connected) CALL report_error(27,exit_status=3)
-    OPEN(UNIT=3,STATUS="SCRATCH")
-   ENDIF
+   !THEN, final output will be unit 4 - which is filled directly from unit 10.
    INQUIRE(UNIT=10,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=10)
    OPEN(UNIT=10,STATUS="SCRATCH")
@@ -3942,10 +4071,13 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep,"-",endstep,"_neighbours.xyz"
    OPEN(UNIT=4,FILE=TRIM(fstring))
    REWIND 4
+   !find suitable origin
+   origin(:)=give_center_of_mass(startstep,molecule_type_index,molecule_index)
    !iterate over the specified timesteps
    DO stepcounter=startstep,endstep,1
     !First, add the reference molecule to the xyz file.
     REWIND 10
+    IF (use_com) origin(:)=give_center_of_mass(stepcounter,molecule_type_index,molecule_index)
     CALL write_molecule(10,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
     !Search for neighbours and write them into unit 10
     CALL give_number_of_neighbours&
@@ -3959,9 +4091,6 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ENDFILE 4
    CLOSE(UNIT=4)
    CLOSE(UNIT=10)
-   IF (use_com) THEN
-    CLOSE(UNIT=3)
-   ENDIF
    CONTAINS
 
     !This SUBROUTINE writes the trajectory including neighbours into unit 4. It also wraps and centers, if necessary.
@@ -3971,29 +4100,14 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     REAL(KIND=WORKING_PRECISION) :: position_clipboard(3)
     CHARACTER(LEN=2) :: element
      natoms=number_of_neighbouring_atoms+give_number_of_atoms_per_molecule(molecule_type_index)
-     IF (use_com) THEN
-      !read atom positions and elements from unit 10 into unit 3.
-      REWIND 10
-      REWIND 3
-      WRITE(3,*) natoms
-      WRITE(3,*)
-      DO atomcounter=1,natoms,1
-       READ(10,*) element,position_clipboard(:)
-       !Write into second scratch file.
-       WRITE(3,*) element,position_clipboard(:)
-      ENDDO
-      !written into scratch file in unit 3. Now, do centre of mass.
-      CALL center_xyz(3,addhead=.TRUE.,outputunit=4,custom_header=TRIM(fstring))
-     ELSE
-      !No centering. Thus, directly transfer from unit 10 to unit 4.
-      REWIND 10
-      WRITE(4,'(I0)') natoms
-      WRITE(4,'(A)') TRIM(fstring)
-      DO atomcounter=1,natoms,1
-       READ(10,*) element,position_clipboard(:)
-       WRITE(4,*) element,SNGL(position_clipboard(:))
-      ENDDO
-     ENDIF
+     !Put reference molecule into origin. Directly transfer from unit 10 to unit 4.
+     REWIND 10
+     WRITE(4,'(I0)') natoms
+     WRITE(4,'(A)') TRIM(fstring)
+     DO atomcounter=1,natoms,1
+      READ(10,*) element,position_clipboard(:)
+      WRITE(4,*) element,SNGL(position_clipboard(:)-origin(:))
+     ENDDO
     END SUBROUTINE transfer_to_output
 
   END SUBROUTINE dump_cut
@@ -4003,7 +4117,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: startstep_in,endstep_in,molecule_type_index,molecule_index
   LOGICAL,INTENT(IN) :: use_com
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
   LOGICAL :: connected
   INTEGER :: stepcounter
   INTEGER :: startstep,endstep
@@ -4074,7 +4188,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   INTEGER :: molecule_type_index
   LOGICAL :: connected
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
     WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"type_",molecule_type_index,".xyz"
     INQUIRE(UNIT=4,OPENED=connected)
@@ -4092,7 +4206,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: molecule_type_index,stepcounter,moleculecounter,atomcount
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
   LOGICAL :: connected
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    !First, do the fools-proof checks
    startstep=startstep_in
    endstep=endstep_in
@@ -4145,7 +4259,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: molecule_type_index,stepcounter,moleculecounter,output(3),ncentres
   LOGICAL,INTENT(IN) :: writemolecularinputfile
   LOGICAL :: connected
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
   CHARACTER(LEN=1) :: element
    IF (DEVELOPERS_VERSION) THEN
     PRINT *," ! CAREFUL: 'PARALLELISED' CONVERTER USED"
@@ -4294,7 +4408,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     INTEGER :: molecule_index
     INTEGER(KIND=WORKING_PRECISION) :: N
     LOGICAL :: connected
-    CHARACTER(LEN=128) :: fstring
+    CHARACTER(LEN=1024) :: fstring
     !the local variables in this routine must be declared as private if parallelised
      averages_maxdist(:)=0.0d0
      averages_rgysquared(:)=0.0d0
@@ -4386,7 +4500,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: startstep,endstep,stepcounter,molecule_type_index,molecule_index
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
   LOGICAL :: connected
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    !First, do the fools-proof checks
    startstep=startstep_in
    endstep=endstep_in
@@ -4487,7 +4601,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     IMPLICIT NONE
     INTEGER :: timestep,nsteps
     REAL(KIND=WORKING_PRECISION) :: TCM_average,TR_average,TD_average
-    CHARACTER(LEN=128) :: fstring
+    CHARACTER(LEN=1024) :: fstring
     LOGICAL :: connected
      TCM_average=0.0d0
      TR_average=0.0d0
@@ -4622,7 +4736,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     INTEGER,INTENT(IN) :: molecule_type_index
     INTEGER :: timestep
     REAL :: drift_av(3),temperature_av(3),corrected_temperature_av(3)
-    CHARACTER(LEN=128) :: fstring
+    CHARACTER(LEN=1024) :: fstring
     LOGICAL :: connected
      IF (VERBOSE_OUTPUT) WRITE(*,'(" Molecule Type ",I0,":")') molecule_type_index
      !initialise variables
@@ -4904,23 +5018,19 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     !I mean, I have that variable. Might as well use it.
     ALLOCATE(export_list(export_total_number),STAT=allocstatus)
     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-    IF (export_total_number>1) THEN
-     WRITE(*,'(A,I0,A)') "You have to enter the indices of the molecules (of type ",molecule_type_index,") now."
-     DO n=1,export_total_number,1
-      WRITE(*,'(A,I0,A,I0,A)') "Please enter molecule index ",n," out of ",export_total_number," you would like to export."
-      inputinteger=user_input_integer(1,maxmol)
-      !check if sensible, i.e. no double specifications. Otherwise, complain.
-      IF (n>1) THEN
-       IF (ANY(export_list(1:n-1)==inputinteger)) THEN
-        WRITE(*,'(A,I0,A)') "The molecule with index ",n," has already been specified."
-        CYCLE
-       ENDIF
+    WRITE(*,'(A,I0,A)') "You have to enter the indices of the molecules (of type ",molecule_type_index,") now."
+    DO n=1,export_total_number,1
+     WRITE(*,'(A,I0,A,I0,A)') "Please enter molecule index ",n," out of ",export_total_number," you would like to export."
+     inputinteger=user_input_integer(1,maxmol)
+     !check if sensible, i.e. no double specifications. Otherwise, complain.
+     IF (n>1) THEN
+      IF (ANY(export_list(1:n-1)==inputinteger)) THEN
+       WRITE(*,'(A,I0,A)') "The molecule with index ",n," has already been specified."
+       CYCLE
       ENDIF
-      export_list(n)=inputinteger
-     ENDDO
-    ELSE
-     export_list(1)=1
-    ENDIF
+     ENDIF
+     export_list(n)=inputinteger
+    ENDDO
    ENDIF
    skip_autocorr=.FALSE.
    IF (dump_verbose) THEN
@@ -5072,7 +5182,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
    WRITE(8,'(" legendre ",I0," ### use legendre polynomial of order ",I0)') legendre_order,legendre_order
    WRITE(8,FMT='(" base ",I0)',ADVANCE="NO") number_of_base_atoms
    IF (number_of_base_atoms==1) THEN
-    WRITE(8,'(" ### the atom with index ",I0,"is used as base point")') fragment_list_base(1)
+    WRITE(8,'(" ### the atom with index ",I0," is used as base point")') fragment_list_base(1)
    ELSE
     WRITE(8,'(" ### ",I0," atoms are used to define the base point (as centre of mass)")') number_of_base_atoms
    ENDIF
@@ -7129,7 +7239,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
   INTEGER,INTENT(IN) :: projection_number
   INTEGER :: array_pos,ios,i
   LOGICAL :: connected
-  CHARACTER(LEN=128) :: filename_diffusion_output
+  CHARACTER(LEN=1024) :: filename_diffusion_output
    INQUIRE(UNIT=3,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=3)
    !generate filename, depending on operation mode
@@ -7231,7 +7341,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
   CHARACTER(LEN=2),DIMENSION(:),ALLOCATABLE :: list_of_elements !--> Turned on support for  2-letter elements!
   REAL,DIMENSION(:,:),ALLOCATABLE :: coordinates !first dimension nlines_total, second dimension the three coordinates
   TYPE :: single_molecule
-   CHARACTER(LEN=128) :: sum_formula
+   CHARACTER(LEN=1024) :: sum_formula
    INTEGER :: number_of_atoms=0 ! = number of atoms PER SINGLE MOLECULE, not total!
    INTEGER :: total_molecule_count=0 ! = number of molecules of this type in the box
    LOGICAL :: ignore=.FALSE. ! = TRUE, when this one has been identified as duplicate, and merged to the previous one.
@@ -7239,7 +7349,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
   END TYPE single_molecule
   LOGICAL,DIMENSION(:),ALLOCATABLE :: atom_assigned! = collects all the atoms that have been assigned so far
   TYPE(single_molecule),DIMENSION(:),ALLOCATABLE :: molecule_list(:) !list of molecules. There is a maximum of (nlines_total) different molecule types, each of them having a number_of_atoms and total_molecule_count
-  CHARACTER(LEN=128) :: trajectory_command_line
+  CHARACTER(LEN=1024) :: trajectory_command_line
   LOGICAL :: file_exists,connected
   LOGICAL(KIND=1),DIMENSION(:,:),ALLOCATABLE :: connectivity(:,:) !I know, it's still a 16-fold waste of RAM, which is why it's only in the developers version.
   INTEGER :: ios,lines,nlines_total,molecule_types,number_of_drude_particles,threadnum,i
@@ -7446,7 +7556,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
     INTEGER :: molecule_type_counter,linecounter1,linecounter2,linecounter3,merged_molecule_types,newest_molecule_type
     INTEGER :: written_atoms
     LOGICAL :: file_exists,write_xyz_files
-    CHARACTER(LEN=128) :: working_directory,xyz_filename
+    CHARACTER(LEN=1024) :: working_directory,xyz_filename
      WRITE(*,'(" Starting cutoff-based molecule recognition.")')
      IF (DEVELOPERS_VERSION) THEN
       CALL initialise_connectivity()
@@ -7749,8 +7859,8 @@ IMPLICIT NONE
 LOGICAL :: file_exists,connected,smalltask!'smalltask' means that the analyis can be run on a login node (usually)
 LOGICAL :: anytask !is there any task at all?
 LOGICAL :: wrapping_is_sensible!this variable is initialised to .TRUE., and set to .FALSE. as soom as something like msd is requested.
-CHARACTER(LEN=128) :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
-CHARACTER(LEN=128) :: filename_msd="diffusion.inp" !diffusion module standard filename
+CHARACTER(LEN=1024) :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
+CHARACTER(LEN=1024) :: filename_msd="diffusion.inp" !diffusion module standard filename
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
  TIME_OUTPUT=TIME_OUTPUT_DEFAULT
@@ -7783,7 +7893,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 17_Feb_2020"
+ PRINT *, "   Date of Release: 05_Mär_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -8251,11 +8361,17 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'dump_cut':"
    PRINT *,"    like dump_single - but the surrounding molecules are also written."
    PRINT *,"    This keyword expects a logical, followed by four integers and one real in the same line:"
-   PRINT *,"    If the logical is 'T', then the molecule is centred to its centre-of-mass."
+   PRINT *,"    If the logical is 'T', then the molecule is centred to its centre-of-mass in every step."
    PRINT *,"    The first and second integers specify the first and last timestep to write."
    PRINT *,"    The third and fourth integers are the molecule type index and the molecule index, respectively."
    PRINT *,"    The real number defines the cutoff for centre-of-mass distance for exporting molecules"
    PRINT *,"    Note that the properly wrapped mirror images of the closest encounters are given."
+   PRINT *," - 'dump_dimers'"
+   PRINT *,"    Dumps the closest molecule of type X around all molecules of type Y for a certain timestep."
+   PRINT *,"    Expects a logical, followed by three integers."
+   PRINT *,"    If the logical is (T), then the output is combined in a single 'trajectory'-like xyz file."
+   PRINT *,"    Otherwise (F), one output file is written per dimer."
+   PRINT *,"    The first integer is the timestep. The following two integers are the types Y and X, respectively"
    PRINT *," - 'cubic_box_edge':"
    PRINT *,"    this keyword expects two real values, the lower and upper bounds of the simulation box."
    PRINT *,"    i.e. cubic_box_edge 0.0 100.0 corresponds to a cubic box with side length 100.0 Angströms"
@@ -8744,7 +8860,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   IMPLICIT NONE
   LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
   INTEGER :: nthreads,analysis_number,n,molecule_type_index,maxmol,startstep,endstep
-  CHARACTER(LEN=128) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    parallelisation_possible=.FALSE.!
    parallelisation_requested=.FALSE.!only changes to .TRUE. from here, never back.
    analysis_number=1
@@ -9161,7 +9277,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      IF (user_input_logical()) THEN
       WRITE(fstring,'(A,I0," ",I0," ",I0," ",I0," ",F0.2,A,I0,A,I0,A,I0,A,I0)') &
       &"dump_cut T ",startstep,endstep,molecule_type_index,molecule_index,cutoff,&
-      &" ### produce centre-of-mass trajectory for neighbours for steps ",startstep,"-",endstep,&
+      &" ### produce centred trajectory for neighbours for steps ",startstep,"-",endstep,&
       &" and molecule ",molecule_index," of type ",molecule_type_index
      ELSE
       WRITE(fstring,'(A,I0," ",I0," ",I0," ",I0," ",F0.2,A,I0,A,I0,A,I0,A,I0)') &
@@ -9628,9 +9744,11 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A)')&
       &" Trajectory for molecule ",inputinteger2," of type ",inputinteger," will be written, including neighbours."
       IF (inputlogical) THEN
-       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,", referencing to centre of mass)"
+       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,&
+       &", referencing to centre of mass of reference molecule in every step)"
       ELSE
-       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,", NOT referencing to centre of mass)"
+       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,&
+       &", referencing to centre of mass of reference molecule in first step)"
       ENDIF
       IF (inputreal>=1.0d0) THEN
        WRITE(*,'(" The threshold for neighbourhood is currently set to ",F0.2," Angström.")') inputreal
@@ -9638,6 +9756,25 @@ INTEGER :: ios,n
        WRITE(*,*) "Small threshold used (less than 1 Angström)"
       ENDIF
       CALL dump_cut(inputlogical,startstep,endstep,inputinteger,inputinteger2,inputreal)
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("dump_dimers") !Module DEBUG
+     IF (BOX_VOLUME_GIVEN) THEN
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical,startstep,inputinteger,inputinteger2
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ENDIF
+      WRITE(*,'(A,I0,A,I0,A,I0,A)') " Dumping dimers, i.e. closest molecules of type ",&
+      &inputinteger2," around ",inputinteger," for timestep ",startstep,"."
+      IF (inputlogical) THEN
+       WRITE(*,*) "(Combined in a single 'trajectory' file)"
+      ELSE
+       WRITE(*,*) "(As separate files for each dimer)"
+      ENDIF
+      CALL dump_dimers(startstep,inputlogical,inputinteger,inputinteger2)
      ELSE
       CALL report_error(41)
      ENDIF
@@ -9868,7 +10005,7 @@ SUBROUTINE initialise_command_line_arguments()
 USE SETTINGS
 USE RECOGNITION
 IMPLICIT NONE
-CHARACTER(LEN=128) :: inputstring,trajstring
+CHARACTER(LEN=1024) :: inputstring,trajstring
 INTEGER :: allocstatus,file_counter,i,charnum
 LOGICAL :: valid_filename,file_exists,command_line_used
  IF (COMMAND_ARGUMENT_COUNT()>0) THEN
