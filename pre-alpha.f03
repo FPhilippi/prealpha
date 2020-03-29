@@ -1,4 +1,4 @@
-! RELEASED ON 05_Mär_2020 AT 11:00
+! RELEASED ON 29_Mar_2020 AT 18:34
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -30,12 +30,19 @@
 !Path names have to be enclosed in quotes. Probably even double quotes.
 MODULE SETTINGS !This module contains important globals and subprograms.
  IMPLICIT NONE
- !basic parameters
-    INTEGER,PARAMETER :: SP=KIND(1.e0)
-    INTEGER,PARAMETER :: DP=KIND(1.d0)
-    INTEGER,PARAMETER :: WORKING_PRECISION=DP!'Standard' precision is double precision; change to single precision here if required.
+ PUBLIC
+ !default values - basic parameters
+ INTEGER,PARAMETER :: SP=KIND(1.e0)
+ INTEGER,PARAMETER :: DP=KIND(1.d0)
+ INTEGER,PARAMETER :: WORKING_PRECISION=DP!'Standard' precision is double precision; change to single precision here if required.
  INTEGER,PARAMETER :: GENERAL_PRECISION=DP!'Standard' precision for positions and dihedrals.
  INTEGER,PARAMETER :: STORAGE_PRECISION=SP!'Standard' precision for the storage of positions in the trajectory.
+ REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
+ REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
+ REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
+ REAL(KIND=GENERAL_PRECISION),PARAMETER :: boltzmann=1.380649E-23!boltzmann constant in joules per kelvin
+ REAL(KIND=WORKING_PRECISION),PARAMETER :: pi=3.141592653589793238462643383279502884197169
+ REAL(KIND=WORKING_PRECISION),PARAMETER :: twopi=2.0*pi
  !First, set default values
  LOGICAL,PARAMETER :: VERBOSE_OUTPUT_DEFAULT=.TRUE.
  LOGICAL,PARAMETER :: TIME_OUTPUT_DEFAULT=.TRUE.
@@ -80,10 +87,11 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  CHARACTER(LEN=1024),DIMENSION(:),ALLOCATABLE :: GENERAL_INPUT_FILENAMES !the general input filenames passed from the command line.
  CHARACTER(LEN=3) :: TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!type of the trajectory, e.g. lmp or xyz
  CHARACTER(LEN=1024) :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT
-    CHARACTER(LEN=1024) :: FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
-    CHARACTER(LEN=1024) :: FILENAME_MOLECULAR_INPUT="molecular.inp"
+ CHARACTER(LEN=1024) :: FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
+ CHARACTER(LEN=1024) :: FILENAME_MOLECULAR_INPUT="molecular.inp"
  CHARACTER(LEN=1024) :: FILENAME_AUTOCORRELATION_INPUT="autocorrelation.inp"
  CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
+ CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
  CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
  CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
  CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
@@ -125,7 +133,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !34 diffusion.inp is not correctly formatted
  !35 tstep is too large, has been reset to maximum permissible value
  !36 tmax is very small
- !37 trajectory is too short for the diffusion analysis.
+ !37 trajectory is too short for the diffusion or distribution analysis.
  !38 couldn't open trajectory file
  !39 cannot invoke rmm-vcf with only one molecule type.
  !40 remind user to provide velocities.
@@ -186,14 +194,20 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !95 Cannot perform molecule recognition
  !96 Atoms for one of the molecular units were separated.
  !97 need at least two different molecules for dimers
- REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
- REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
- REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
- REAL(KIND=GENERAL_PRECISION),PARAMETER :: boltzmann=1.380649E-23!boltzmann constant in joules per kelvin
+ !98 distribution.inp is not available
+ !99 distribution.inp is not correctly formatted
+ !100 problem when streaming distribution input.
+ !101 integer overflow while binning
+ !102 Not enough arguments in command line
+ !103 Not enough steps in trajectory for jump analysis
+ !104 bin count set to nearest sensible value
+ !105 endstep<startstep, switch the two
+
+ !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
  PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real
- PUBLIC :: student_t_value,covalence_radius
+ PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION
  PRIVATE :: q !that's not a typo!
  PRIVATE :: error_count
  CONTAINS
@@ -352,8 +366,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 36: tmax is smaller than 10."
      WRITE(*,*) "--> Program will continue, tmax is set to its minimum (see 'EXIT STATUS')."
     CASE (37)
-     WRITE(*,*) " #  ERROR 37: trajectory is too short for diffusion module (needs at least 11 steps)."
-     WRITE(*,*) "--> Main program will continue, diffusion analysis is aborted."
+     WRITE(*,*) " #  ERROR 37: trajectory is too short for this module (needs > 10 steps)."
+     WRITE(*,*) "--> Main program will continue, diffusion/distribution analysis is aborted."
     CASE (38)
      WRITE(*,*) "SEVERE ERROR 38: Trajectory file couldn't be opened."
      CALL finalise_global()
@@ -568,12 +582,40 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  ERROR 91: Cannot dump dimers - need two different molecules!"
      WRITE(*,*) " #  (either two different molecule types, or two different molecules of one type)"
      WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (98)
+     WRITE(*,*) " #  ERROR 98: couldn't find '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+     WRITE(*,*) "--> redelivering control to main unit"
+    CASE (99)
+     WRITE(*,*) " #  SEVERE ERROR 99: couldn't read '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+     WRITE(*,*) " #  Check format of input file!"
+     CLOSE(UNIT=3)!unit 3 is the distribution input file
+     CALL finalise_global()
+     STOP
+    CASE (100)
+     WRITE(*,*) " #  ERROR 100: problem streaming '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+     WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'!"
+    CASE (101)
+     WRITE(*,*) " #  WARNING 101: integer overflow - switch to floating point operation?"
+     WRITE(*,*) "--> Program will continue. Check Results."
+    CASE (102)
+     WRITE(*,*) " #  ERROR 102: command line argument missing."
+    CASE (103)
+     WRITE(*,*) " #  ERROR 103: Not enough timesteps in trajectory for the requested jump analysis."
+     WRITE(*,*) " #  (see EXIT STATUS for required minimum number of steps)"
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (104)
+     WRITE(*,*) " #  ERROR 104: bin count out of sensible range."
+     WRITE(*,*) "--> bin count is set to nearest sensible value. (see EXIT STATUS)"
+    CASE (105)
+     WRITE(*,*) " #  WARNING 105: startstep is bigger than endstep."
+     WRITE(*,*) "--> startstep and endstep are swapped."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
    ENDIF
    IF (error_count>MAXITERATIONS) THEN
     WRITE(*,*) " #  SEVERE ERROR 94: Error count exceeds maximum."
+    error_count=0
     CALL finalise_global()
     STOP
    ENDIF
@@ -637,7 +679,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   INTEGER FUNCTION user_input_integer(low,high)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: low,high
-  INTEGER :: inputinteger,ios
+  INTEGER :: inputinteger,ios  
    DO
     WRITE(*,ADVANCE="NO",FMT='("  > ")')
     READ(*,IOSTAT=ios,FMT=*) inputinteger
@@ -910,14 +952,51 @@ END MODULE SETTINGS
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
 MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
     USE SETTINGS
-    IMPLICIT NONE
+ IMPLICIT NONE
+ PRIVATE
+ !default values
+ REAL(KIND=WORKING_PRECISION),PARAMETER :: tolerance=0.0001d0!tolerance in degrees used to define identity of angles. Also used in some other case as distance criterion.
+ !variables
     REAL(KIND=WORKING_PRECISION) :: uvector(3) !uvector is the unit vector around which the rotation will occur
  REAL(KIND=WORKING_PRECISION) :: sina,cosa !sina and cosa are actually sinus(alpha) and cosinus(alpha), with alpha being the angle of the rotation.
     REAL(KIND=WORKING_PRECISION) :: rotation(3,3) !the rotation matrix
- REAL(KIND=WORKING_PRECISION),PARAMETER :: tolerance=0.0001d0!tolerance in degrees used to define identity of angles. Also used in some other case as distance criterion.
- PUBLIC :: prepare_rotation,rotate,dihedral_angle!dihedral_angle changes the rotation matrix!
+ !PRIVATE/PUBLIC declarations
+ PUBLIC :: prepare_rotation,rotate,dihedral_angle,rotate_random!dihedral_angle changes the rotation matrix!
  PRIVATE :: make_rotation_matrix,uvector,sina,cosa,tolerance,rotation!Thou shalt not temper with the matrix.
  CONTAINS
+
+  !brute-force generation of a uniformly distributed random rotation matrix. needs srand to be called before
+  SUBROUTINE rotate_random(vector)
+  IMPLICIT NONE
+  REAL(KIND=GENERAL_PRECISION),INTENT(INOUT) ::  vector(3)
+  REAL(KIND=WORKING_PRECISION) :: x,y,z
+  REAL(KIND=WORKING_PRECISION) :: cosg,sing,cosb,sinb,alpha,beta,gamma,sina2,cosa2
+  REAL(KIND=WORKING_PRECISION) :: rotation_local(3,3) !the rotation matrix - needs to be a local variable for parallelisation
+   alpha=RAND()*twopi
+   beta=RAND()*twopi
+   gamma=RAND()*twopi
+   sina2=SIN(alpha)
+   cosa2=COS(alpha)
+   sinb=SIN(beta)
+   cosb=COS(beta)
+   sing=SIN(gamma)
+   cosg=COS(gamma)
+   rotation_local(1,1)=cosb*cosg
+   rotation_local(1,2)=-sing*cosb
+   rotation_local(1,3)=sinb
+   rotation_local(2,1)=sina2*sinb*cosg+sing*cosa2
+   rotation_local(2,2)=-sina2*sinb*sing+cosa2*cosg
+   rotation_local(2,3)=-sina2*cosb
+   rotation_local(3,1)=-sinb*cosa2*cosg+sina2*sing
+   rotation_local(3,2)=sinb*sing*cosa2+sina2*cosg
+   rotation_local(3,3)=cosa2*cosb
+   x=vector(1)
+   y=vector(2)
+   z=vector(3)
+   vector(1)=x*rotation_local(1,1)+y*rotation_local(1,2)+z*rotation_local(1,3)
+   vector(2)=x*rotation_local(2,1)+y*rotation_local(2,2)+z*rotation_local(2,3)
+   vector(3)=x*rotation_local(3,1)+y*rotation_local(3,2)+z*rotation_local(3,3)
+  END SUBROUTINE rotate_random
 
   SUBROUTINE make_rotation_matrix()! This subroutine builds the rotation matrix. Not accessible globally.
   IMPLICIT NONE
@@ -946,7 +1025,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
    angle=(ACOS(cosa)*degrees)!calculate angle in degrees, mainly for debugging purposes
    IF (PRESENT(aligned)) aligned=.FALSE. !Some external procedures need to know whether the vectors are aligned, hence the optional variable.
    IF (angle<=tolerance) THEN !angle is zero - vectors are aligned!
-    IF (VERBOSE_OUTPUT) WRITE(*,'(A,E7.1)') "vectors are aligned, angle = ",angle
+    IF (DEVELOPERS_VERSION) WRITE(*,'(A,E7.1)') "  ! vectors are aligned, angle = ",angle
     IF (PRESENT(aligned)) aligned=.TRUE.
     !The rotation matrix is the identity matrix, because nothing should change.
     rotation(:,:)=0.0d0
@@ -955,7 +1034,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
     rotation(3,3)=1.0d0
    ELSE
     IF ((180.0-angle)<=tolerance) THEN
-     IF (VERBOSE_OUTPUT) WRITE(*,'(A,F7.3)') "vectors are antiparallel, angle = ",angle
+     IF (DEVELOPERS_VERSION) WRITE(*,'(A,F7.3)') "  ! vectors are antiparallel, angle = ",angle
      IF ((a(1)<=(1.0d0-tolerance)).AND.(a(1)>=(-1.0d0+tolerance))) THEN !This part is just to handle the rare case of antiparallel a and b along the x axis...
       dummy_axis(:)=0.0d0
       dummy_axis(1)=1.0d0
@@ -1008,7 +1087,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
      CALL rotate(uvector1)
      CALL rotate(uvector2)
    ELSE!there are no components in y or z direction in the connection vector.
-    IF (VERBOSE_OUTPUT) WRITE(*,*) "dihedral_angle: already preoriented"
+    IF (DEVELOPERS_VERSION) WRITE(*,*) "  ! dihedral_angle: already preoriented"
    ENDIF
    !Project to plane
    projection1=uvector1(2:3)
@@ -1058,6 +1137,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
+ PRIVATE
+ !variables
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1084,7 +1165,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  TYPE,PRIVATE :: molecule
   INTEGER :: constraints=0
   INTEGER :: charge=0
-  INTEGER :: number_of_atoms=0 ! = extent of dimension three of trajectory, number of atoms PER SINGLE MOLECULE, not total!
+  INTEGER :: number_of_atoms=0 ! = extent of dimension one of trajectory, number of atoms PER SINGLE MOLECULE, not total!
   INTEGER :: total_molecule_count=0 ! = extent of dimension two of trajectory, number of molecules of this type in the box
   INTEGER :: number_of_drudes_in_molecule=0 ! = number of drude particles in this molecule (counter for successfully assigned drude pairs)
         REAL(KIND=GENERAL_PRECISION) :: mass=0.0d0
@@ -1092,7 +1173,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   TYPE(drude_pair),DIMENSION(:),ALLOCATABLE :: list_of_drude_pairs ! list of pairs of drude particles / drude cores / drudes
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_masses !corresponding masses for the atoms
   TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot !like trajectory, but for one timestep only. Required for READ_SEQUENTIAL.
-  TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory !first dimension: timestep, second dimension: index of the molecule (not to be confused with molecule_type_index), third dimension: Atom index in that molecule
+  TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory
+  !trajectory is now in column major order!
+  !first dimension: Atom index in molecule
+  !second dimension: index of the molecule (not to be confused with molecule_type_index)
+  !third dimension: timestep
   TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
  END TYPE molecule
  REAL(KIND=STORAGE_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
@@ -1110,19 +1195,27 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  INTEGER :: number_of_drude_particles=0 !number of drude particles per box
  INTEGER :: ndrudes_check=0 !number of drude particles specified in the molecular input file
  TYPE(molecule),DIMENSION(:),ALLOCATABLE :: molecule_list !list of molecules, usually two members: cation and anion. Has to be same order as in lammps trajectory. The different molecule types / members are usually referred to as 'molecule_type_index' in subroutines.
+ !PRIVATE VARIABLES
+ PRIVATE :: box_dimensions,drude_mass,number_of_molecule_types,total_number_of_atoms,number_of_steps,box_size
+ PRIVATE :: dihedrals_initialised,dihedral_member_indices,number_of_dihedrals,wrap_snap
+ PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_masses,wrap_full,custom_constraints
+ PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
+ PRIVATE :: fragments_initialised,fragment_list_base,fragment_list_tip,number_of_tip_atoms,number_of_base_atoms
+ PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments
+ !PRIVATE/PUBLIC declarations
+ PRIVATE :: report_trajectory_properties,reset_trajectory_file
  PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
  PUBLIC :: give_dihedrals,initialise_dihedrals,give_number_of_molecule_types,give_number_of_atoms_per_molecule
  PUBLIC :: give_number_of_molecules_per_step,give_mass_of_molecule,show_molecular_settings,print_memory_requirement
- PUBLIC :: give_total_number_of_molecules_per_step
- PRIVATE :: box_dimensions,drude_mass,number_of_molecule_types,total_number_of_atoms,number_of_steps,box_size
- PRIVATE :: report_trajectory_properties,dihedrals_initialised,dihedral_member_indices,number_of_dihedrals,wrap_snap
- PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_masses,wrap_full,custom_constraints
- PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
- PUBLIC :: assign_drudes
+ PUBLIC :: give_total_number_of_molecules_per_step,show_drude_settings,give_box_volume,give_box_limit
+ PUBLIC :: assign_drudes,give_intramolecular_distances,give_total_temperature,give_sum_formula,constraints_available
  PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
  PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles
  PUBLIC :: give_smallest_distance,give_number_of_neighbours,wrap_vector,give_smallest_distance_squared,compute_drude_properties
  PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
+ PUBLIC :: give_intermolecular_contact_distance,give_smallest_atom_distance,give_smallest_atom_distance_squared
+ PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
+ PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared
  CONTAINS
 
   !The following subroutine sets the cubic box limits
@@ -1155,7 +1248,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      difference_vector(:)=DBLE(molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:))
     ELSE
-     difference_vector(:)=DBLE(molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:))
+     difference_vector(:)=DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
     ENDIF
     difference_vector(:)=difference_vector(:)-centre_of_mass(:)
     current_distance_squared=SUM(difference_vector(:)**2)
@@ -1227,7 +1320,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
           &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
          ELSE
           core_velocity(:)=&
-          &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+          &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
          ENDIF
          !calculate the temperature from the velocity
          TR=TR+mass_clipboard*SUM((core_velocity(:))**2)
@@ -1245,9 +1338,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
           &molecule_list(molecule_type_index)%snapshot(molecule_index,drude_flag)%coordinates(:)
          ELSE
           core_velocity(:)=&
-          &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+          &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
           drude_velocity(:)=&
-          &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,drude_flag)%coordinates(:)
+          &molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)
          ENDIF
          core_velocity(:)=(core_mass*core_velocity(:)+drude_mass*drude_velocity(:))/mass_clipboard
          !calculate the temperature from the velocity
@@ -1287,8 +1380,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
          &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
         ELSE
          relative_drude_velocity(:)=&
-         &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,drude_flag)%coordinates(:)-&
-         &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+         &molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)-&
+         &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
         ENDIF
         TD=TD+molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%reduced_mass*&
         &SUM((relative_drude_velocity(:))**2)
@@ -1580,8 +1673,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     CALL goto_timestep(timestep2)
     pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%snapshot(molecule_index_2,atom_index_2)%coordinates(:))
    ELSE
-    pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%trajectory(timestep1,molecule_index_1,atom_index_1)%coordinates(:))
-    pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%trajectory(timestep2,molecule_index_2,atom_index_2)%coordinates(:))
+    pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%trajectory(atom_index_1,molecule_index_1,timestep1)%coordinates(:))
+    pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%trajectory(atom_index_2,molecule_index_2,timestep2)%coordinates(:))
    ENDIF
    !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
    give_smallest_atom_distance_squared=maximum_distance_squared
@@ -1684,7 +1777,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    ENDDO
   END SUBROUTINE give_number_of_neighbours
 
-  !The task of convert_parallel is to reduce a trajectory to centre-of-mass. Not part of the official version.
+  !The task of convert_parallel is to reduce a trajectory to centre-of-mass. Not part of the official version. Doesn't really work, because File I/O is the slow part.
   SUBROUTINE convert_parallel()
   IMPLICIT NONE
   INTEGER :: queuesize,first_in,last_in,stepcounter,nprocs,number_of_molecules
@@ -1918,7 +2011,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
   END SUBROUTINE convert_parallel
 
-  !This subroutine rewinds the trajectory file and adjusts the 'pointer' accordingly.
+  !This subroutine rewinds the trajectory file and adjusts the 'pointer' accordingly. (Hell, I'm not starting with real pointers here)
   SUBROUTINE reset_trajectory_file()
   IMPLICIT NONE
    IF (READ_SEQUENTIAL) THEN
@@ -1987,16 +2080,16 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         IF (centre_of_mass(xyzcounter)<=box_dimensions(1,xyzcounter)) THEN
          !centre of mass is outside of box (smaller)
          centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
-         molecule_list(molecule_type_index)%trajectory(stepcounter,molecule_index,:)%coordinates(xyzcounter)=&
-         &molecule_list(molecule_type_index)%trajectory(stepcounter,molecule_index,:)%coordinates(xyzcounter)&
+         molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)=&
+         &molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)&
          &+box_size(xyzcounter)
          CYCLE
         ELSE
          IF (centre_of_mass(xyzcounter)>=box_dimensions(2,xyzcounter)) THEN
           !centre of mass is outside of box (bigger)
           centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
-          molecule_list(molecule_type_index)%trajectory(stepcounter,molecule_index,:)%coordinates(xyzcounter)=&
-          &molecule_list(molecule_type_index)%trajectory(stepcounter,molecule_index,:)%coordinates(xyzcounter)&
+          molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)=&
+          &molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)&
           &-box_size(xyzcounter)
           CYCLE
          ELSE
@@ -2072,12 +2165,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    drift(:)=drift(:)/FLOAT(molecule_list(molecule_type_index)%total_molecule_count)
    !At this point, the drift is correct. Now, calculate the temperatures:
    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory  
-    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of trajectory
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
      !Get the current 'atom_clipboard', which usually would be the velocity.
      IF (READ_SEQUENTIAL) THEN
       atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
      ELSE
-      atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+      atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
      ENDIF
      mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
      !first, the normal, uncorrected temperature.
@@ -2093,12 +2186,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     T1(:)=0.0d0
     T2(:)=0.0d0
     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory  
-     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of trajectory
+     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
       !Get the current 'atom_clipboard', which usually would be the velocity.
       IF (READ_SEQUENTIAL) THEN
        atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
       ELSE
-       atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+       atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
       ENDIF
       mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
       !first, the normal, uncorrected temperature.
@@ -2152,12 +2245,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    !calculate the temperature, iterate over every molecule:
    DO molecule_type_index=1,number_of_molecule_types,1
     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory    
-     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of trajectory
+     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
       !Get the current 'atom_clipboard', which usually would be the velocity.
       IF (READ_SEQUENTIAL) THEN
        atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
       ELSE
-       atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+       atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
       ENDIF
       mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
       !sum up all the mv²
@@ -2359,7 +2452,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       !For each molecule type, read the corresponding number of molecules:
       DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 1 of snapshot (would be "2" for trajectory)
        !Finally, iterate over the atoms in that particular molecule:
-       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives second dimension of trajectory (would be "3" for trajectory)
+       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives second dimension of snapshot (would be "1" for trajectory)
         !LOOP VARIABLES:
         !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
         !molecule_index: current explicit molecule, e.g. molecule number 231
@@ -2429,12 +2522,27 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     CALL report_error(41)
    ENDIF
   END FUNCTION give_box_volume
-  
+
+  REAL(KIND=WORKING_PRECISION)  FUNCTION give_box_limit()
+  IMPLICIT NONE
+   IF (BOX_VOLUME_GIVEN) THEN
+    give_box_limit=MINVAL(box_size(:))
+   ELSE
+    give_box_limit=-1.0d0
+    CALL report_error(41)
+   ENDIF
+  END FUNCTION give_box_limit
+
   INTEGER FUNCTION give_number_of_atoms_per_molecule(molecule_type_index)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: molecule_type_index
    give_number_of_atoms_per_molecule=molecule_list(molecule_type_index)%number_of_atoms
   END FUNCTION give_number_of_atoms_per_molecule
+
+  INTEGER FUNCTION give_maximum_distance_squared()
+  IMPLICIT NONE
+   give_maximum_distance_squared=maximum_distance_squared
+  END FUNCTION give_maximum_distance_squared
 
   INTEGER FUNCTION give_number_of_molecules_per_step(molecule_type_index)
   IMPLICIT NONE
@@ -2520,7 +2628,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       &snapshot(molecule_index,dihedral_member_indices(m,n))%coordinates(:)
      ELSE
       dihedral_members(n,:)=molecule_list(molecule_type_index_for_dihedrals)%&
-      &trajectory(timestep,molecule_index,dihedral_member_indices(m,n))%coordinates(:)
+      &trajectory(dihedral_member_indices(m,n),molecule_index,timestep)%coordinates(:)
      ENDIF
      IF (writexyz) WRITE(3,*) molecule_list(molecule_type_index_for_dihedrals)%&
       &list_of_elements(dihedral_member_indices(m,n)),dihedral_members(n,:)
@@ -2626,7 +2734,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &snapshot(molecule_index,fragment_list_tip(1))%coordinates(:)
     ELSE
      give_tip_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
-     &trajectory(timestep,molecule_index,fragment_list_tip(1))%coordinates(:)
+     &trajectory(fragment_list_tip(1),molecule_index,timestep)%coordinates(:)
     ENDIF
     RETURN
    ENDIF
@@ -2639,7 +2747,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &snapshot(molecule_index,fragment_list_tip(counter))%coordinates(:))
     ELSE
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
-     &trajectory(timestep,molecule_index,fragment_list_tip(counter))%coordinates(:))
+     &trajectory(fragment_list_tip(counter),molecule_index,timestep)%coordinates(:))
     ENDIF
     give_tip_fragment(:)=give_tip_fragment(:)+element_mass*unweighted_pos(:)
    ENDDO
@@ -2660,7 +2768,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &snapshot(molecule_index,fragment_list_base(1))%coordinates(:)
     ELSE
      give_base_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
-     &trajectory(timestep,molecule_index,fragment_list_base(1))%coordinates(:)
+     &trajectory(fragment_list_base(1),molecule_index,timestep)%coordinates(:)
     ENDIF
     RETURN
    ENDIF
@@ -2673,7 +2781,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &snapshot(molecule_index,fragment_list_base(counter))%coordinates(:))
     ELSE
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
-     &trajectory(timestep,molecule_index,fragment_list_base(counter))%coordinates(:))
+     &trajectory(fragment_list_base(counter),molecule_index,timestep)%coordinates(:))
     ENDIF
     give_base_fragment(:)=give_base_fragment(:)+element_mass*unweighted_pos(:)
    ENDDO
@@ -2788,7 +2896,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:))
     ELSE
-     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:))
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
     ENDIF
     !then, this position is weighted with the atom's mass
     weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
@@ -2851,7 +2959,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)+shift(:)
     ELSE
      WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-     &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)+shift(:)
+     &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:)
     ENDIF
    ENDDO
   END SUBROUTINE write_molecule
@@ -2893,7 +3001,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
      ELSE
       WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-      &molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
+      &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
      ENDIF
     CASE (0) !this is a drude particle - skip this one by cycling.
      CYCLE
@@ -2903,8 +3011,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       corepos(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
       drudepos(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,drude_flag)%coordinates(:)
      ELSE
-      corepos(:)=molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,atom_index)%coordinates(:)
-      drudepos(:)=molecule_list(molecule_type_index)%trajectory(timestep,molecule_index,drude_flag)%coordinates(:)
+      corepos(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+      drudepos(:)=molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)
      ENDIF
      !merge drudepos into corepos:
      corepos(:)=(corepos(:)*molecule_list(molecule_type_index)%list_of_atom_masses(MODULO(atom_index-1,natoms)+1)+& !core position * its mass
@@ -2982,7 +3090,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        ALLOCATE(molecule_list(n)%snapshot(c,b),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ELSE
-       ALLOCATE(molecule_list(n)%trajectory(number_of_steps,c,b),STAT=allocstatus)
+       ALLOCATE(molecule_list(n)%trajectory(b,c,number_of_steps),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ENDIF
       !at this point, the list_of_elements and mass are not specified. This information will be read from the lammps trajectory.
@@ -3488,7 +3596,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      IF (VERBOSE_OUTPUT) WRITE(*,FMT='(A26)',ADVANCE="NO") " reading the trajectory..."
      REWIND 3
      !The outer loop iterates over the timesteps.
-     DO stepcounter=1,number_of_steps,1 !gives dimension 1 of trajectory
+     DO stepcounter=1,number_of_steps,1 !gives third dimension of trajectory
       !first, skip the head of the trajectory
       DO dummy=1,headerlines_to_skip,1
        READ(3,IOSTAT=ios,FMT=*)
@@ -3507,14 +3615,14 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        !For each molecule type, read the corresponding number of molecules:
        DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
         !Finally, iterate over the atoms in that particular molecule:
-        DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of trajectory
+        DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
          !LOOP VARIABLES:
          !stepcounter: current timestep, e.g. 1234
          !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
          !molecule_index: current explicit molecule, e.g. molecule number 231
          !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
          READ(3,*) element_name,&
-         &molecule_list(molecule_type_index)%trajectory(stepcounter,molecule_index,atom_index)%coordinates
+         &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates
         ENDDO
        ENDDO 
       ENDDO
@@ -3620,6 +3728,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     ENDIF
    END SELECT
   END FUNCTION atomic_weight
+
 END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
@@ -3628,12 +3737,231 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
+ PRIVATE
+ !variables
  !$ REAL(8) :: timeline_begin_real=0.0d0
  INTEGER :: timeline_begin
+ !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
- PUBLIC remove_drudes
+ PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
  PRIVATE test_dihedrals
  CONTAINS
+
+  !checks whether timesteps are reasonable.
+  SUBROUTINE check_timesteps(startstep,endstep)
+  IMPLICIT NONE
+  INTEGER,INTENT(INOUT) :: startstep,endstep
+  INTEGER :: step_clip
+   IF (startstep>endstep) THEN
+    CALL report_error(105)
+    step_clip=startstep
+    startstep=endstep
+    endstep=step_clip
+   ENDIF
+   IF (startstep<1) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=1
+   ELSEIF (startstep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=give_number_of_timesteps()
+   ENDIF
+   IF (endstep<1) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=1
+   ELSEIF (endstep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=give_number_of_timesteps()
+   ENDIF
+  END SUBROUTINE check_timesteps
+
+  !checks whether timesteps are reasonable.
+  SUBROUTINE check_timestep(timestep)
+  IMPLICIT NONE
+  INTEGER,INTENT(INOUT) :: timestep
+   IF (timestep<1) THEN
+    CALL report_error(57,exit_status=timestep)
+    timestep=1
+   ELSEIF (timestep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=timestep)
+    timestep=give_number_of_timesteps()
+   ENDIF
+  END SUBROUTINE check_timestep
+
+  !Constructs a histogram of jump velocity with increasing jump time.
+  SUBROUTINE jump_analysis(delta_steps,bin_count_in,molecule_type_index_in,startstep_in,endstep_in,maxvel_in)
+  IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER,INTENT(IN) :: delta_steps,bin_count_in,molecule_type_index_in,startstep_in,endstep_in
+  REAL,INTENT(IN),OPTIONAL :: maxvel_in
+  REAL :: maximum_velocity,stepsize
+  INTEGER :: allocstatus,deallocstatus,ios,bin_count,type_counter
+  INTEGER(KIND=DP) :: within_bin,out_of_bounds
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: jump_histogram
+   !First, do the fools-proof checks
+   IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_in)
+    RETURN
+   ENDIF
+   IF (give_number_of_timesteps()<(delta_steps+1)) THEN
+    CALL report_error(103,exit_status=delta_steps+1)
+    RETURN
+   ENDIF
+   IF (bin_count_in<10) THEN
+    bin_count=10
+    CALL report_error(104,exit_status=10)
+   ELSEIF (bin_count_in>1000) THEN
+    bin_count=1000
+    CALL report_error(104,exit_status=1000)
+   ELSE
+    bin_count=bin_count_in
+   ENDIF
+   ALLOCATE(jump_histogram(bin_count,delta_steps),STAT=allocstatus)
+   IF (allocstatus/=0) THEN
+    CALL report_error(22,exit_status=ios)
+    RETURN
+   ENDIF
+   IF (molecule_type_index_in>0) THEN
+    WRITE(*,'(" Molecule type ",I0," (",A,"):")')&
+    &molecule_type_index_in,TRIM(give_sum_formula(type_counter))
+    CALL optimize_maxvel(molecule_type_index_in)
+    jump_histogram(:,:)=0
+    CALL fill_histogram(molecule_type_index_in)
+    CALL write_histogram(molecule_type_index_in)
+   ELSE
+    DO type_counter=1,give_number_of_molecule_types()
+     within_bin=0
+     out_of_bounds=0
+     WRITE(*,'(" Molecule type ",I0," out of ",I0," (",A,"):")')&
+     &type_counter,give_number_of_molecule_types(),TRIM(give_sum_formula(type_counter))
+     CALL optimize_maxvel(type_counter)
+     jump_histogram(:,:)=0
+     CALL fill_histogram(type_counter)
+     CALL write_histogram(type_counter)
+    ENDDO
+   ENDIF
+   DEALLOCATE(jump_histogram,STAT=deallocstatus)
+   IF (deallocstatus/=0) THEN
+    CALL report_error(23,exit_status=deallocstatus)
+    RETURN
+   ENDIF
+
+   CONTAINS
+
+    SUBROUTINE optimize_maxvel(molecule_type_index)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index
+    INTEGER :: molecule_index
+    REAL :: jump_velocity,jump_vector(3)
+    LOGICAL :: optimize
+     optimize=.TRUE.
+     IF (PRESENT(maxvel_in)) THEN
+      IF (maxvel_in>0.0) THEN
+       optimize=.FALSE.
+       maximum_velocity=maxvel_in
+      ENDIF
+     ENDIF
+     IF (optimize) THEN
+      !get maximum velocity from first step
+      maximum_velocity=0.0
+      DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+       jump_vector(:)=give_center_of_mass(2,molecule_type_index,molecule_index)-&
+       &give_center_of_mass(1,molecule_type_index,molecule_index)
+       jump_velocity=SQRT(SUM(jump_vector(:)**2))/FLOAT(TIME_SCALING_FACTOR)
+       IF (jump_velocity>maximum_velocity) maximum_velocity=jump_velocity
+      ENDDO
+     ENDIF
+     IF (VERBOSE_OUTPUT) WRITE(*,'("   Highest binned velocity "ES9.3", largest time difference ",I0," steps.")')&
+     &maximum_velocity,delta_steps
+     stepsize=(maximum_velocity)/FLOAT(bin_count)
+    END SUBROUTINE optimize_maxvel
+
+    SUBROUTINE fill_histogram(molecule_type_index)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index
+    INTEGER :: molecule_index,timestep,time_shift,number_of_timesteps,binpos,jump_histogram_local(bin_count,delta_steps)
+    REAL :: jump_velocity,jump_vector(3),jump_time
+     number_of_timesteps=give_number_of_timesteps()
+     !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+     !$OMP PRIVATE(time_shift,jump_time,molecule_index,jump_vector,jump_velocity,binpos,jump_histogram_local)
+     !$OMP SINGLE
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,'(A,I0,A)') "   ### Parallel execution on ",OMP_get_num_threads()," threads (jump histogram)"
+     !$  CALL timing_parallel_sections(.TRUE.)
+     !$ ENDIF
+     !$OMP END SINGLE
+     jump_histogram_local(:,:)=0
+     !$OMP DO
+     DO timestep=startstep_in,endstep_in-1,1
+      !the jump distance will be evaluated between timestep and timestep+time_shift.
+      !timestep+time_shift must not exceed the number of timesteps.
+      DO time_shift=1,MIN((number_of_timesteps-timestep),delta_steps),1
+       jump_time=FLOAT(time_shift*TIME_SCALING_FACTOR)
+       DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+        jump_vector(:)=give_center_of_mass(timestep+time_shift,molecule_type_index,molecule_index)-&
+        &give_center_of_mass(timestep,molecule_type_index,molecule_index)
+        jump_velocity=SQRT(SUM(jump_vector(:)**2))/jump_time
+        binpos=(INT(jump_velocity/stepsize)+1)
+        IF (.NOT.((binpos>bin_count).OR.(binpos<0))) THEN
+         !$OMP ATOMIC
+         within_bin=within_bin+1
+         jump_histogram_local(binpos,time_shift)=jump_histogram_local(binpos,time_shift)+1
+        ELSE
+         !$OMP ATOMIC
+         out_of_bounds=out_of_bounds+1
+        ENDIF
+       ENDDO
+      ENDDO
+     ENDDO
+     !$OMP END DO
+     !$OMP CRITICAL
+     jump_histogram(:,:)=jump_histogram(:,:)+jump_histogram_local(:,:)
+     !$OMP END CRITICAL
+     !$OMP END PARALLEL
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='("   ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+    END SUBROUTINE fill_histogram
+
+    SUBROUTINE write_histogram(molecule_type_index)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: molecule_type_index
+    INTEGER :: time_shift,binpos
+    REAL :: jump_velocity,jump_probability_histogram(bin_count,delta_steps)
+    CHARACTER(LEN=1024) :: fstring
+    LOGICAL :: connected
+     !normalise histogram
+     DO time_shift=1,delta_steps,1
+      jump_probability_histogram(:,time_shift)=&
+      &FLOAT(jump_histogram(:,time_shift))/FLOAT(SUM(jump_histogram(:,time_shift)))
+     ENDDO
+     !Print results
+     WRITE(fstring,'(2A,I0,A,I0,A,I0)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+     &"jump_probability_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in
+     IF (VERBOSE_OUTPUT) THEN
+      WRITE(*,'("   within bin ",I0,", out of bounds ",I0,".")') within_bin,out_of_bounds
+      WRITE(*,'(3A)') "   Writing jump velocity histogram (probability) to file '",TRIM(fstring),"'"
+     ENDIF
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     OPEN(UNIT=3,FILE=TRIM(fstring))
+     WRITE(3,'(A,I0,A)') "This file contains the probabilities of any molecule of type ",molecule_type_index&
+     &," to jump with the indicated velocity."
+     WRITE(3,*) "jump_velocity jump_time probability"
+     DO binpos=1,bin_count,1
+      jump_velocity=FLOAT(binpos)*stepsize-0.5*stepsize
+      DO time_shift=1,delta_steps,1
+       WRITE(3,*) jump_velocity,time_shift*TIME_SCALING_FACTOR,jump_probability_histogram(binpos,time_shift)
+      ENDDO
+     ENDDO
+     CLOSE(UNIT=3)
+    END SUBROUTINE write_histogram
+
+  END SUBROUTINE jump_analysis
 
   !This molecule writes the dimers for a given timestep_in, i.e.
   !all closest molecules of type molecule_type_index_2 around all molecules of type molecule_type_index_1.
@@ -3641,12 +3969,11 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: timestep_in,molecule_type_index_1,molecule_type_index_2
   LOGICAL,INTENT(IN) :: combine_to_single_traj
-  INTEGER :: startstep,molecule_index_1,natoms,molecule_index_2
+  INTEGER :: molecule_index_1,natoms,molecule_index_2
   CHARACTER(LEN=1024) :: fstring,header
   REAL(KIND=WORKING_PRECISION) :: shift(3)
   LOGICAL :: connected
    !First, do the fools-proof checks
-   startstep=timestep_in
    IF (molecule_type_index_1>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index_1)
     RETURN
@@ -3666,13 +3993,6 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     CALL report_error(97)
     RETURN
    ENDIF
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ELSEIF (startstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=give_number_of_timesteps()
-   ENDIF
    natoms=give_number_of_atoms_per_molecule(molecule_type_index_1)+give_number_of_atoms_per_molecule(molecule_type_index_2)
    !First, do the fools-proof checks
    INQUIRE(UNIT=4,OPENED=connected)
@@ -3680,7 +4000,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    !If merged into one file: open the unit here.
    IF (combine_to_single_traj) THEN
     WRITE(fstring,'(A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"dimers_type_",&
-    &molecule_type_index_2,"_around_type_",molecule_type_index_1,"_step_",startstep,".xyz"
+    &molecule_type_index_2,"_around_type_",molecule_type_index_1,"_step_",timestep_in,".xyz"
     OPEN(UNIT=4,FILE=TRIM(fstring))
     INQUIRE(UNIT=10,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=10)
@@ -3704,12 +4024,12 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    REAL :: smallest_distance_squared,current_distance_squared
    REAL(KIND=WORKING_PRECISION) :: current_shift(3)
    INTEGER :: counter
-   smallest_distance_squared=maximum_distance_squared
+   smallest_distance_squared=give_maximum_distance_squared()
     DO counter=1,give_number_of_molecules_per_step(molecule_type_index_2),1
      !Check if the molecules are *exactly* the same! could happen because we might also want to dump dimers in, e.g., pure methanol.
      IF ((molecule_index_1==counter).AND.(molecule_type_index_1==molecule_type_index_2)) CYCLE
      current_distance_squared=give_smallest_distance_squared&
-     &(startstep,startstep,molecule_type_index_1,molecule_type_index_2,molecule_index_1,counter,current_shift(:))
+     &(timestep_in,timestep_in,molecule_type_index_1,molecule_type_index_2,molecule_index_1,counter,current_shift(:))
      IF (current_distance_squared<smallest_distance_squared) THEN
       !found new best
       molecule_index_2=counter
@@ -3728,18 +4048,18 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
      REWIND 10
      WRITE(10,'(I0)') natoms
      WRITE(10,*)
-     CALL write_molecule(10,startstep,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
-     CALL write_molecule(10,startstep,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
+     CALL write_molecule(10,timestep_in,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
+     CALL write_molecule(10,timestep_in,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
      CALL center_xyz(10,addhead=.TRUE.,outputunit=4,custom_header=header)
     ELSE
      !Write separate files... might be quite a few.
      WRITE(fstring,'(A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"dimer_around_type-index_",&
-     &molecule_type_index_1,"-",molecule_index_1,"_step_",startstep,".xyz"
+     &molecule_type_index_1,"-",molecule_index_1,"_step_",timestep_in,".xyz"
      OPEN(UNIT=4,FILE=TRIM(fstring))
      WRITE(4,'(I0)') natoms
      WRITE(4,*)
-     CALL write_molecule(4,startstep,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
-     CALL write_molecule(4,startstep,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
+     CALL write_molecule(4,timestep_in,molecule_type_index_1,molecule_index_1,include_header=.FALSE.)
+     CALL write_molecule(4,timestep_in,molecule_type_index_2,molecule_index_2,include_header=.FALSE.,translate_by=shift(:))
      CALL center_xyz(4,addhead=.TRUE.,custom_header=header)
      CLOSE(UNIT=4)
     ENDIF
@@ -3751,24 +4071,15 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   SUBROUTINE contact_distance(startstep_in,molecule_type_index_in)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: startstep_in,molecule_type_index_in
-  INTEGER :: timestep,molecule_type_index
+  INTEGER :: molecule_type_index
   REAL :: smallest,largest
    !availability of box volume check in calling routine.
-   timestep=startstep_in
-   IF (timestep<1) THEN
-    CALL report_error(57,exit_status=timestep)
-    timestep=1
-   ENDIF
-   IF (timestep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=timestep)
-    timestep=give_number_of_timesteps()
-   ENDIF
    IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index_in)
     RETURN
    ENDIF
    IF (molecule_type_index_in<1) THEN
-    WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances at timestep for all molecule types.",I0)') timestep
+    WRITE(*,'(" Calculating intra- and intermolecular contact distances at timestep ",I0," for all molecule types.")') startstep_in
     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
      WRITE(*,'("   Molecule type index ",I0," out of ",I0,".")') molecule_type_index,give_number_of_molecule_types()
      CALL print_distances()
@@ -3776,7 +4087,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ELSE
     molecule_type_index=molecule_type_index_in
     WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances for molecule type ",I0," at timestep ",I0,".")')&
-    &,molecule_type_index,timestep
+    &,molecule_type_index,startstep_in
     CALL print_distances()
    ENDIF
 
@@ -3784,12 +4095,12 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
 
     SUBROUTINE print_distances()
     IMPLICIT NONE
-     CALL give_intramolecular_distances(timestep,molecule_type_index,smallest,largest)
+     CALL give_intramolecular_distances(startstep_in,molecule_type_index,smallest,largest)
      IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
      WRITE(*,'("   Largest intramolecular distance:  ",F0.3)') largest
      IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
      WRITE(*,'("   Smallest intramolecular distance: ",F0.3)') smallest
-     CALL give_intermolecular_contact_distance(timestep,molecule_type_index,smallest)
+     CALL give_intermolecular_contact_distance(startstep_in,molecule_type_index,smallest)
      IF (molecule_type_index_in<1) WRITE(*,FMT='("  ")',ADVANCE="NO")
      WRITE(*,'("   Smallest intermolecular distance: ",F0.3)') smallest
     END SUBROUTINE print_distances
@@ -4027,10 +4338,8 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   REAL(KIND=WORKING_PRECISION),SAVE :: origin(3)=0.0d0
   LOGICAL :: connected
   INTEGER :: stepcounter
-  INTEGER :: startstep,endstep,number_neighbours,number_of_neighbouring_atoms
+  INTEGER :: number_neighbours,number_of_neighbouring_atoms
    !First, do the fools-proof checks
-   startstep=startstep_in
-   endstep=endstep_in
    IF (molecule_type_index>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index)
     RETURN
@@ -4047,18 +4356,6 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     CALL report_error(69,exit_status=molecule_index)
     RETURN
    ENDIF
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
-   ENDIF
    !While searching the neighbours, the found atoms will be written into the scratch file in unit 10.
    !THEN, final output will be unit 4 - which is filled directly from unit 10.
    INQUIRE(UNIT=10,OPENED=connected)
@@ -4068,13 +4365,13 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    INQUIRE(UNIT=4,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=4)
    WRITE(fstring,'(2A,I0,A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
-   &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep,"-",endstep,"_neighbours.xyz"
+   &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in,"_neighbours.xyz"
    OPEN(UNIT=4,FILE=TRIM(fstring))
    REWIND 4
    !find suitable origin
-   origin(:)=give_center_of_mass(startstep,molecule_type_index,molecule_index)
+   origin(:)=give_center_of_mass(startstep_in,molecule_type_index,molecule_index)
    !iterate over the specified timesteps
-   DO stepcounter=startstep,endstep,1
+   DO stepcounter=startstep_in,endstep_in,1
     !First, add the reference molecule to the xyz file.
     REWIND 10
     IF (use_com) origin(:)=give_center_of_mass(stepcounter,molecule_type_index,molecule_index)
@@ -4120,10 +4417,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   CHARACTER(LEN=1024) :: fstring
   LOGICAL :: connected
   INTEGER :: stepcounter
-  INTEGER :: startstep,endstep
    !First, do the fools-proof checks
-   startstep=startstep_in
-   endstep=endstep_in
    IF (molecule_type_index>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index)
     RETURN
@@ -4140,18 +4434,6 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     CALL report_error(69,exit_status=molecule_index)
     RETURN
    ENDIF
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
-   ENDIF
    IF (use_com) THEN
     INQUIRE(UNIT=3,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=3)
@@ -4161,10 +4443,10 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    INQUIRE(UNIT=4,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=4)
    WRITE(fstring,'(2A,I0,A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
-   &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep,"-",endstep,".xyz"
+   &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in,".xyz"
    OPEN(UNIT=4,FILE=TRIM(fstring))
    !iterate over the specified timesteps
-   DO stepcounter=startstep,endstep,1
+   DO stepcounter=startstep_in,endstep_in,1
     !Write the string to pass as custom header later
     WRITE(fstring,'("Timestep nr. ",I0)') stepcounter
     IF (use_com) THEN
@@ -4317,29 +4599,15 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ENDIF
   END SUBROUTINE convert
 
-  SUBROUTINE report_gyradius(molecule_type_index_in,startstep_in,endstep_in)
+  SUBROUTINE report_gyradius(molecule_type_index_in,startstep,endstep)
   IMPLICIT NONE
-  INTEGER,INTENT(IN) :: molecule_type_index_in,startstep_in,endstep_in
-  INTEGER :: startstep,endstep,timestep,molecule_type_index
+  INTEGER,INTENT(IN) :: molecule_type_index_in,startstep,endstep
+  INTEGER :: timestep,molecule_type_index
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: averages_maxdist,averages_rgysquared,averages_rgy
-   startstep=startstep_in
-   endstep=endstep_in
    !first, do all the annoying fools-proof tests...
    IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index_in)
     RETURN
-   ENDIF
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
    ENDIF
    IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
    CALL initialise_gyradius()
@@ -4405,7 +4673,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     IMPLICIT NONE
     REAL(KIND=GENERAL_PRECISION) :: rgy_sq,maxdist,globalav_rgy_sq,globalav_rgy,globalav_maxdist
     REAL(KIND=GENERAL_PRECISION) :: stdev_rgy_sq,stdev_rgy,stdev_maxdist
-    INTEGER :: molecule_index
+    INTEGER :: molecule_index,timestep
     INTEGER(KIND=WORKING_PRECISION) :: N
     LOGICAL :: connected
     CHARACTER(LEN=1024) :: fstring
@@ -4497,38 +4765,23 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   !This SUBROUTINE writes a SUBROUTINE with removed drude particles. This requires assigned drude particles!
   SUBROUTINE remove_drudes(startstep_in,endstep_in)
   IMPLICIT NONE
-  INTEGER :: startstep,endstep,stepcounter,molecule_type_index,molecule_index
+  INTEGER :: stepcounter,molecule_type_index,molecule_index
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
   LOGICAL :: connected
   CHARACTER(LEN=1024) :: fstring
-   !First, do the fools-proof checks
-   startstep=startstep_in
-   endstep=endstep_in
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
-   ENDIF
    !open the output file
    INQUIRE(UNIT=4,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=4)
-   IF (startstep==endstep) THEN
+   IF (startstep_in==endstep_in) THEN
     WRITE(fstring,'(2A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep,".xyz"
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,".xyz"
    ELSE
     WRITE(fstring,'(2A,I0,A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep,"-",endstep,".xyz"
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,"-",endstep_in,".xyz"
    ENDIF
    OPEN(UNIT=4,FILE=TRIM(fstring))
    !iterate over the specified timesteps
-   DO stepcounter=startstep,endstep,1
+   DO stepcounter=startstep_in,endstep_in,1
     WRITE(4,'(I0)') (give_number_of_atoms_per_step()-give_number_of_drude_particles())
     WRITE(4,'("Timestep number ",I0)') stepcounter
     DO molecule_type_index=1,give_number_of_molecule_types(),1
@@ -4543,26 +4796,12 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   END SUBROUTINE
 
   !This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
-  SUBROUTINE report_drude_temperature(startstep_in,endstep_in)
+  SUBROUTINE report_drude_temperature(startstep,endstep)
   IMPLICIT NONE
-  INTEGER,INTENT(IN) :: startstep_in,endstep_in
-  INTEGER :: Nf,Nmol,ND,startstep,endstep
+  INTEGER,INTENT(IN) :: startstep,endstep
+  INTEGER :: Nf,Nmol,ND
   REAL(KIND=WORKING_PRECISION) :: TCM,TR,TD
    !fools-proof tests
-   startstep=startstep_in
-   endstep=endstep_in
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
-   ENDIF
    IF (INFORMATION_IN_TRAJECTORY=="POS") CALL report_error(56)
    IF ((startstep==1).AND.(endstep==1)) THEN
     !do the dirty quick print.
@@ -4642,33 +4881,19 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
 
   END SUBROUTINE report_drude_temperature
 
-  SUBROUTINE report_temperature(molecule_type_index_in,startstep_in,endstep_in)
+  SUBROUTINE report_temperature(molecule_type_index_in,startstep,endstep)
   IMPLICIT NONE
  50 FORMAT ("   T",A1,": ",EN9.1," K (",EN9.1," K)")
  51 FORMAT ("   T",A1,": ",F5.1," K (",F5.1," K)")
-  INTEGER,INTENT(IN) :: molecule_type_index_in,startstep_in,endstep_in
-  INTEGER :: startstep,endstep,counter
+  INTEGER,INTENT(IN) :: molecule_type_index_in,startstep,endstep
+  INTEGER :: counter
   REAL(KIND=WORKING_PRECISION) :: drift(3),temperature(3),corrected_temperature(3),&
   &kinetic_energy,kinetic_energy_total,total_temp,constraints_correction
-   startstep=startstep_in
-   endstep=endstep_in
    kinetic_energy_total=0.0d0
    !first, do all the annoying fools-proof tests...
    IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
     CALL report_error(33,exit_status=molecule_type_index_in)
     RETURN
-   ENDIF
-   IF (startstep<1) THEN
-    CALL report_error(57,exit_status=startstep)
-    startstep=1
-   ENDIF
-   IF (endstep>give_number_of_timesteps()) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=give_number_of_timesteps()
-   ENDIF
-   IF (endstep<startstep) THEN
-    CALL report_error(57,exit_status=endstep)
-    endstep=startstep
    ENDIF
    IF (INFORMATION_IN_TRAJECTORY=="POS") CALL report_error(56)
    IF (molecule_type_index_in<1) THEN
@@ -4831,7 +5056,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
- !default values.
+ PRIVATE
+ !default values
  LOGICAL,PARAMETER :: fold_default=.FALSE.
  LOGICAL,PARAMETER :: dump_verbose_default=.FALSE.
  LOGICAL,PARAMETER :: skip_autocorr_default=.FALSE.
@@ -4860,12 +5086,13 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  CHARACTER (LEN=16) :: operation_mode="dihedral"!operation mode of the autocorrelation module.
  CHARACTER (LEN=32),ALLOCATABLE :: formatted_dihedral_names(:)
  INTEGER :: molecule_type_index,number_of_dihedral_conditions,bin_count=bin_count_default
+ !PRIVATE/PUBLIC declarations
  PRIVATE :: autocorr_array,molecule_type_index,operation_mode,number_of_dihedral_conditions,boundaries,formatted_dihedral_names
  PRIVATE :: initialise_autocorrelation,dihedral_autocorrelation,finalise_autocorrelation,bin_count,skip_autocorr
  PRIVATE :: global_incidence,dump_verbose,number_of_entries_in_array,PES_subset_independent,PES_subset_dependent,average_h
  PRIVATE :: tmax,calculate_autocorrelation_function_from_binary_array,molecule_type_index_b,export_dihedral,export_list
  PRIVATE :: fold_default,dump_verbose_default,skip_autocorr_default,tmax_default,bin_count_default,legendre_order
- PUBLIC :: perform_autocorrelation,user_dihedral_input,user_vacf_input
+ PUBLIC :: perform_autocorrelation,user_dihedral_input,user_vacf_input,user_reorientation_input
 
  CONTAINS
 
@@ -5112,7 +5339,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
   CHARACTER (LEN=*) :: filename_reorient
   LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
   INTEGER,INTENT(IN) :: number_of_molecules,nsteps
-  INTEGER :: maxmol,ios,allocstatus,deallocstatus,n
+  INTEGER :: maxmol,ios,allocstatus,deallocstatus,n,number_of_tip_atoms,number_of_base_atoms
   LOGICAL :: connected
   INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
   INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
@@ -5654,6 +5881,13 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(" ",A,I0)') "setting 'bin_count' to ",bin_count
        ENDIF
+       IF (bin_count<10) THEN
+        bin_count=10
+        CALL report_error(104,exit_status=10)
+       ELSEIF (bin_count>1000) THEN
+        bin_count=1000
+        CALL report_error(104,exit_status=1000)
+       ENDIF
       CASE DEFAULT
        IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
       END SELECT
@@ -5983,7 +6217,6 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       temp_function(timeline+1,2)=temp_function(timeline+1,2)+(temp_value/nbreal)
      ENDDO
     END SUBROUTINE iterate_timesteps_self_contributions
-
 
     !This subroutine computes eq (4) from https://journals.aps.org/pre/pdf/10.1103/PhysRevE.50.1162 without the prefactors (just the part in {...})
     SUBROUTINE correlate_average_velocities()
@@ -6791,6 +7024,8 @@ END MODULE AUTOCORRELATION
 MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
+ IMPLICIT NONE
+ PRIVATE
  !default values
  INTEGER,PARAMETER :: tmax_default=10000
  INTEGER,PARAMETER :: tstep_default=1
@@ -6804,12 +7039,13 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
     REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared !mean squared displacement, dimension is the time shift given in timesteps
  REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: x_unsquared !mean displacement (=drift), first dimension = time shift, remaining dimensions = xyz of drift
     INTEGER(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_num !number of averages taken for the positions
+ LOGICAL :: verbose_print=verbose_print_default
+ !PRIVATE/PUBLIC declarations
  PRIVATE :: operation_mode,initialise_diffusion,number_of_projections,tmax,projections,tstep
  PRIVATE :: finalise_diffusion,make_diffusion_functions,x_num,x_squared,x_unsquared
  PRIVATE :: tmax_default,tstep_default,verbose_print_default,verbose_print
- LOGICAL :: verbose_print=verbose_print_default
  PRIVATE :: write_diffusion_functions
- PUBLIC :: perform_diffusion
+ PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input
 
  CONTAINS
 
@@ -6822,7 +7058,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
   LOGICAL :: use_default,printdrift,connected
   INTEGER,INTENT(IN) :: number_of_molecules,nsteps
   INTEGER :: nprojections,allocstatus,deallocstatus,maxmol,tstep,tmax,n,ios
-  INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index, just as in module DIFFUSION
+ ! INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index, just as in module DIFFUSION
    parallelisation_possible=.TRUE.
    PRINT *,"Generating MSD input."
    IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
@@ -7321,8 +7557,11 @@ END MODULE DIFFUSION
 !This Module performs low-level command line tasks.
 MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
  USE SETTINGS
-    IMPLICIT NONE
+ IMPLICIT NONE
+ PRIVATE
+ !variables
  INTEGER :: safety_shift_default=200 !how many atoms to check in the molecule recognition. Ideally the maximum number of atoms in a molecule.
+ !PRIVATE/PUBLIC declarations
  PUBLIC :: molecule_recognition
  CONTAINS
 
@@ -7850,17 +8089,878 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
 
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
+!This Module calculates special combined distribution functions - such as cylindrical or polar.
+MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
+ USE SETTINGS
+ USE MOLECULAR
+ IMPLICIT NONE
+ PRIVATE
+ !default values
+ INTEGER,PARAMETER :: sampling_interval_default=10
+ INTEGER,PARAMETER :: bin_count_default=100
+ LOGICAL,PARAMETER :: subtract_uniform_default=.FALSE.
+ LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
+ REAL,PARAMETER :: maxdist_default=10.0
+ !variables
+ CHARACTER (LEN=8) :: operation_mode="NONE"!operation mode of the distribution module.
+ INTEGER :: number_of_references !number of different references. '0 0 1' uses the z-axis, etc.
+ INTEGER :: bin_count_b=bin_count_default!number of bins in the final 2D combined distribution functions (in "a" direction!)
+ INTEGER :: bin_count_a=bin_count_default!number of bins in the final 2D combined distribution functions (in "b" direction!)
+ INTEGER :: sampling_interval=sampling_interval_default!every this many steps are used for the distribution functions
+ REAL :: maxdist=maxdist_default!only molecules with a distance < maxdist are considered. Should be half the box size.
+ REAL :: foolsproof_ratio!for the cdf, consider rare sampling of corners.
+ LOGICAL :: subtract_uniform=subtract_uniform_default!subtract the uniform density
+ LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
+ INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
+ REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
+ REAL :: step_a,step_b !step sizes in angströms or radians
+ REAL :: ideal_density
+ !PRIVATE/PUBLIC declarations
+ PRIVATE :: operation_mode,number_of_references,sampling_interval,references,weigh_charge,subtract_uniform,maxdist
+ PRIVATE :: distribution_function
+ PUBLIC :: user_distribution_input,perform_distribution_analysis
+
+ CONTAINS
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distribution'
+  SUBROUTINE user_distribution_input(parallelisation_possible,parallelisation_requested,number_of_molecules,filename_distribution)
+  IMPLICIT NONE
+  LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+  CHARACTER (LEN=*) :: filename_distribution
+  LOGICAL :: connected,optimize_distance,separate_bins
+  INTEGER,INTENT(IN) :: number_of_molecules
+  INTEGER :: allocstatus,deallocstatus,maxmol,n,ios
+   parallelisation_possible=.TRUE.
+   PRINT *,"Generating distribution function input."
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"First of all, the calculation of distribution functions benefits from parallelisation."
+    PRINT *,"Would you like to turn on parallelisation? (y/n)"
+    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   ENDIF
+   PRINT *,"This feature calculates two-dimensional distribution functions in cylindrical or polar coordinates."
+   PRINT *,"The main purpose is to investigate anisotropy, such as channel formation."
+   PRINT *,"Thus, the distribution functions are calculated with respect to a specified reference vector."
+   PRINT *,"In cylindrical coordinates, the independent variables are"
+   PRINT *,"  a) the distance perpendicular to the reference vector and"
+   PRINT *,"  b) the distance collinear to the reference vector."
+   PRINT *,"In polar coordinates, the independent variables are"
+   PRINT *,"  a) the distance between the two molecules in the considered pair and"
+   PRINT *,"  b) the angle between reference vector and the vector connecting the molecules."
+   PRINT *,"Would you like to request the distribution function in polar (y) or cylindrical (n) coordinates?"
+   IF (user_input_logical()) THEN
+    operation_mode="pdf"
+   ELSE
+    operation_mode="cdf"
+   ENDIF
+   PRINT *,"You now need to specify the combinations of reference vector and the two molecule types for the distribution."
+   PRINT *,"How many of these combinations would you like to specify?"
+   number_of_references=user_input_integer(1,100000)
+   !Allocate memory for intermediate storage...
+   ALLOCATE(references(5,number_of_references),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   maxmol=number_of_molecules
+   IF (maxmol<1) maxmol=10000!unknown molecule number... expect the worst.
+   !THEN, read references from the standard input.
+   DO n=1,number_of_references,1
+    WRITE(*,'(" Reading reference number ",I0,"...")') n
+    PRINT *,"Please give the molecule type index / number of the reference molecule:"
+    PRINT *,"(This molecule will be the origin for the distribution analysis)"
+    references(4,n)=user_input_integer(1,maxmol)
+    PRINT *,"It is possible to consider *all* molecule types around this reference molecules."
+    PRINT *,"Would you like to use all (y) molecules or only those of a specific type (n)?"
+    IF (user_input_logical()) THEN
+     references(5,n)=-1
+    ELSE
+     PRINT *,"Which molecule type would you like to observe / use for the distribution function?"
+     references(5,n)=user_input_integer(1,maxmol)
+    ENDIF
+    PRINT *,"You now have to choose the reference vector for this molecule type."
+    PRINT *,"For example, '0 0 1' is the z direction."
+    PRINT *,"If you specify '0 0 0', then the reference vector will be randomised for *every pair*."
+    PRINT *,"Please provide the x-component as integer:"
+    references(1,n)=user_input_integer(-10,10)
+    PRINT *,"Please provide the y-component as integer:"
+    references(2,n)=user_input_integer(-10,10)
+    PRINT *,"Please provide the z-component as integer:"
+    references(3,n)=user_input_integer(-10,10)
+   ENDDO
+   !At this point, references should be initialised.
+   !Thus, continue with reading in the switches:
+   PRINT *,"Would you like to change advanced settings?"
+   IF (TRIM(operation_mode)=="pdf") THEN
+    PRINT *,"These are bin counts, sampling interval, maximum distance, and subtraction of uniform density."
+   ELSE
+    PRINT *,"These are bin counts, sampling interval, and maximum distance."
+   ENDIF
+   IF (user_input_logical()) THEN
+    PRINT *,"would you like to set the bin counts for a) and b) separately?"
+    WRITE(*,'(" (default for bin counts is currently set to ",I0,")")') bin_count_default
+    separate_bins=user_input_logical()
+    IF (separate_bins) THEN
+     PRINT *,"Please enter bin count for independent variable a):"
+     bin_count_a=user_input_integer(10,1000)
+     PRINT *,"Please enter bin count for independent variable a):"
+     bin_count_b=user_input_integer(10,1000)
+    ELSE
+     PRINT *,"Please enter bin count (to be used for both independent variables):"
+     bin_count_a=user_input_integer(10,1000)
+    ENDIF
+    PRINT *,"Every how many steps would you like to use to construct the histogram?"
+    WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+    sampling_interval=user_input_integer(1,1000)
+    PRINT *,"You need to choose a maximum distance - molecule pairs beyond that threshold will be disregarded."
+    PRINT *,"It is recommended to use half the box size where available. Would you like to use that shortcut? (y/n)"
+    optimize_distance=user_input_logical()
+    IF (.NOT.(optimize_distance)) THEN
+     PRINT *,"Please enter the maximum distance."
+     maxdist=user_input_real(5.0,1000.0)
+    ENDIF
+    IF (TRIM(operation_mode)=="pdf") THEN
+     PRINT *,"Would you like to subtract the uniform density? (y/n)"
+     PRINT *,"(i.e. only show differences to the radial distribution function)"
+     subtract_uniform=user_input_logical()
+    ENDIF
+   ELSE
+    optimize_distance=.TRUE.
+    CALL set_defaults()
+   ENDIF
+   PRINT *,"Should the entries for the histogram be weighed by their charge?"
+   PRINT *,"(Useful only in combination with 'all surrounding molecules')"
+   weigh_charge=user_input_logical()
+   WRITE(*,FMT='(A)',ADVANCE="NO") " writing distribution input file..."
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_distribution),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   SELECT CASE (TRIM(operation_mode))
+   CASE ("cdf")
+    WRITE(8,'(" cdf ",I0," ### cylindrical distribution function.")') number_of_references
+   CASE ("pdf")
+    WRITE(8,'(" pdf ",I0," ### polar distribution function.")') number_of_references
+   CASE DEFAULT
+    CALL report_error(0)
+   END SELECT
+   DO n=1,number_of_references,1
+    WRITE(8,ADVANCE="NO",FMT='(" ",SP,I0," ",I0," ",I0,SS," ",I0," ",I0," ### ")') references(:,n)
+    IF (references(5,n)<1) THEN
+     WRITE(8,ADVANCE="NO",FMT='(" *all* molecules around ")')
+    ELSE
+     WRITE(8,ADVANCE="NO",FMT='(" molecules of type ",I0," around ")') references(5,n)
+    ENDIF
+    WRITE(8,ADVANCE="NO",FMT='(" those of type ",I0)') references(4,n)
+    IF (ALL(references(1:3,n)==0)) THEN
+     WRITE(8,'(", randomised reference vector.")')
+    ELSE
+     WRITE(8,'(".")')
+    ENDIF
+   ENDDO
+   IF (optimize_distance) THEN
+    WRITE(8,'(" maxdist_optimize ### set maximum distance to half the box size")')
+   ELSE
+    WRITE(8,'(" maxdist ",F0.3," ### set maximum distance to half the box size")')maxdist
+   ENDIF
+   IF (subtract_uniform) THEN
+    WRITE(8,'(" subtract_uniform T ### subtract anisotropic density - only for pdf")')
+   ELSE
+    WRITE(8,'(" subtract_uniform F ### do not subtract anisotropic density.")')
+   ENDIF
+   IF (weigh_charge) THEN
+    WRITE(8,'(" weigh_charge T ### weigh with charge - only sensible when *all* molecules are used!")')
+   ELSE
+    WRITE(8,'(" weigh_charge F ### no charge weighing")')
+   ENDIF
+   WRITE(8,'(" sampling_interval ",I0," ### sample every ",I0," timesteps.")') sampling_interval,sampling_interval
+   IF (separate_bins) THEN
+    WRITE(8,'(" bin_count_a ",I0," ### set bin counts for a) to ",I0,".")') bin_count_a,bin_count_a
+    WRITE(8,'(" bin_count_b ",I0," ### set bin counts for b) to ",I0,".")') bin_count_b,bin_count_b
+   ELSE
+    WRITE(8,'(" bin_count ",I0," ### set bin counts for both variables to ",I0,".")') bin_count_a,bin_count_a
+   ENDIF
+   WRITE(8,*) "quit"
+   WRITE(8,*)
+   WRITE(8,*) "This is an input file for the calculation of distribution functions."
+   WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
+   ENDFILE 8
+   CLOSE(UNIT=8)
+   WRITE(*,*) "done"
+   DEALLOCATE(references,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+  END SUBROUTINE user_distribution_input
+
+  SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
+  IMPLICIT NONE
+   sampling_interval=sampling_interval_default
+   bin_count_a=bin_count_default
+   bin_count_b=bin_count_default
+   subtract_uniform=subtract_uniform_default
+   weigh_charge=weigh_charge_default
+   maxdist=maxdist_default
+  END SUBROUTINE set_defaults
+
+  !initialises the distribution module by reading the specified input file.
+  SUBROUTINE initialise_distribution()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: ios,allocstatus
+   ! first, check if file exists.
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),EXIST=file_exists)
+   IF (file_exists) THEN
+    !setting defaults to start with.
+    CALL set_defaults()
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "reading file '",TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+    INQUIRE(UNIT=3,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=3)
+    OPEN(UNIT=3,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),&
+    &ACTION='READ',IOSTAT=ios)
+    IF (ios/=0) CALL report_error(99,exit_status=ios)
+    READ(3,IOSTAT=ios,FMT=*) operation_mode!read the operation mode.
+    IF (ios/=0) CALL report_error(99,exit_status=ios)
+    !support for synonyms
+    IF (TRIM(operation_mode)=="cydf") operation_mode="cdf"
+    IF (TRIM(operation_mode)=="podf") operation_mode="pdf"
+    !Now read the body of the distribution input file in line with the requested operation mode:
+    SELECT CASE (TRIM(operation_mode))
+    CASE ("cdf")
+     !The 'corners' of the cylinder are sampled more rarely than the middle.
+     !Thus, only those pairs with distances < 0.71*maxdist are binned.
+     foolsproof_ratio=2.0**(-0.5)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "calculating cylindrical distribution function."
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "reading user-specified references."
+     CALL read_references()!uses unit 3!!
+     IF ((ERROR_CODE)==33) RETURN !UNIT 3 is closed by report_error
+     !allocating memory - first, check for sensible input.
+     CALL allocate_memory()
+     !step sizes in angströms, depending on bin counts and boundary values:
+     ! a is the distance in the "xy" plane, i.e. perpendicular to the reference vector
+     step_a=(maxdist*foolsproof_ratio)/FLOAT(bin_count_a)
+     ! b is the vertical distance (in "z", with z being collinear with the reference vector).
+     ! twice size, because this one has to go in both positive and negative direction.
+     step_b=(2.0*maxdist*foolsproof_ratio)/FLOAT(bin_count_b)
+    CASE ("pdf")
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "calculating polar distribution functions."
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "reading user-specified references."
+     CALL read_references()!uses unit 3!!
+     IF ((ERROR_CODE)==33) RETURN !UNIT 3 is closed by report_error
+     !allocating memory - first, check for sensible input.
+     CALL allocate_memory()
+     !step sizes in angströms or radians, depending on bin counts and boundary values:
+     ! a is the real space distance between the molecules in the considered pair
+     step_a=(maxdist)/FLOAT(bin_count_a)
+     ! b is the polar angle in radians.
+     step_b=(pi)/FLOAT(bin_count_b)
+    CASE DEFAULT
+     CALL report_error(99)
+    END SELECT
+    CLOSE(UNIT=3)
+   ELSE
+    CALL report_error(31)!No input - no output. easy as that.
+   ENDIF
+   CONTAINS
+
+    SUBROUTINE read_references()!This subroutine is responsible for reading the body of the distribution input file, connected as unit 3.
+    IMPLICIT NONE
+    INTEGER :: n,inputbin
+    CHARACTER(LEN=32) :: inputstring
+     IF ((TRIM(operation_mode)=="cdf").OR.(TRIM(operation_mode)=="pdf")) THEN
+      !read user-specified references
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,number_of_references
+      !Allocate memory to store the references and the molecule_type_index
+      ALLOCATE(references(5,number_of_references),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+      !Try to read all the references from the input file.
+      DO n=1,number_of_references,1
+       READ(3,IOSTAT=ios,FMT=*) references(:,n)
+       IF (ios/=0) CALL report_error(99,exit_status=ios)!ERROR 99: incorrect format in distribution.inp
+       IF ((references(4,n)>give_number_of_molecule_types()).OR.(references(4,n)<1)) THEN
+        !the specified molecule type doesn't exist. Stop execution.
+        CALL report_error(33,exit_status=references(4,n))
+        CLOSE(UNIT=3)
+        RETURN
+       ENDIF
+       !the last reference can be <1, which means all molecule types have to be considered
+       IF (references(5,n)>give_number_of_molecule_types()) THEN
+        !the specified molecule type doesn't exist. Stop execution.
+        CALL report_error(33,exit_status=references(5,n))
+        CLOSE(UNIT=3)
+        RETURN
+       ENDIF
+      ENDDO
+     ELSE !unknown operation mode.
+      CALL report_error(0)
+     ENDIF
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_DISTRIBUTION_INPUT)
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "  Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
+       EXIT
+      ENDIF
+      SELECT CASE (TRIM(inputstring))
+      CASE ("sampling_interval")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'sampling_interval' to default (=",sampling_interval_default,")"
+        sampling_interval=sampling_interval_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'sampling_interval' to ",sampling_interval
+       ENDIF
+      CASE ("bin_count")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,inputbin
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'bin_count_a' and 'bin_count_b' to default (=",bin_count_default,")"
+        bin_count_a=bin_count_default
+        bin_count_b=bin_count_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'bin_count_a' and 'bin_count_b' to ",inputbin
+        bin_count_a=inputbin
+        bin_count_b=inputbin
+       ENDIF
+      CASE ("bin_count_a")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,bin_count_a
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'bin_count_a' to default (=",bin_count_default,")"
+        bin_count_a=bin_count_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'bin_count_a' to ",bin_count_a
+       ENDIF
+      CASE ("bin_count_b")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,bin_count_b
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'bin_count_b' to default (=",bin_count_default,")"
+        bin_count_b=bin_count_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'bin_count_b' to ",bin_count_b
+       ENDIF
+      CASE ("maxdist")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,maxdist
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'maxdist' to default (=",maxdist_default,")"
+        maxdist=maxdist_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)') "   setting 'maxdist' to ",maxdist
+       ENDIF
+      CASE ("maxdist_optimize")
+       maxdist=give_box_limit()/2.0
+       IF (maxdist<0.0d0) THEN
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
+        &"  setting 'maxdist' to default (=",maxdist_default,")"
+        maxdist=maxdist_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (half the box length)"
+       ENDIF
+      CASE ("subtract_uniform")
+       IF (TRIM(operation_mode)=="pdf") THEN
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,subtract_uniform
+        IF (ios/=0) THEN
+         CALL report_error(100,exit_status=ios)
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+         &"  setting 'subtract_uniform' to default (=",subtract_uniform_default,")"
+         subtract_uniform=subtract_uniform_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'subtract_uniform' to ",subtract_uniform
+        ENDIF
+       ELSE
+        WRITE(*,*) "  subtract_uniform is only available for the polar distribution function."
+       ENDIF
+      CASE ("weigh_charge")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,weigh_charge
+       IF (ios/=0) THEN
+        CALL report_error(100,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'weigh_charge' to default (=",weigh_charge_default,")"
+        weigh_charge=weigh_charge_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
+       ENDIF
+      CASE ("quit")
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "  Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
+       EXIT
+      CASE DEFAULT
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
+      END SELECT
+      !check bin counts
+      IF (bin_count_a<10) THEN
+       bin_count_a=10
+       CALL report_error(104,exit_status=10)
+      ELSEIF (bin_count_a>1000) THEN
+       bin_count_a=1000
+       CALL report_error(104,exit_status=1000)
+      ENDIF
+      IF (bin_count_b<10) THEN
+       bin_count_b=10
+       CALL report_error(104,exit_status=10)
+      ELSEIF (bin_count_b>1000) THEN
+       bin_count_b=1000
+       CALL report_error(104,exit_status=1000)
+      ENDIF
+     ENDDO
+    END SUBROUTINE read_references
+
+    SUBROUTINE allocate_memory()
+     ALLOCATE(distribution_function(bin_count_a,bin_count_b),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    END SUBROUTINE allocate_memory
+
+  END SUBROUTINE initialise_distribution
+
+  !finalises the distribution module.
+  SUBROUTINE finalise_distribution()
+  IMPLICIT NONE
+  INTEGER :: deallocstatus
+   DEALLOCATE(references,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   DEALLOCATE(distribution_function,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+  END SUBROUTINE finalise_distribution
+
+  !This subroutine generates the required distribution functions.
+  SUBROUTINE make_distribution_functions(reference_number)
+  USE ANGLES
+  IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER,INTENT(IN) :: reference_number
+  INTEGER(KIND=DP) :: distribution_histogram(bin_count_a,bin_count_b)
+  INTEGER(KIND=DP) :: within_bin!how many pairs are in the bin?
+  INTEGER(KIND=DP) :: out_of_bounds!how many pairs have exceeded the bounds? should be zero for pdf.
+  INTEGER :: molecule_type_index_ref,molecule_type_index_obs,timestep
+  LOGICAL :: all_surrounding_molecules!IF TRUE, THEN all surrounding molecules are considered, of any type.
+  LOGICAL :: randomise!IF TRUE, THEN the reference vector is randomised each step
+  LOGICAL :: aligned !IF TRUE, THEN reference vector is the z direction already
+  REAL :: maxdist_squared
+  REAL(KIND=WORKING_PRECISION) :: reference_vector(3)
+  REAL :: shift !vertical distance shift for cydf
+   shift=maxdist*foolsproof_ratio
+   out_of_bounds=0
+   within_bin=0
+   maxdist_squared=maxdist**2
+   randomise=(ALL(references(1:3,reference_number)==0))
+   IF (randomise) THEN
+    CALL srand(86456)
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "  randomising reference vector."
+   ELSE
+    reference_vector(:)=FLOAT(references(1:3,reference_number))
+    CALL normalize3D(reference_vector)
+    CALL prepare_rotation(reference_vector,(/0.0d0,0.0d0,1.0d0/),aligned=aligned)
+    IF (VERBOSE_OUTPUT) THEN
+     IF (aligned) THEN
+      WRITE(*,*) "  using z-direction as reference vector."
+     ELSE
+      WRITE(*,*) "  prepared rotation matrix for mapping onto reference vector."
+     ENDIF
+    ENDIF
+   ENDIF
+   !the molecule_type_index can be initialised from the references array:
+   molecule_type_index_ref=references(4,reference_number)
+   IF (references(5,reference_number)<1) THEN
+    !invalid molecule type index, i.e. look at all available!
+    all_surrounding_molecules=.TRUE.
+   ELSE
+    molecule_type_index_obs=references(5,reference_number)
+    all_surrounding_molecules=.FALSE.
+   ENDIF
+   CALL iterate_timesteps_parallelised(randomise)
+   CALL transfer_histogram()
+
+   CONTAINS
+
+    SUBROUTINE iterate_timesteps_parallelised(random_debug)
+    IMPLICIT NONE
+    INTEGER :: observed_type
+    INTEGER(KIND=DP) :: within_bin_local,out_of_bounds_local
+    INTEGER(KIND=DP) :: distribution_histogram_local(bin_count_a,bin_count_b)
+    LOGICAL,INTENT(IN) :: random_debug
+     !initialise the histogram
+     distribution_histogram(:,:)=0
+     !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+     !$OMP PRIVATE(observed_type,distribution_histogram_local,within_bin_local,out_of_bounds_local)&
+     !$OMP PRIVATE(reference_vector)
+     !$OMP SINGLE
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,'(A,I0,A)') "   ### Parallel execution on ",OMP_get_num_threads()," threads (distribution function)"
+     !$  CALL timing_parallel_sections(.TRUE.)
+     !$ ENDIF
+     !$OMP END SINGLE
+     distribution_histogram_local(:,:)=0
+     observed_type=molecule_type_index_obs
+     !$OMP DO
+     DO timestep=1,give_number_of_timesteps(),sampling_interval
+      IF (all_surrounding_molecules) THEN
+       DO observed_type=1,give_number_of_molecule_types(),1
+        CALL fill_histogram&
+        &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
+        !$OMP ATOMIC
+        within_bin=within_bin+within_bin_local
+        !$OMP ATOMIC
+        out_of_bounds=out_of_bounds+out_of_bounds_local
+       ENDDO
+      ELSE
+       CALL fill_histogram&
+       &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
+       !$OMP ATOMIC
+       within_bin=within_bin+within_bin_local
+       !$OMP ATOMIC
+       out_of_bounds=out_of_bounds+out_of_bounds_local
+      ENDIF
+     ENDDO
+     !$OMP END DO
+     !$OMP CRITICAL
+     distribution_histogram(:,:)=distribution_histogram(:,:)+distribution_histogram_local(:,:)
+     !$OMP END CRITICAL
+     !$OMP END PARALLEL
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='("   ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+    END SUBROUTINE iterate_timesteps_parallelised
+
+    SUBROUTINE fill_histogram&
+    &(timestep_in,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
+    IMPLICIT NONE
+    INTEGER :: binpos_a,binpos_b,molecule_index_ref,molecule_index_obs
+    INTEGER,INTENT(IN) :: timestep_in,observed_type
+    REAL :: current_distance_squared,a,b
+    REAL(KIND=WORKING_PRECISION) :: link_vector(3),local_reference(3)
+    INTEGER(KIND=DP),INTENT(INOUT) :: distribution_histogram_local(:,:)
+    INTEGER(KIND=DP),INTENT(OUT) :: within_bin_local,out_of_bounds_local
+    LOGICAL,INTENT(IN) :: random_debug
+     within_bin_local=0
+     out_of_bounds_local=0
+     !iterate over all reference molecules
+     DO molecule_index_ref=1,give_number_of_molecules_per_step(molecule_type_index_ref),1
+      !iterate over all observed molecules
+      DO molecule_index_obs=1,give_number_of_molecules_per_step(observed_type),1
+       IF ((molecule_type_index_ref==observed_type).AND.(molecule_index_ref==molecule_index_obs)) CYCLE
+       !check if the two molecules are within distance
+       current_distance_squared=give_smallest_distance_squared&
+       &(timestep_in,timestep_in,molecule_type_index_ref,observed_type,molecule_index_ref,molecule_index_obs,&
+       &translation=link_vector(:))
+       IF (current_distance_squared<maxdist_squared) THEN
+        !molecule pair is close enough.
+        link_vector(:)=link_vector(:)+&
+        &give_center_of_mass(timestep_in,observed_type,molecule_index_obs)-&
+        &give_center_of_mass(timestep_in,molecule_type_index_ref,molecule_index_ref)
+        !Calculate bin limits.
+        SELECT CASE (TRIM(operation_mode))
+        CASE ("cdf")
+         !cylindrical distribution function: a will be distance in plane perpendicular to reference vector,
+         ! b will be vertical distance. needs to be corrected, because can be negative
+         !IF necessary, randomise rotation matrix - expensive!
+         IF (random_debug) THEN
+          CALL rotate_random(link_vector(:))
+         ELSE
+          CALL rotate(link_vector(:))
+         ENDIF
+         a=SQRT(link_vector(1)**2+link_vector(2)**2)
+         b=link_vector(3)
+         binpos_a=(INT(a/step_a)+1)
+         binpos_b=(INT((b+shift)/step_b))+1
+         IF ((binpos_b==1).AND.(b<0)) binpos_b=0
+         ! a=(binpos_a-1)*step_a+0.5*step_a
+         ! b=(binpos_b-1)*step_b+0.5*step_b-shift
+        CASE ("pdf")
+         !If necessary, randomise uvector (debug mostly)
+         IF (random_debug) THEN
+          local_reference(1)=RAND()-0.5
+          local_reference(2)=RAND()-0.5
+          local_reference(3)=RAND()-0.5
+          CALL normalize3D(local_reference)
+         ELSE
+          local_reference(:)=reference_vector(:)
+         ENDIF
+         !polar distribution function: a will be distance, b will be angle in radians
+         a=SQRT(current_distance_squared)
+         CALL normalize3D(link_vector(:))
+         b=ACOS(DOT_PRODUCT(link_vector(:),local_reference(:)))
+         binpos_a=INT(a/step_a)+1
+         binpos_b=INT(b/step_b)+1
+        CASE DEFAULT
+         CALL report_error(0)
+        END SELECT
+        IF (((binpos_a>0).AND.(binpos_a<=bin_count_a)).AND.((binpos_b>0).AND.(binpos_b<=bin_count_b))) THEN
+         within_bin_local=within_bin_local+1
+         IF (weigh_charge) THEN
+          distribution_histogram_local(binpos_a,binpos_b)=distribution_histogram_local(binpos_a,binpos_b)+&
+          &give_charge_of_molecule(observed_type)
+         ELSE
+          distribution_histogram_local(binpos_a,binpos_b)=distribution_histogram_local(binpos_a,binpos_b)+1
+         ENDIF
+        ELSE
+         out_of_bounds_local=out_of_bounds_local+1
+        ENDIF
+       ENDIF
+      ENDDO
+     ENDDO
+    END SUBROUTINE fill_histogram
+
+    SUBROUTINE transfer_histogram()
+    IMPLICIT NONE
+    REAL :: total_volume,chunk_area,chunk_volume
+    REAL :: a,b
+    REAL :: within_bin_real,share
+    INTEGER :: binpos_a,binpos_b
+     distribution_function(:,:)=0.0
+     IF (within_bin<0) THEN
+      CALL report_error(101)
+      within_bin_real=SUM(FLOAT(distribution_histogram(:,:)))
+     ELSE
+      within_bin_real=FLOAT(within_bin)
+     ENDIF
+     IF (VERBOSE_OUTPUT) THEN
+      WRITE(*,'("   within bin ",I0,", out of bounds ",I0,".")') within_bin,out_of_bounds
+      share=100.0*(FLOAT(out_of_bounds)/FLOAT(out_of_bounds+within_bin))
+      IF (share>1.0) WRITE(*,'("   ",F0.1,"% were within the sphere, but beyond the array bounds.")') share
+     ENDIF
+     !Compute total volume
+     SELECT CASE (TRIM(operation_mode))
+     CASE ("cdf")
+      total_volume=twopi*(shift**3) !pi*height*radius^2, height is 2*radius
+     CASE ("pdf")
+      total_volume=(4.0/3.0)*pi*(maxdist**3)
+     CASE DEFAULT
+      CALL report_error(0)
+     END SELECT
+     ideal_density=within_bin_real/total_volume
+     !correct histogram for ideal density
+     distribution_function(:,:)=FLOAT(distribution_histogram(:,:))/ideal_density
+     IF (VERBOSE_OUTPUT) THEN
+      ideal_density=ideal_density/&
+      &FLOAT((give_number_of_timesteps()/sampling_interval)*&
+      &give_number_of_molecules_per_step(references(4,reference_number)))
+      WRITE(*,'("   ideal density: ",ES9.3," particles/Angström^3")')ideal_density
+      IF (DEVELOPERS_VERSION) WRITE(*,'("  ! total volume:  ",ES9.3," cubic Angströms")') total_volume
+     ENDIF
+     DO binpos_a=1,bin_count_a,1
+      !Compute chunk area / partial integral
+      SELECT CASE (TRIM(operation_mode))
+      CASE ("cdf")
+       ! a is the distance in the 'xy' plane, i.e. perpendicular to the reference vector.
+       a=(FLOAT(binpos_a)*step_a) !outer limit of a distance
+       chunk_area=pi*((a**2)-((a-step_a)**2))!radial and azimuthal part of volume
+      CASE ("pdf")
+       ! a is the real space distance between the molecules.
+       a=(FLOAT(binpos_a)*step_a) !outer limit of radius
+       chunk_area=((a**3)-((a-step_a)**3))!radial part of volume
+       chunk_area=(twopi/3.0)*chunk_area!azimuthal part and constants
+       a=(a-(step_a*0.5)) !Correct to the middle of the range
+      CASE DEFAULT
+       CALL report_error(0)
+      END SELECT
+      DO binpos_b=1,bin_count_b,1
+       !Compute chunk volume
+       SELECT CASE (TRIM(operation_mode))
+       CASE ("cdf")
+        ! b is the vertical distance (in "z", with z being collinear with the reference vector).
+        !The difference will always be delta(b), which is step_b
+        chunk_volume=chunk_area*step_b
+       CASE ("pdf")
+        ! b is the polar angle in radians.
+        b=FLOAT(binpos_b)*step_b !upper limit
+        chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
+       CASE DEFAULT
+        CALL report_error(0)
+       END SELECT
+       !correct distribution function for chunk volume
+       distribution_function(binpos_a,binpos_b)=distribution_function(binpos_a,binpos_b)/chunk_volume
+      ENDDO
+     ENDDO
+    END SUBROUTINE transfer_histogram
+
+  END SUBROUTINE make_distribution_functions
+
+  !This subroutine is responsible for writing the output into a file.
+  SUBROUTINE write_distribution_functions(reference_number)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: reference_number
+  REAL :: shift_b,trace,integral
+  REAL :: a,b,previous
+  INTEGER :: binpos_a,binpos_b,ios
+  CHARACTER(LEN=1024) :: filename_distribution_output,filename_trace,headerline,unitline,filename_number_integral
+  LOGICAL :: connected
+   INQUIRE(UNIT=3,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=3)
+   INQUIRE(UNIT=10,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=10)
+   IF (ALL(references(1:3,reference_number)==0)) THEN
+    WRITE(filename_distribution_output,'(A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"randomised_"
+    WRITE(headerline,'(A)') "randomised vector, "
+   ELSE
+    WRITE(filename_distribution_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"reference_",reference_number,"_"
+    WRITE(headerline,'(A,SP,I0," ",I0," ",I0,SS,", ")') "reference vector ",references(1:3,reference_number)
+   ENDIF
+   IF (references(5,reference_number)<1) THEN
+    !all surroundings...
+    WRITE(filename_distribution_output,'(A,"all_around_",I0)')&
+    &TRIM(filename_distribution_output),references(4,reference_number)
+    WRITE(headerline,'(A," all molecules around type ",I0,", ")')&
+    &TRIM(headerline),references(4,reference_number)
+   ELSE
+    WRITE(filename_distribution_output,'(A,"type_",I0,"_around_",I0)')&
+    &TRIM(filename_distribution_output),references(5,reference_number),references(4,reference_number)
+    WRITE(headerline,'(A," all molecules of type ",I0," around type ",I0,", ")')&
+    &TRIM(headerline),references(5,reference_number),references(4,reference_number)
+   ENDIF
+   !do specific 'pretreatment'
+   SELECT CASE (TRIM(operation_mode))
+   CASE ("cdf")
+    shift_b=maxdist*foolsproof_ratio
+    IF (weigh_charge) WRITE(filename_distribution_output,'(A,"_xcharge")') TRIM(filename_distribution_output)
+    WRITE(filename_distribution_output,'(A,"_cdf")') TRIM(filename_distribution_output)
+    WRITE(headerline,'(A," cylindrical distribution function")') TRIM(headerline)
+    WRITE(unitline,'("a(perpendicular distance) b(collinear distance) g(a,b)")')
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "  writing distribution data (cdf) into file: ",TRIM(filename_distribution_output)
+    OPEN(UNIT=3,FILE=TRIM(filename_distribution_output),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+   CASE ("pdf")
+    shift_b=0.0
+    !Write trace, i.e. the radial distribution function
+    WRITE(filename_trace,'(A,"_rdf")') TRIM(filename_distribution_output)
+    IF (weigh_charge) THEN
+     WRITE(filename_trace,'(A,"_xcharge")') TRIM(filename_trace)
+     WRITE(filename_distribution_output,'(A,"_xcharge")') TRIM(filename_distribution_output)
+    ENDIF
+    WRITE(filename_number_integral,'(A,"_nintegral")') TRIM(filename_trace)
+    IF (subtract_uniform) WRITE(filename_distribution_output,'(A,"_-trace")') TRIM(filename_distribution_output)
+    WRITE(filename_distribution_output,'(A,"_pdf")') TRIM(filename_distribution_output)
+    !filenames are complete now.
+    IF (VERBOSE_OUTPUT) THEN
+     WRITE(*,*) "  writing trace (rdf) into file: ",TRIM(filename_trace)
+     WRITE(*,*) "  writing number integral into file: ",TRIM(filename_number_integral)
+    ENDIF
+    OPEN(UNIT=3,FILE=TRIM(filename_trace),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    OPEN(UNIT=10,FILE=TRIM(filename_number_integral),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(3,'(A," radial distribution function (trace of pdf)")') TRIM(headerline)
+    WRITE(3,'("distance g(r)")')
+    WRITE(10,'(A," number integral INT(4*pi*r^2*g(r))dR")') TRIM(headerline)
+    WRITE(10,'("distance n(r)")')
+    integral=0.0
+    WRITE(10,*) 0.0,0.0
+    previous=0.0
+    DO binpos_a=1,bin_count_a,1
+     trace=SUM(distribution_function(binpos_a,:))/FLOAT(bin_count_b)
+     a=(FLOAT(binpos_a)*step_a) !upper limit - integral runs over whole section
+     !trapezoidal integration
+     integral=integral+number_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
+     WRITE(10,*) a,integral
+     a=a-0.5*step_a !using the middle to report everything else
+     WRITE(3,*) a,trace
+     previous=trace
+     IF (subtract_uniform) THEN
+      distribution_function(binpos_a,:)=distribution_function(binpos_a,:)-trace
+     ENDIF
+    ENDDO
+    CLOSE(UNIT=3)
+    CLOSE(UNIT=10)
+    WRITE(unitline,'("a(distance) b(polar angle) g(a,b)")')
+    WRITE(headerline,'(A," polar distribution function")') TRIM(headerline)
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "  writing distribution data (pdf) into file: ",TRIM(filename_distribution_output)
+    OPEN(UNIT=3,FILE=TRIM(filename_distribution_output),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+   CASE DEFAULT
+    CALL report_error(0)
+   END SELECT
+   IF (weigh_charge) WRITE(headerline,'(A,", weighed by charge")') TRIM(headerline)
+   WRITE(3,'(A,A,A)') "Output in this file is based on the input file '",TRIM(FILENAME_DISTRIBUTION_INPUT),"':"
+   WRITE(3,'(A)') TRIM(headerline)
+   WRITE(3,'(A)') TRIM(unitline)
+   DO binpos_a=1,bin_count_a,1
+    DO binpos_b=1,bin_count_b,1
+     a=(FLOAT(binpos_a)*step_a)-0.5*step_a
+     b=(FLOAT(binpos_b)*step_b)-0.5*step_b-shift_b
+     WRITE(3,*) a,b,distribution_function(binpos_a,binpos_b)
+    ENDDO
+   ENDDO
+   CLOSE(UNIT=3)
+
+   CONTAINS
+
+    REAL FUNCTION number_integral_trapezoid(g_a,g_b,radius_a,radius_b)
+    IMPLICIT NONE
+    REAL,INTENT(IN) :: g_a,g_b,radius_a,radius_b
+    REAL :: m,n,upper,lower
+     n=(radius_b*g_a-radius_a*g_b)/(radius_b-radius_a)
+     m=(g_b-n)/(radius_b)
+     upper=(m/4.0)*(radius_b**4)+(n/3.0)*(radius_b**3)
+     lower=(m/4.0)*(radius_a**4)+(n/3.0)*(radius_a**3)
+     !evaluate the integral
+     number_integral_trapezoid=4.0*pi*(upper-lower)
+    END FUNCTION number_integral_trapezoid
+
+  END SUBROUTINE write_distribution_functions
+
+  SUBROUTINE perform_distribution_analysis()
+  IMPLICIT NONE
+  INTEGER :: n
+  CHARACTER(LEN=1024)  :: name_obs
+   IF (give_number_of_timesteps()<11) THEN
+    !trajectory is too short. Abort analysis.
+    CALL report_error(37)
+   ELSE
+    CALL initialise_distribution()
+    IF ((ERROR_CODE/=31).AND.((ERROR_CODE)/=33)) THEN
+     !do the actual analysis:
+     !user-defined references.
+     DO n=1,number_of_references,1
+      IF (references(5,n)<1) THEN
+       name_obs="all"
+      ELSE
+       name_obs=TRIM(give_sum_formula(references(5,n)))
+      ENDIF
+      WRITE(*,'(" Calculating distribution for reference vector ",I0," out of ",I0,".")') n,number_of_references
+      WRITE(*,'("   (Vector ",SP,I0," ",I0," ",I0,SS,", ",A," for ",A," around ",A,")")')&
+      &references(1:3,n),TRIM(operation_mode),TRIM(name_obs),TRIM(give_sum_formula(references(4,n)))
+      CALL make_distribution_functions(n)
+      CALL write_distribution_functions(n)
+     ENDDO
+     CALL finalise_distribution()
+    ELSE
+     ERROR_CODE=ERROR_CODE_DEFAULT
+    ENDIF
+   ENDIF
+  END SUBROUTINE perform_distribution_analysis
+
+END MODULE DISTRIBUTION
+!--------------------------------------------------------------------------------------------------------------------------------!
 !This is the main program unit. the MOLECULAR, DEBUG and ANGLES modules are general purpose, everything else is invoked as specified in general.inp
 RECURSIVE SUBROUTINE initialise_global()
 USE MOLECULAR
 USE DEBUG
 USE SETTINGS
 IMPLICIT NONE
-LOGICAL :: file_exists,connected,smalltask!'smalltask' means that the analyis can be run on a login node (usually)
+!default values
+!variables
+!PRIVATE/PUBLIC declarations
+LOGICAL :: file_exists,connected,smalltask!'smalltask' means that the analysis can be run on a login node (usually)
 LOGICAL :: anytask !is there any task at all?
 LOGICAL :: wrapping_is_sensible!this variable is initialised to .TRUE., and set to .FALSE. as soom as something like msd is requested.
 CHARACTER(LEN=1024) :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
 CHARACTER(LEN=1024) :: filename_msd="diffusion.inp" !diffusion module standard filename
+CHARACTER(LEN=1024) :: filename_distribution="distribution.inp" !distribution module standard filename
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
  TIME_OUTPUT=TIME_OUTPUT_DEFAULT
@@ -7893,7 +8993,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 05_Mär_2020"
+ PRINT *, "   Date of Release: 29_Mar_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -8275,6 +9375,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    - All three components of the drift vector, <x>, <y>, and <z>"
    PRINT *,"    - The number of averages taken to obtain these values."
    PRINT *
+   PRINT *,"   Distribution Functions: (PARALLELISED)"
+   PRINT *,"   Calculates distribution functions referenced to a fixed vector in space."
+   PRINT *,"   cylindrical and polar coordinate systems are supported."
+   PRINT *,"   Different references vectors can be chosen, including a randomised reference vector (debug purposes)."
+   PRINT *,"   This could be e.g. '0 0 1' (z-direction is the reference)."
+   PRINT *,"   In both coordinate systems, values are averaged over all azimuthal angles."
+   PRINT *
    PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
    PRINT *,"Some of the more demanding routines exist also in a parallelised version."
    PRINT *,"(see option '4' in the main menu for more information about parallelisation)"
@@ -8313,6 +9420,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"These latter three act on the whole analysis, no matter where specified."
    PRINT *,"Only their first occurence matters - everything afterwards is ignored."
    PRINT *,"An incorrectly formatted 'general.inp' is not tolerated (read the error messages)."
+   PRINT *,"For many switches, a simple mode that doesn't require additional input is available."
+   PRINT *,"The simple mode is requested by appending '_simple' to the switch, e.g. 'gyradius_simple'."
    PRINT *,"Available switches are: (case-sensitive, everything is lowercase)"
    PRINT *," - 'sequential_read':"
    PRINT *,"    If true 'T', then the trajectory is read line by line."
@@ -8343,18 +9452,19 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'dump_example':"
    PRINT *,"    Writes an xyz file of every specified molecule type into the output folder."
    PRINT *,"    Can be used to extract the atom numbers for the dihedral analysis."
-   PRINT *," - 'dump_snapshot':"
+   PRINT *," - 'dump_snapshot': (simple mode available)"
    PRINT *,"    Expects an integer and a logical and dumps the specified timestep as .xyz file."
    PRINT *,"    If the logical is 'T', then every molecule is written into a separate file."
-   PRINT *," - 'dump_split':"
+   PRINT *," - 'dump_split': (simple mode available)"
    PRINT *,"    Splits the trajectory into separate files for every molecule type (centred to centre of mass!)."
+   PRINT *,"    Expects two integers: the first timestep and the last timestep."
    PRINT *," - 'dump_single':"
    PRINT *,"    Writes a trajectory containing just one single molecule."
    PRINT *,"    This keyword expects a logical, followed by four integers in the same line:"
    PRINT *,"    If the logical is 'T', then the molecule is centred to its centre-of-mass."
    PRINT *,"    The first and second integers specify the first and last timestep to write."
    PRINT *,"    The third and fourth integers are the molecule type index and the molecule index, respectively."
-   PRINT *," - 'contact_distance':"
+   PRINT *," - 'contact_distance': (simple mode available)"
    PRINT *,"    Reports the smallest intra- and intermolecular distances and the largest intramolecular distance."
    PRINT *,"    This keyword expects two integers as input: the timestep to analyse and the molecule type index."
    PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
@@ -8376,16 +9486,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    this keyword expects two real values, the lower and upper bounds of the simulation box."
    PRINT *,"    i.e. cubic_box_edge 0.0 100.0 corresponds to a cubic box with side length 100.0 Angströms"
    PRINT *,"    useful if e.g. dump_cut is used with a xyz trajectory."
-   PRINT *," - 'convert':"
+   PRINT *," - 'convert': (simple mode available)"
    PRINT *,"    converts the given trajectory to a centre-of-mass trajectory (per specified molecule type)."
    PRINT *,"    i.e. only the centres of mass for the molecules are printed instead of the atoms."
    PRINT *,"    This keyword expects a logical. If (T), then a new, modified molecular input file is written as well."
-   PRINT *," - 'temperature':"
+   PRINT *," - 'temperature': (simple mode available)"
    PRINT *,"    Computes the instantaneous temperature of a particular molecule type."
    PRINT *,"    This keyword expects exactly three integers:"
    PRINT *,"    The molecule type index, and the range of analysis, given as first step and last step."
    PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
-   PRINT *," - 'drude_temp':"
+   PRINT *," - 'drude_temp': (simple mode available)"
    PRINT *,"    Computes drude, centre of mass, and total temperature of the whole box."
    PRINT *,"    This keyword computes equation (13), (14) and (15) in:"
    PRINT *,"    J. Phys. Chem. Lett., 2019, 10, 7523–7530. DOI 10.1021/acs.jpclett.9b02983"
@@ -8393,16 +9503,22 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    since the automatic drude particle assignment is only available for position trajectories."
    PRINT *,"    This keyword expects exactly two integers:"
    PRINT *,"    The range of analysis, given as first step and last step."
-   PRINT *," - 'remove_drudes':"
+   PRINT *," - 'remove_drudes': (simple mode available)"
    PRINT *,"    writes a new trajectory, with drude particles merged into their respective cores."
    PRINT *,"    (requires assigned drude particles, either manually or automatically)"
    PRINT *,"    This keyword expects exactly two integers:"
    PRINT *,"    The range of analysis, given as first step and last step."
-   PRINT *," - 'gyradius':"
+   PRINT *," - 'gyradius': (simple mode available)"
    PRINT *,"    Computes the ensemble averages and standard deviations of radius of gyration,"
    PRINT *,"    radius of gyration squared, and maximum distance of any atom in a molecule from its centre of mass."
    PRINT *,"    This keyword expects exactly three integers:"
    PRINT *,"    The molecule type index, and the range of analysis, given as first step and last step."
+   PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
+   PRINT *," - 'jump_analysis': (simple mode available)"
+   PRINT *,"    Computes a histogram / probability distribution of jump velocities."
+   PRINT *,"    This keyword expects exactly three integers:"
+   PRINT *,"    The molecule type index, the range of analysis, given as first step and last step,"
+   PRINT *,"    and the maximum jump length / shift given as number of timesteps."
    PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
    PRINT *," - 'show_settings':"
    PRINT *,"    Writes settings and useful information to the standard output"
@@ -8486,6 +9602,36 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    then only shifts by 1,10,20,...,tmax are computed."
    PRINT *," -  'print_verbose':"
    PRINT *,"    If yes (T), then the detailed drift is printed, too."
+   PRINT *," - 'quit'"
+   PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+   PRINT *
+   PRINT *,"distribution input file:"
+   PRINT *,"The first line contains the expression 'cdf' or 'pdf', followed by the number of references N."
+   PRINT *,"'cdf' requests the cylindrical distribution function, 'pdf' requests the polar distribution function."
+   PRINT *,"The references are read from the N lines following the first line. The format of each line is:"
+   PRINT *,"x - y - z - number of reference molecule type - number of observed molecule type."
+   PRINT *,"For molecule type 1 around 2 relative to z-direction, the line would thus contain '0 0 1 2 1'."
+   PRINT *,"a 'zero' reference vector, i.e. '0 0 0', triggers the randomisation of the reference vector."
+   PRINT *,"If the molecule type of the observed molecule is -1, then *all* molecule types are used."
+   PRINT *,"After the projections have been specified, switches can be specified in an arbitrary order."
+   PRINT *,"Available are:"
+   PRINT *," - 'bin_count':"
+   PRINT *,"    Expects an integer, which is then used as bin count for both independent variables."
+   PRINT *," - 'bin_count_a':"
+   PRINT *,"    Expects an integer, which is then used as bin count for variable a)."
+   PRINT *," - 'bin_count_b':"
+   PRINT *,"    Expects an integer, which is then used as bin count for variable b)."
+   PRINT *," - 'maxdist':"
+   PRINT *,"    Expects a real value, which is taken as the cutoff distance of molecule pairs to be considered."
+   PRINT *," -  'maxdist_optimize':"
+   PRINT *,"    sets 'maxdist' to half the box size where available. doesn't need additional input values."
+   PRINT *," - 'subtract_uniform'"
+   PRINT *,"    If yes (T), then the uniform density / radial distribution function is subtracted."
+   PRINT *,"    Only available for the polar distribution function."
+   PRINT *," - 'weigh_charge'"
+   PRINT *,"    The charges of observed molecules are added to the distribution histogram, rather than unity."
+   PRINT *," - 'sampling_interval'"
+   PRINT *,"    Expects an integer. Every so many steps are used for the analysis."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *
@@ -8958,6 +10104,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"If you type '0' the program will (later) try to use the (permitted) maximum."
      nthreads=user_input_integer(0,64)
     CASE (8)!convert to centre of mass
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("convert_simple ### centre of mass trajectory with default values.")
+      CYCLE
+     ENDIF
      smalltask=.FALSE.
      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      PRINT *,"Would you also like to write the appropriately adjusted molecular input file? (y/n)"
@@ -8967,6 +10119,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       CALL append_string("convert F ### reduce trajectory to centre of mass, don't write new molecular.inp")
      ENDIF
     CASE (9)!compute instantaneous temperature.
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("temperature_simple ### calculate temperature with default values.")
+      CYCLE
+     ENDIF
      IF (number_of_molecules<1) THEN
       maxmol=10000!unknown molecule number... expect the worst.
      ELSE
@@ -9003,7 +10161,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (10)!show the drude settings at this point
      CALL append_string("show_drude ### print detailed information about drude assignments")
      PRINT *,"The corresponding section has been added to the input file."
-    CASE (11)
+    CASE (11) !drude temperature
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("drude_temp_simple ### calculate drude temperature with default values.")
+      CYCLE
+     ENDIF
      PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
      PRINT *,"To this end, please enter the first timestep to analyse"
      startstep=user_input_integer(1,nsteps)
@@ -9015,7 +10179,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A," ### calculate drude temperature for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
-    CASE (12)
+    CASE (12) !remove drudes
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("remove_drudes_simple ### merge drude particles into cores with default values.")
+      CYCLE
+     ENDIF
      PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
      PRINT *,"To this end, please enter the first timestep to analyse"
      startstep=user_input_integer(1,nsteps)
@@ -9038,11 +10208,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   SUBROUTINE coordinates_user_input()
   USE DIFFUSION
   USE AUTOCORRELATION
+  USE DISTRIBUTION
   IMPLICIT NONE
   LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
-  INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index,maxmol
+  INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index,maxmol,deltasteps
   REAL :: cutoff
-  CHARACTER(LEN=168) :: fstring
+  CHARACTER(LEN=1024) :: fstring
    parallelisation_possible=.FALSE.!
    parallelisation_requested=.FALSE.!only changes to .TRUE. from here, never back.
    analysis_number=1
@@ -9088,7 +10259,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 17 - Compute ensemble average of radius of gyration."
     PRINT *," 18 - Write trajectory with drude particles merged into cores."
     PRINT *," 19 - Calculate close contact distances (inter- and intramolecular)."
-    SELECT CASE (user_input_integer(0,19))
+    PRINT *," 20 - Calculate polar or cylindrical distribution function."
+    PRINT *," 21 - Jump analysis / jump velocity distribution"
+    SELECT CASE (user_input_integer(0,21))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -9160,7 +10333,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      ELSE
       CALL append_string("error_output F ### turn off error messages")
      ENDIF
-    CASE (8)
+    CASE (8)!specify number of threads
      PRINT *,"Please give the number of threads you want to use."
      PRINT *,"If you type '0' the program will (later) try to use the (permitted) maximum."
      nthreads=user_input_integer(0,64)
@@ -9175,6 +10348,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       analysis_number=analysis_number+1
      ENDIF
     CASE (10)!dump a snapshot of a given timestep
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("dump_snapshot_simple ### dump snapshot with default values.")
+      CYCLE
+     ENDIF
      PRINT *,"Please give the timestep of which you want the snapshot to be:"
      snap=user_input_integer(1,nsteps)
      PRINT *,"Do you want the molecules to be exported as separate files? (y/n)"
@@ -9190,8 +10369,18 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       analysis_number=analysis_number+1
      ENDIF
     CASE (11)!splits the trajectory
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("dump_split_simple ### split trajectory per molecule type.")
+      CYCLE
+     ENDIF
      smalltask=.FALSE.
-     WRITE(fstring,'("dump_split ### split trajectory (per molecule type)")')
+     PRINT *,"Please give the first timestep in the trajectory:"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"Please type the final timestep you wish to export:"
+     endstep=user_input_integer(startstep,nsteps)
+     WRITE(fstring,'("dump_split ",I0," ",I0," ### split trajectory (per molecule type)")') startstep,endstep
      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
@@ -9201,6 +10390,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       analysis_number=analysis_number+1
      ENDIF
     CASE (12)!converts
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("convert_simple ### centre of mass trajectory with default values.")
+      CYCLE
+     ENDIF
      smalltask=.FALSE.
      PRINT *,"Would you also like to produce an adjusted molecular input file? (y/n)"
      IF (user_input_logical()) THEN
@@ -9313,7 +10508,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (16)!show the drude settings at this point
      CALL append_string("show_drude ### print detailed information about drude assignments")
      PRINT *,"The corresponding section has been added to the input file."
-    CASE (17)
+    CASE (17)!radius of gyration
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("gyradius_simple ### radius of gyration / maxdist analysis with default values.")
+      CYCLE
+     ENDIF
      PRINT *,"Please give the first timestep in the trajectory:"
      startstep=user_input_integer(1,nsteps)
      PRINT *,"Please type the final timestep you wish to export:"
@@ -9340,7 +10541,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      &" ### compute radius of gyration and maximum distance of any atom from centre of mass."
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
-    CASE (18)
+    CASE (18)!merge drude particles into cores
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("remove_drudes_simple ### merge drude particles into cores with default values.")
+      CYCLE
+     ENDIF
      PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
      PRINT *,"To this end, please enter the first timestep to analyse"
      startstep=user_input_integer(1,nsteps)
@@ -9352,17 +10559,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A," ### write trajectory without drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
-    CASE (19)
-     PRINT *,"It is necessary to provide the timestep to be analysed."
-     PRINT *,"Please enter this timestep as integer:"
-     startstep=user_input_integer(1,nsteps)
-     PRINT *,"Would you like to compute the contact distances for just one molecule type (y), or for every type (n)?"
-     IF (user_input_logical()) THEN
-      PRINT *,"Please enter the index of the molecule type you wish to observe."
-      molecule_type_index=user_input_integer(1,maxmol)
-     ELSE
-      molecule_type_index=-1
-     ENDIF
+    CASE (19)!close contact distance, inter- and intramolecular
      parallelisation_possible=.TRUE.
      IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
       PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
@@ -9373,9 +10570,98 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
       CALL append_string(fstring)
      ENDIF
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("contact_distance_simple ### inter/intramolecular distance analysis with default values.")
+      CYCLE
+     ENDIF
+     PRINT *,"It is necessary to provide the timestep to be analysed."
+     PRINT *,"Please enter this timestep as integer:"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"Would you like to compute the contact distances for just one molecule type (y), or for every type (n)?"
+     IF (user_input_logical()) THEN
+      PRINT *,"Please enter the index of the molecule type you wish to observe."
+      molecule_type_index=user_input_integer(1,maxmol)
+     ELSE
+      molecule_type_index=-1
+     ENDIF
      WRITE(fstring,'(" contact_distance ",I0," ",I0)') startstep,molecule_type_index
      WRITE(fstring,'(A," ### compute largest/smallest intramolecular and smallest intermolecular distances")') TRIM(fstring)
      CALL append_string(fstring)
+    CASE (20)!cylindrical and polar distribution function
+     smalltask=.FALSE.
+     IF (nsteps<11) THEN
+      PRINT *,"Your trajectory is really too short for that. Please use more timesteps."
+      PRINT *,"The minimum of steps - even if only for debugging purposes - should be 11."
+     ELSE
+      CALL user_distribution_input(parallelisation_possible,parallelisation_requested,number_of_molecules,filename_distribution)
+      IF (parallelisation_requested) THEN
+       CALL append_string("parallel_operation T ### turn on parallel operation")
+       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+       CALL append_string(fstring)
+      ENDIF
+      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+      CALL append_string('distribution "'//TRIM(OUTPUT_PREFIX)//&
+      &TRIM(filename_distribution)//'" ### compute distribution function')
+      IF (own_prefix) THEN
+       own_prefix=.FALSE.
+      ELSE
+       analysis_number=analysis_number+1
+      ENDIF
+      !enough information for the analysis.
+      SKIP_ANALYSIS=.FALSE.
+     ENDIF
+    CASE (21)!jump analysis
+     IF (.NOT.(parallelisation_requested)) THEN
+      PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+      IF (user_input_logical()) parallelisation_requested=.TRUE.
+     ENDIF
+     IF (parallelisation_requested) THEN
+      CALL append_string("parallel_operation T ### turn on parallel operation")
+      WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+      CALL append_string(fstring)
+     ENDIF
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("jump_analysis_simple ### jump analysis with default values.")
+      CYCLE
+     ENDIF
+     IF (nsteps==1) THEN
+      PRINT *,"Not enough timesteps available."
+      CYCLE
+     ENDIF
+     smalltask=.FALSE.
+     PRINT *,"Please give the first timestep to consider for the analysis:"
+     startstep=user_input_integer(1,nsteps-1)
+     PRINT *,"Please type the final timestep:"
+     endstep=user_input_integer(startstep+1,nsteps)
+     IF (number_of_molecules<1) THEN
+      maxmol=10000!unknown molecule number... expect the worst.
+     ELSE
+      maxmol=number_of_molecules
+     ENDIF
+     IF (number_of_molecules==1) THEN
+      PRINT *,"Only one molecule type available, which will be observed."
+      molecule_type_index=1
+     ELSE
+      PRINT *,"Would you perform the jump analysis for just one molecule type (y), or for every type (n)?"
+      IF (user_input_logical()) THEN
+       PRINT *,"Please enter the index of the molecule type you wish to observe."
+       molecule_type_index=user_input_integer(1,maxmol)
+      ELSE
+       molecule_type_index=-1
+      ENDIF
+     ENDIF
+     deltasteps=nsteps-startstep
+     PRINT *,"Please specify the maximum jump length (in timesteps):"
+     deltasteps=user_input_integer(1,deltasteps)
+     WRITE(fstring,'(A,I0," ",I0," ",I0," ",I0,A)')&
+     &"jump_analysis ",molecule_type_index,startstep,endstep,deltasteps,&
+     &" ### compute histogram / probability distribution of jump velocities."
+     CALL append_string(fstring)
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -9473,7 +10759,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"(This can also be one of those specified in the command line)"
    PRINT *,"If there is a general input file, then the actual analysis starts,"
    PRINT *,"and the general input file is read line by line."
-   PRINT *,"During the analyis, no further input is required."
+   PRINT *,"During the analysis, no further input is required."
    PRINT *,"The result is that errors in the general input file are not tolerated."
    PRINT *,"If a line cannot be read, then the execution stops and an error is printed."
    PRINT *,"When a keyword linking to a separate input file is found,"
@@ -9534,6 +10820,7 @@ END SUBROUTINE initialise_global
 
 SUBROUTINE finalise_global()
 USE MOLECULAR
+USE SETTINGS
 IMPLICIT NONE
 42 FORMAT ("    ########   #####")
 44 FORMAT ("        ########")
@@ -9565,6 +10852,7 @@ USE DEBUG
 USE AUTOCORRELATION
 USE DIFFUSION
 USE SETTINGS
+USE DISTRIBUTION
 IMPLICIT NONE
   !$ INTERFACE
   !$  FUNCTION OMP_get_num_threads()
@@ -9680,20 +10968,35 @@ INTEGER :: ios,n
       CALL report_error(19,exit_status=ios)
       EXIT
      ENDIF
+     CALL check_timestep(inputinteger)
      CALL dump_snapshot(inputinteger,inputlogical)
      WRITE(*,'(A,I0,A)') " Snapshot of step ",inputinteger," written to output folder."
+    CASE ("dump_snapshot_simple") !Module DEBUG
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     CALL dump_snapshot(1,.FALSE.)
+     WRITE(*,'(A,I0,A)') " Snapshot of first step written to output folder."
     CASE ("dump_split") !Module DEBUG
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      BACKSPACE 7
-     READ(7,IOSTAT=ios,FMT=*) inputstring
+     READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
      IF (ios/=0) THEN
       CALL report_error(19,exit_status=ios)
       EXIT
      ENDIF
+     CALL check_timesteps(startstep,endstep)
      WRITE(*,'(A,I0,A)') " Trajectory will be split into ",&
      &give_number_of_molecule_types()," molecule types."
-     CALL dump_split(1,give_number_of_timesteps())
-    CASE ("remove_drudes")
+     WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+     CALL dump_split(startstep,endstep)
+    CASE ("dump_split_simple") !Module DEBUG
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     WRITE(*,'(A,I0,A)') " Trajectory will be split into ",&
+     &give_number_of_molecule_types()," molecule types - simple mode."
+     startstep=1
+     endstep=give_number_of_timesteps()
+     WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+     CALL dump_split(startstep,endstep)
+    CASE ("remove_drudes") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
      IF (ios/=0) THEN
@@ -9701,7 +11004,19 @@ INTEGER :: ios,n
       EXIT
      ENDIF
      IF (are_drudes_assigned()) THEN
+      CALL check_timesteps(startstep,endstep)
       WRITE(*,*) "Writing trajectory with drude particles merged into cores."
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+      CALL remove_drudes(startstep,endstep)
+     ELSE
+      CALL report_error(91)
+     ENDIF
+    CASE ("remove_drudes_simple") !Module DEBUG
+     IF (are_drudes_assigned()) THEN
+      WRITE(*,*) "Writing trajectory with drude particles merged into cores - simple mode."
+      startstep=1
+      endstep=1
+      CALL check_timesteps(startstep,endstep)
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       CALL remove_drudes(startstep,endstep)
      ELSE
@@ -9715,6 +11030,16 @@ INTEGER :: ios,n
        CALL report_error(19,exit_status=ios)
        EXIT
       ENDIF
+      CALL check_timestep(inputinteger)
+      CALL contact_distance(inputinteger,inputinteger2)
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("contact_distance_simple")
+     IF (BOX_VOLUME_GIVEN) THEN
+      inputinteger=1
+      inputinteger2=-1
+      CALL check_timestep(inputinteger)
       CALL contact_distance(inputinteger,inputinteger2)
      ELSE
       CALL report_error(41)
@@ -9726,6 +11051,7 @@ INTEGER :: ios,n
       CALL report_error(19,exit_status=ios)
       EXIT
      ENDIF
+     CALL check_timesteps(startstep,endstep)
      WRITE(*,'(A,I0,A,I0,A)') " Trajectory for molecule ",inputinteger2," of type ",inputinteger," will be written."
      IF (inputlogical) THEN
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,", using centre of mass)"
@@ -9741,6 +11067,7 @@ INTEGER :: ios,n
        CALL report_error(19,exit_status=ios)
        EXIT
       ENDIF
+      CALL check_timesteps(startstep,endstep)
       WRITE(*,'(A,I0,A,I0,A)')&
       &" Trajectory for molecule ",inputinteger2," of type ",inputinteger," will be written, including neighbours."
       IF (inputlogical) THEN
@@ -9767,6 +11094,7 @@ INTEGER :: ios,n
        CALL report_error(19,exit_status=ios)
        EXIT
       ENDIF
+      CALL check_timestep(startstep)
       WRITE(*,'(A,I0,A,I0,A,I0,A)') " Dumping dimers, i.e. closest molecules of type ",&
       &inputinteger2," around ",inputinteger," for timestep ",startstep,"."
       IF (inputlogical) THEN
@@ -9805,6 +11133,11 @@ INTEGER :: ios,n
      IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(inputlogical,TRAJECTORY_TYPE)
+    CASE ("convert_simple") !Module DEBUG
+     WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
+     WRITE(*,*) "An adjusted molecular input file will be written, too."
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+     CALL convert(.TRUE.,TRAJECTORY_TYPE)
     CASE ("temperature") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -9816,6 +11149,19 @@ INTEGER :: ios,n
        EXIT
       ENDIF
       WRITE(*,*) "Calculating the kinetic temperature, based on NkT=mv²."
+      CALL check_timesteps(startstep,endstep)
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+      CALL report_temperature(inputinteger,startstep,endstep)
+     ENDIF
+    CASE ("temperature_simple") !Module DEBUG
+     IF (WRAP_TRAJECTORY) THEN
+      CALL report_error(72)
+     ELSE
+      WRITE(*,*) "Calculating the kinetic temperature for first timestep, based on NkT=mv² (simple mode)."
+      inputinteger=-1
+      startstep=1
+      endstep=1
+      CALL check_timesteps(startstep,endstep)
       CALL report_temperature(inputinteger,startstep,endstep)
      ENDIF
     CASE ("gyradius") !Module DEBUG
@@ -9826,7 +11172,15 @@ INTEGER :: ios,n
       EXIT
      ENDIF
      WRITE(*,*) "Calculating ensemble average of radius of gyration."
+     CALL check_timesteps(startstep,endstep)
+     WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
      CALL report_gyradius(inputinteger,startstep,endstep)
+    CASE ("gyradius_simple") !Module DEBUG
+     WRITE(*,*) "Calculating ensemble average of radius of gyration - simple mode."
+     startstep=1
+     endstep=100
+     CALL check_timesteps(startstep,endstep)
+     CALL report_gyradius(-1,startstep,endstep)
     CASE ("drude_temp") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -9839,7 +11193,17 @@ INTEGER :: ios,n
       ENDIF
       WRITE(*,*) "Calculating the kinetic temperature, based on NkT=mv²."
       WRITE(*,*) "(Extended support of drude particles requires manual drude assignment)"
+      CALL check_timesteps(startstep,endstep)
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       CALL report_drude_temperature(startstep,endstep)
+     ENDIF
+    CASE ("drude_temp_simple") !Module DEBUG
+     IF (WRAP_TRAJECTORY) THEN
+      CALL report_error(72)
+     ELSE
+      WRITE(*,*) "Calculating the kinetic temperature of first timestep, based on NkT=mv² (simple mode)."
+      WRITE(*,*) "(Extended support of drude particles requires manual drude assignment)"
+      CALL report_drude_temperature(1,1)
      ENDIF
     CASE ("set_threads") !Module DEBUG
      !$ IF (.FALSE.) THEN
@@ -9851,9 +11215,11 @@ INTEGER :: ios,n
      !$  CALL report_error(19,exit_status=ios)
      !$  EXIT
      !$ ENDIF
-     !$ IF ((inputinteger<1).OR.(inputinteger>OMP_get_max_threads())) THEN
+     !$ IF (inputinteger<1) THEN
+     !$  inputinteger=OMP_get_num_threads()
+     !$ ELSEIF (inputinteger>OMP_get_num_procs()) THEN
      !$  CALL report_error(42,exit_status=inputinteger)
-     !$  inputinteger=OMP_get_max_threads()
+     !$  inputinteger=OMP_get_num_procs()
      !$ ENDIF
      !$ CALL OMP_set_num_threads(inputinteger)
      !$ WRITE(*,'(" number of threads set to ",I0)') inputinteger
@@ -9918,6 +11284,21 @@ INTEGER :: ios,n
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
+    CASE ("distribution") !Module DISTRIBUTION
+     IF (BOX_VOLUME_GIVEN) THEN
+      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ENDIF
+       FILENAME_DISTRIBUTION_INPUT=dummy
+      WRITE(*,*) "Distribution module invoked."
+      CALL perform_distribution_analysis()
+     ELSE
+      CALL report_error(41)
+     ENDIF
     CASE ("error_output")
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
@@ -9942,6 +11323,24 @@ INTEGER :: ios,n
       ENDIF
       WRITE(*,*) "setting 'PARALLEL_OPERATION' to ",PARALLEL_OPERATION
      ENDIF
+    CASE ("jump_analysis_simple")
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     WRITE(*,*) "Constructing a histogram of jump duration vs jump velocity."
+     inputinteger=give_number_of_timesteps()/10
+     IF (inputinteger<10) inputinteger=give_number_of_timesteps()
+     CALL jump_analysis(inputinteger,100,-1,1,give_number_of_timesteps())
+    CASE ("jump_analysis")
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     BACKSPACE 7
+     READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,startstep,endstep,inputinteger2
+     IF (ios/=0) THEN
+      CALL report_error(19,exit_status=ios)
+      EXIT
+     ENDIF
+     WRITE(*,*) "Constructing a histogram of jump duration vs jump velocity."
+     CALL check_timesteps(startstep,endstep)
+     WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+     CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep)
     CASE DEFAULT
      CALL report_error(20,n+HEADER_LINES)!HEADER_LINES = number of fixed lines in general input file
     END SELECT
@@ -9978,8 +11377,9 @@ INTEGER :: ios,n
    WRITE(*,*) "-fopenmp flag not set! PARALLEL_OPERATION has no effect."
    !$ ENDIF
    !$ WRITE(*,*) "OMP flag set!"
-   !$ WRITE(*,16) "NUMBER_OF_THREADS   ",OMP_get_num_threads()
-   !$ WRITE(*,16) "NUMBER_OF_PROCS     ",OMP_get_num_procs()
+   !$ WRITE(*,16) "NUMBER_OF_THREADS     ",OMP_get_num_threads()
+   !$ WRITE(*,16) "NUMBER_OF_PROCS       ",OMP_get_num_procs()
+   !$ WRITE(*,16) "MAX_NUMBER_OF_THREADS ",OMP_get_max_threads()
    CALL show_molecular_settings()
    WRITE(*,*) "(input) Filenames:"
    WRITE(*,*) '   TRAJECTORY      "',TRIM(FILENAME_TRAJECTORY),'"'
@@ -10007,7 +11407,7 @@ USE RECOGNITION
 IMPLICIT NONE
 CHARACTER(LEN=1024) :: inputstring,trajstring
 INTEGER :: allocstatus,file_counter,i,charnum
-LOGICAL :: valid_filename,file_exists,command_line_used
+LOGICAL :: valid_filename,file_exists,command_line_used,skip_next,missing_argument
  IF (COMMAND_ARGUMENT_COUNT()>0) THEN
   GLOBAL_ITERATIONS=0
   !The maximum of sensible members in the GENERAL_INPUT_FILENAMES list is the number of passed arguments.
@@ -10015,7 +11415,12 @@ LOGICAL :: valid_filename,file_exists,command_line_used
   IF (allocstatus/=0) CALL report_error(66,exit_status=allocstatus)
   !Iterate over the input arguments
   command_line_used=.FALSE.
+  skip_next=.FALSE.
   DO file_counter=1,COMMAND_ARGUMENT_COUNT(),1
+   IF (skip_next) THEN
+    skip_next=.FALSE.
+    CYCLE
+   ENDIF
    CALL GET_COMMAND_ARGUMENT(file_counter,inputstring)
    inputstring=ADJUSTL(inputstring)
    !Check for command line switches.
@@ -10023,23 +11428,46 @@ LOGICAL :: valid_filename,file_exists,command_line_used
    CASE ("-d")
     IF (LEN(TRIM(inputstring))>2) THEN
      REDIRECTED_OUTPUT=TRIM(inputstring(3:))
+    ELSE
+     skip_next=.TRUE.
+     !use following command line argument as input.
+     missing_argument=(file_counter==COMMAND_ARGUMENT_COUNT())
+     IF (missing_argument) THEN
+      CALL report_error(102)
+     ELSE
+      CALL GET_COMMAND_ARGUMENT(file_counter+1,REDIRECTED_OUTPUT)
+      REDIRECTED_OUTPUT=TRIM(ADJUSTL(REDIRECTED_OUTPUT))
+     ENDIF
     ENDIF
     valid_filename=.FALSE.
-    IF (.NOT.(DISCONNECTED)) THEN
+    IF (.NOT.((DISCONNECTED).OR.(missing_argument))) THEN
      DISCONNECTED=.TRUE.
      WRITE(*,*) " # REDIRECTING UNIT 6 TO '",TRIM(REDIRECTED_OUTPUT),"'"
      WRITE(*,*)
      OPEN(UNIT=6,FILE=TRIM(REDIRECTED_OUTPUT))
      WRITE(*,*) " # UNIT 6 REDIRECTED TO '",TRIM(REDIRECTED_OUTPUT),"'"
     ENDIF
+    IF (missing_argument) command_line_used=.TRUE.
    CASE ("-r")
     IF (LEN(TRIM(inputstring))>2) THEN
      trajstring=TRIM(inputstring(3:))
+    ELSE
+     skip_next=.TRUE.
+     !use following command line argument as input.
+     missing_argument=(file_counter==COMMAND_ARGUMENT_COUNT())
+     IF (missing_argument) THEN
+      CALL report_error(102)
+     ELSE
+      CALL GET_COMMAND_ARGUMENT(file_counter+1,trajstring)
+      trajstring=TRIM(ADJUSTL(trajstring))
+     ENDIF
     ENDIF
     valid_filename=.FALSE.
-    WRITE(*,*) " # CALLING MOLECULE RECOGNITION MODULE"
-    WRITE(*,*)
-    CALL molecule_recognition(trajstring)
+    IF (.NOT.(missing_argument)) THEN
+     WRITE(*,*) " # CALLING MOLECULE RECOGNITION MODULE"
+     WRITE(*,*)
+     CALL molecule_recognition(trajstring)
+    ENDIF
     command_line_used=.TRUE.
    CASE DEFAULT
     !Check if there are some weird characters
