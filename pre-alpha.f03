@@ -1,4 +1,4 @@
-! RELEASED ON 29_Mar_2020 AT 18:34
+! RELEASED ON 09_Apr_2020 AT 10:25
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -40,6 +40,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  REAL(KIND=WORKING_PRECISION),PARAMETER :: degrees=57.295779513082320876798154814105d0 !constant: 360/2*Pi
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: avogadro=6.02214076d23!avogadro's constant
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: elementary_charge=1.602176634E-19!elementary_charge in Coulomb
+ REAL(KIND=GENERAL_PRECISION),PARAMETER :: vacuum_permittivity=8.8541878128E-12 !vacuum permittivity in farads/metre
  REAL(KIND=GENERAL_PRECISION),PARAMETER :: boltzmann=1.380649E-23!boltzmann constant in joules per kelvin
  REAL(KIND=WORKING_PRECISION),PARAMETER :: pi=3.141592653589793238462643383279502884197169
  REAL(KIND=WORKING_PRECISION),PARAMETER :: twopi=2.0*pi
@@ -157,7 +158,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !58 overwriting mass while reading molecular input file
  !59 negative mass has been specified
  !60 compromised format of masses section in molecular input file.
- !61 Failed reading the custom mass input - masses set to zero.
+ !61 Failed reading the custom default mass input - masses set to zero.
  !62 particle with vanishing mass detected.
  !63 Failed reading the custom constraints input - constraints removed.
  !64 compromised format of constraints section in molecular input file.
@@ -202,6 +203,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !103 Not enough steps in trajectory for jump analysis
  !104 bin count set to nearest sensible value
  !105 endstep<startstep, switch the two
+ !106 invalid TIME_SCALING_FACTOR
+ !107 Cannot read ITEM: TIMESTEP
+ !108 inconsistency in ITEM: TIMESTEP detected
+ !109 Failed reading the custom atomic masses input. will try to use element names where available.
+ !110 invalid molecule_type_index, ignore line
+ !111 invalid atom_index, ignore line
+ !112 atomic mass already specified, will be overwritten.
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -298,8 +306,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      CALL finalise_global()
      STOP
     CASE (17)
-     WRITE(*,*) " #  SEVERE ERROR 17: file molecular.inp doesn't exist"
-     STOP
+     WRITE(*,*) " #  SEVERE ERROR 17: The specified molecular input file doesn't exist."
+     IF (.NOT.(PRESENT(exit_status))) STOP
     CASE (18)
      WRITE(*,*) " #  SEVERE ERROR 18: problem streaming '",TRIM(FILENAME_GENERAL_INPUT),"'"
      CALL finalise_global()
@@ -446,10 +454,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 59: negative mass specified for '",CHAR(exit_status),"'."
     CASE (60)
      WRITE(*,*) " #  WARNING 60: The character '",CHAR(exit_status),"' has been ignored."
-     WRITE(*,*) " #  Only lowercase letters (a,b,c,...,z) and 'X' (for drudes) are allowed."
+     WRITE(*,*) " #  Only lowercase letters (a,b,c,...,z) and element names including 'X' (for drudes) are allowed."
     CASE (61)
-     WRITE(*,*) " #  ERROR 61: Couldn't read 'masses' section from molecular input file."
-     WRITE(*,*) "--> Check format of molecular input file! Masses have been set to zero."
+     WRITE(*,*) " #  ERROR 61: Couldn't read 'default_masses' section from molecular input file."
+     WRITE(*,*) "--> Check format of molecular input file! COM masses have been set to zero."
     CASE (62)
      WRITE(*,*) " #  WARNING 62: A massless particle has been specified."
      WRITE(*,*) " #  Quantities like the kinetic temperature will be biased!"
@@ -609,6 +617,23 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (105)
      WRITE(*,*) " #  WARNING 105: startstep is bigger than endstep."
      WRITE(*,*) "--> startstep and endstep are swapped."
+    CASE (106)
+     WRITE(*,*) " #  ERROR 106: Invalid TIME_SCALING_FACTOR (see EXIT STATUS)."
+     WRITE(*,*) "--> reset to default."
+    CASE (107)
+     WRITE(*,*) " #  WARNING 107: Cannot read timestep item from trajectory head."
+    CASE (108)
+     WRITE(*,*) " #  WARNING 108: Inconsistency in timestep item detected."
+     WRITE(*,*) "--> Check for double timesteps!"
+    CASE (109)
+     WRITE(*,*) " #  ERROR 109: Couldn't read 'atomic_masses' section from molecular input file."
+     WRITE(*,*) "--> Check format of molecular input file! Will use default masses where possible."
+    CASE (110)
+     WRITE(*,*) " #  WARNING 110: Invalid molecule type. This line is ignored."
+    CASE (111)
+     WRITE(*,*) " #  WARNING 111: Invalid atom index. This line is ignored."
+    CASE (112)
+     WRITE(*,*) " #  WARNING 112: Atomic mass already specified - will be overwritten."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
@@ -638,7 +663,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   IMPLICIT NONE
   REAL(KIND=WORKING_PRECISION),INTENT(INOUT) :: vector(3)
   REAL(KIND=WORKING_PRECISION) :: length
-   length=DSQRT((vector(1))**2+(vector(2))**2+(vector(3))**2)
+   length=SQRT((vector(1))**2+(vector(2))**2+(vector(3))**2)
    IF (length==0.0_WORKING_PRECISION) CALL report_error(1)
    vector=(vector/length)
   END SUBROUTINE normalize3D
@@ -669,7 +694,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   IMPLICIT NONE
   REAL(KIND=WORKING_PRECISION),INTENT(INOUT) :: vector(2)
   REAL(KIND=WORKING_PRECISION) :: length
-   length=DSQRT((vector(1))**2+(vector(2))**2)
+   length=SQRT((vector(1))**2+(vector(2))**2)
    IF (length==0.0_WORKING_PRECISION) CALL report_error(3)
    vector=(vector/length)
   END SUBROUTINE normalize2D
@@ -1078,7 +1103,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
    CALL normalize3D(uvector2)
    !INITIALIZE ROTATION, RX=0
    uvector(1)=0.0d0 !X component is zero
-   sina=DSQRT(connection_vector(2)**2+connection_vector(3)**2)! 'sina' is here the length of the projection of the connection_vector along the x axis.
+   sina=SQRT(connection_vector(2)**2+connection_vector(3)**2)! 'sina' is here the length of the projection of the connection_vector along the x axis.
    IF (sina>=tolerance) THEN
      uvector(2)=connection_vector(3)/sina
      uvector(3)=-connection_vector(2)/sina!now, uvector is normalized.
@@ -1103,9 +1128,9 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
     IF (length>(1.0d0+tolerance)) CALL report_error(2)
     length=(1.0d0)
    ENDIF
-   clip=DACOS(length)
-   ccw(1)=+DCOS(clip)*uvector1(2)-DSIN(clip)*uvector1(3)
-   ccw(2)=+DSIN(clip)*uvector1(2)+DCOS(clip)*uvector1(3)
+   clip=ACOS(length)
+   ccw(1)=+COS(clip)*uvector1(2)-SIN(clip)*uvector1(3)
+   ccw(2)=+SIN(clip)*uvector1(2)+COS(clip)*uvector1(3)
    CALL normalize2D(ccw)
    dihedral_angle=(clip*degrees)
    ccw=(ccw*projection2)
@@ -1117,7 +1142,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
     IF (clip>(1.0d0+tolerance)) CALL report_error(2)
     clip=(1.0d0)
    ENDIF
-   IF ((DACOS(clip)*degrees)<=tolerance) THEN
+   IF ((ACOS(clip)*degrees)<=tolerance) THEN
     IF (PRESENT(minusplus)) THEN
      IF (minusplus) THEN 
       dihedral_angle=(-dihedral_angle)
@@ -1138,7 +1163,32 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
+ !parameter
+ REAL,PARAMETER :: default_mass_hydrogen=01.008
+ REAL,PARAMETER :: default_mass_fluorine=18.998
+ REAL,PARAMETER :: default_mass_boron=10.81
+ REAL,PARAMETER :: default_mass_chlorine=35.45
+ REAL,PARAMETER :: default_mass_bromine=79.904
+ REAL,PARAMETER :: default_mass_iodine=126.904
+ REAL,PARAMETER :: default_mass_nitrogen=14.007
+ REAL,PARAMETER :: default_mass_oxygen=15.999
+ REAL,PARAMETER :: default_mass_carbon=12.011
+ REAL,PARAMETER :: default_mass_sulfur=32.066
+ REAL,PARAMETER :: default_mass_phosphorus=30.974
+ REAL,PARAMETER :: default_mass_lithium=6.94
  !variables
+ REAL :: mass_hydrogen
+ REAL :: mass_fluorine
+ REAL :: mass_boron
+ REAL :: mass_chlorine
+ REAL :: mass_bromine
+ REAL :: mass_iodine
+ REAL :: mass_nitrogen
+ REAL :: mass_oxygen
+ REAL :: mass_carbon
+ REAL :: mass_sulfur
+ REAL :: mass_phosphorus
+ REAL :: mass_lithium
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1172,6 +1222,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   CHARACTER(LEN=2),DIMENSION(:),ALLOCATABLE :: list_of_elements !--> Turned on support for  2-letter elements!
   TYPE(drude_pair),DIMENSION(:),ALLOCATABLE :: list_of_drude_pairs ! list of pairs of drude particles / drude cores / drudes
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_masses !corresponding masses for the atoms
+  LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_mass_specified !any elements that are .TRUE. will not be initialised from the trajectory!
   TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot !like trajectory, but for one timestep only. Required for READ_SEQUENTIAL.
   TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory
   !trajectory is now in column major order!
@@ -1186,7 +1237,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL(KIND=STORAGE_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
     REAL(KIND=SP) :: drude_mass=0.0e0
  REAL(KIND=SP) :: COM_mass_list(IACHAR("a"):(IACHAR("a")+25)) !A list of user-specified masses for centre-of-mass trajectories.
- LOGICAL :: custom_masses !if 'T', then the user has specified his own masses for lowercase letters.
+ LOGICAL :: custom_default_masses !if 'T', then the user has specified his own default masses for lowercase letters or elements.
+ LOGICAL :: custom_atom_masses !if 'T', then the user has manually specified atom masses.
  LOGICAL :: custom_constraints !if 'T', then the user has specified custom constraints on some molecules.
  INTEGER :: file_position=-1!at which timestep the file to read is positioned. The first step is 1.
  INTEGER :: number_of_steps=0 !number of timesteps in whole trajectory
@@ -1198,10 +1250,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  !PRIVATE VARIABLES
  PRIVATE :: box_dimensions,drude_mass,number_of_molecule_types,total_number_of_atoms,number_of_steps,box_size
  PRIVATE :: dihedrals_initialised,dihedral_member_indices,number_of_dihedrals,wrap_snap
- PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_masses,wrap_full,custom_constraints
+ PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_default_masses,wrap_full
  PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
  PRIVATE :: fragments_initialised,fragment_list_base,fragment_list_tip,number_of_tip_atoms,number_of_base_atoms
- PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments
+ PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments,custom_constraints
+ PRIVATE :: custom_atom_masses
  !PRIVATE/PUBLIC declarations
  PRIVATE :: report_trajectory_properties,reset_trajectory_file
  PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
@@ -1215,8 +1268,58 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
  PUBLIC :: give_intermolecular_contact_distance,give_smallest_atom_distance,give_smallest_atom_distance_squared
  PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
- PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared
+ PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
+ PUBLIC :: print_atomic_masses
  CONTAINS
+
+  SUBROUTINE set_default_masses()
+  IMPLICIT NONE
+   mass_hydrogen=default_mass_hydrogen
+   mass_fluorine=default_mass_fluorine
+   mass_boron=default_mass_boron
+   mass_chlorine=default_mass_chlorine
+   mass_bromine=default_mass_bromine
+   mass_iodine=default_mass_iodine
+   mass_nitrogen=default_mass_nitrogen
+   mass_oxygen=default_mass_oxygen
+   mass_carbon=default_mass_carbon
+   mass_sulfur=default_mass_sulfur
+   mass_phosphorus=default_mass_phosphorus
+   mass_lithium=default_mass_lithium
+  END SUBROUTINE set_default_masses
+
+  SUBROUTINE subtract_drude_masses()
+  IMPLICIT NONE
+   IF (VERBOSE_OUTPUT) PRINT *," Subtracting drude masses from N,O,C,S,P,Li"
+   mass_nitrogen=mass_nitrogen-drude_mass
+   mass_oxygen=mass_oxygen-drude_mass
+   mass_carbon=mass_carbon-drude_mass
+   mass_sulfur=mass_sulfur-drude_mass
+   mass_phosphorus=mass_phosphorus-drude_mass
+   mass_lithium=mass_lithium-drude_mass
+  END SUBROUTINE subtract_drude_masses
+
+  SUBROUTINE print_atomic_masses()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,atom_index
+  REAL :: native_mass,atomic_mass
+  CHARACTER(LEN=2) :: element_name
+   WRITE(*,'(" The following lines can be used/altered to request custom atomic masses:")')
+   WRITE(*,'("   atomic_masses ",I0)') SUM(molecule_list(:)%number_of_atoms)
+   DO molecule_type_index=1,number_of_molecule_types,1
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     atomic_mass=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+     native_mass=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+     element_name=molecule_list(molecule_type_index)%list_of_elements(atom_index)
+     WRITE(*,FMT='("   ",I0," ",I0," ",F0.3,"( ")',ADVANCE="NO") molecule_type_index,atom_index,atomic_mass
+     IF (ABS(atomic_mass-native_mass)>0.001) THEN
+      WRITE(*,'(A,", default mass was ",F0.3,")")') TRIM(element_name),native_mass
+     ELSE
+      WRITE(*,'(" Element ",A,")")') TRIM(element_name)
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE print_atomic_masses
 
   !The following subroutine sets the cubic box limits
   SUBROUTINE set_cubic_box(lower,upper)
@@ -1246,7 +1349,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    centre_of_mass(:)=give_center_of_mass(timestep,molecule_type_index,molecule_index)
    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
     IF (READ_SEQUENTIAL) THEN
-     difference_vector(:)=DBLE(molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:))
+     difference_vector(:)=DBLE(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:))
     ELSE
      difference_vector(:)=DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
     ENDIF
@@ -1317,7 +1420,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         DO molecule_index=1,nmol_per_step,1
          IF (READ_SEQUENTIAL) THEN
           core_velocity(:)=&
-          &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+          &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
          ELSE
           core_velocity(:)=&
           &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
@@ -1333,9 +1436,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         DO molecule_index=1,nmol_per_step,1
          IF (READ_SEQUENTIAL) THEN
           core_velocity(:)=&
-          &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+          &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
           drude_velocity(:)=&
-          &molecule_list(molecule_type_index)%snapshot(molecule_index,drude_flag)%coordinates(:)
+          &molecule_list(molecule_type_index)%snapshot(drude_flag,molecule_index)%coordinates(:)
          ELSE
           core_velocity(:)=&
           &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
@@ -1376,8 +1479,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        DO molecule_index=1,nmol_per_step,1
         IF (READ_SEQUENTIAL) THEN
          relative_drude_velocity(:)=&
-         &molecule_list(molecule_type_index)%snapshot(molecule_index,drude_flag)%coordinates(:)-&
-         &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+         &molecule_list(molecule_type_index)%snapshot(drude_flag,molecule_index)%coordinates(:)-&
+         &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
         ELSE
          relative_drude_velocity(:)=&
          &molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)-&
@@ -1669,9 +1772,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip
    IF (READ_SEQUENTIAL) THEN
     CALL goto_timestep(timestep1)
-    pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%snapshot(molecule_index_1,atom_index_1)%coordinates(:))
+    pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%snapshot(atom_index_1,molecule_index_1)%coordinates(:))
     CALL goto_timestep(timestep2)
-    pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%snapshot(molecule_index_2,atom_index_2)%coordinates(:))
+    pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%snapshot(atom_index_2,molecule_index_2)%coordinates(:))
    ELSE
     pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%trajectory(atom_index_1,molecule_index_1,timestep1)%coordinates(:))
     pos_2(:)=DBLE(molecule_list(molecule_type_index_2)%trajectory(atom_index_2,molecule_index_2,timestep2)%coordinates(:))
@@ -1951,7 +2054,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         !store current atom position in weighted_pos
         weighted_pos=DBLE(molecule_list(molecule_type_index)%queue(position_input,molecule_index,atom_index)%coordinates(:))
         !weigh position with mass...
-        weighted_pos(:)=weighted_pos(:)*DBLE(atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index)))
+        weighted_pos(:)=weighted_pos(:)*DBLE(molecule_list(molecule_type_index)%list_of_atom_masses(atom_index))
         !... and add to centre of mass.
         coordinates_output(position_input,counter,:)=coordinates_output(position_input,counter,:)+weighted_pos(:)
        ENDDO
@@ -2125,14 +2228,14 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      !Apologies for the jump. We are all weak sometimes.
      10  IF (centre_of_mass(xyzcounter)<=box_dimensions(1,xyzcounter)) THEN
        centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
-       molecule_list(molecule_type_index)%snapshot(molecule_index,:)%coordinates(xyzcounter)=&
-       &molecule_list(molecule_type_index)%snapshot(molecule_index,:)%coordinates(xyzcounter)+box_size(xyzcounter)
+       molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
+       &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
        GOTO 10
       ELSE
        IF (centre_of_mass(xyzcounter)>=box_dimensions(2,xyzcounter)) THEN
         centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
-        molecule_list(molecule_type_index)%snapshot(molecule_index,:)%coordinates(xyzcounter)=&
-        &molecule_list(molecule_type_index)%snapshot(molecule_index,:)%coordinates(xyzcounter)-box_size(xyzcounter)
+        molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
+        &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
         GOTO 10
        ENDIF
       ENDIF
@@ -2168,11 +2271,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
      !Get the current 'atom_clipboard', which usually would be the velocity.
      IF (READ_SEQUENTIAL) THEN
-      atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+      atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
      ELSE
       atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
      ENDIF
-     mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+     mass_clipboard=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
      !first, the normal, uncorrected temperature.
      temperature(:)=temperature(:)+mass_clipboard*(atom_clipboard(:)**2) !in every direction, T=m*v²
      !now, correct for the drift, and then compute the drift-corrected temperature from that.
@@ -2189,11 +2292,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
       !Get the current 'atom_clipboard', which usually would be the velocity.
       IF (READ_SEQUENTIAL) THEN
-       atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+       atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
       ELSE
        atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
       ENDIF
-      mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+      mass_clipboard=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
       !first, the normal, uncorrected temperature.
       TL(:)=TL(:)+mass_clipboard*(atom_clipboard(:))**2
       T0(:)=T0(:)+mass_clipboard*(atom_clipboard(:)-drift(:))**2
@@ -2248,11 +2351,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
       !Get the current 'atom_clipboard', which usually would be the velocity.
       IF (READ_SEQUENTIAL) THEN
-       atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+       atom_clipboard(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
       ELSE
        atom_clipboard(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
       ENDIF
-      mass_clipboard=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+      mass_clipboard=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
       !sum up all the mv²
       give_total_temperature=give_total_temperature+mass_clipboard*SUM((atom_clipboard(:))**2)
      ENDDO
@@ -2272,7 +2375,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,'("    ",A," ",I0)') "file_position             ",file_position
    WRITE(*,'("    ",A," ",L1)') "dihedrals_initialised     ",dihedrals_initialised
    WRITE(*,'("    ",A," ",L1)') "custom_constraints        ",custom_constraints
-   WRITE(*,'("    ",A," ",L1)') "custom_masses             ",custom_masses
+   WRITE(*,'("    ",A," ",L1)') "custom_default_masses     ",custom_default_masses
+   WRITE(*,'("    ",A," ",L1)') "custom_atom_masses        ",custom_atom_masses
    WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
    WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
    WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
@@ -2450,15 +2554,15 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      !THEN, read one molecule type after the other:
      DO molecule_type_index=1,number_of_molecule_types,1
       !For each molecule type, read the corresponding number of molecules:
-      DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 1 of snapshot (would be "2" for trajectory)
+      DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of snapshot (would be "2" for trajectory)
        !Finally, iterate over the atoms in that particular molecule:
-       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives second dimension of snapshot (would be "1" for trajectory)
+       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of snapshot (would be "1" for trajectory)
         !LOOP VARIABLES:
         !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
         !molecule_index: current explicit molecule, e.g. molecule number 231
         !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
         READ(9,*) dummystring,&
-        &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates
+        &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates
        ENDDO
       ENDDO 
      ENDDO
@@ -2625,7 +2729,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     DO n=1,4,1 ! n iterates over the four atom indices required for a dihedral
      IF (READ_SEQUENTIAL) THEN
       dihedral_members(n,:)=molecule_list(molecule_type_index_for_dihedrals)%&
-      &snapshot(molecule_index,dihedral_member_indices(m,n))%coordinates(:)
+      &snapshot(dihedral_member_indices(m,n),molecule_index)%coordinates(:)
      ELSE
       dihedral_members(n,:)=molecule_list(molecule_type_index_for_dihedrals)%&
       &trajectory(dihedral_member_indices(m,n),molecule_index,timestep)%coordinates(:)
@@ -2731,7 +2835,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      IF (timestep/=file_position) CALL goto_timestep(timestep)
      give_tip_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
-     &snapshot(molecule_index,fragment_list_tip(1))%coordinates(:)
+     &snapshot(fragment_list_tip(1),molecule_index)%coordinates(:)
     ELSE
      give_tip_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
      &trajectory(fragment_list_tip(1),molecule_index,timestep)%coordinates(:)
@@ -2744,7 +2848,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      IF (timestep/=file_position) CALL goto_timestep(timestep)
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
-     &snapshot(molecule_index,fragment_list_tip(counter))%coordinates(:))
+     &snapshot(fragment_list_tip(counter),molecule_index)%coordinates(:))
     ELSE
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
      &trajectory(fragment_list_tip(counter),molecule_index,timestep)%coordinates(:))
@@ -2765,7 +2869,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      IF (timestep/=file_position) CALL goto_timestep(timestep)
      give_base_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
-     &snapshot(molecule_index,fragment_list_base(1))%coordinates(:)
+     &snapshot(fragment_list_base(1),molecule_index)%coordinates(:)
     ELSE
      give_base_fragment(:)=molecule_list(molecule_type_index_for_fragments)%&
      &trajectory(fragment_list_base(1),molecule_index,timestep)%coordinates(:)
@@ -2778,7 +2882,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      IF (timestep/=file_position) CALL goto_timestep(timestep)
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
-     &snapshot(molecule_index,fragment_list_base(counter))%coordinates(:))
+     &snapshot(fragment_list_base(counter),molecule_index)%coordinates(:))
     ELSE
      unweighted_pos(:)=DBLE(molecule_list(molecule_type_index_for_fragments)%&
      &trajectory(fragment_list_base(counter),molecule_index,timestep)%coordinates(:))
@@ -2880,8 +2984,26 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     WRITE(*,'("  ! molecule #",I0,":")') molecule_type_index
     WRITE(*,*) " ! ",(TRIM(molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1))&
     &,atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1)
+    CALL print_atom_properties(molecule_type_index)
    ENDDO
   END SUBROUTINE report_element_lists
+
+  SUBROUTINE print_atom_properties(molecule_type_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index
+  INTEGER :: atom_index
+   !replace
+   !atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+   !with
+   !molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+   WRITE(*,'("  ! number element atomic_mass native_mass")')
+   DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+    WRITE(*,'("  !   ",I0," ",A2," ",F0.3)') atom_index,&
+    &molecule_list(molecule_type_index)%list_of_elements(atom_index),&
+    &molecule_list(molecule_type_index)%list_of_atom_masses(atom_index),&
+    &atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+   ENDDO
+  END SUBROUTINE print_atom_properties
 
   FUNCTION give_center_of_mass(timestep,molecule_type_index,molecule_index)
   IMPLICIT NONE
@@ -2894,7 +3016,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     !first, the current atom's position is stored in weighted_pos.
     !added support for sequential read.
     IF (READ_SEQUENTIAL) THEN
-     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:))
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:))
     ELSE
      weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
     ENDIF
@@ -2956,7 +3078,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    DO atom_index=1,natoms,1
     IF (READ_SEQUENTIAL) THEN
      WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-     &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)+shift(:)
+     &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:)
     ELSE
      WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
      &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:)
@@ -2998,7 +3120,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     CASE (-1) !non-polarisable atom - print just as it is.
      IF (READ_SEQUENTIAL) THEN
       WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-      &molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
+      &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
      ELSE
       WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
       &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
@@ -3008,8 +3130,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     CASE DEFAULT
      !everything else should be drude cores - merge with the drude particle.
      IF (READ_SEQUENTIAL) THEN
-      corepos(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,atom_index)%coordinates(:)
-      drudepos(:)=molecule_list(molecule_type_index)%snapshot(molecule_index,drude_flag)%coordinates(:)
+      corepos(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+      drudepos(:)=molecule_list(molecule_type_index)%snapshot(drude_flag,molecule_index)%coordinates(:)
      ELSE
       corepos(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
       drudepos(:)=molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)
@@ -3048,8 +3170,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     !Read header!
     CALL read_molecular_input_file_header()
     IF (totalcharge/=0) CALL report_error(52,exit_status=totalcharge)
-    !Read masses!
-    CALL read_molecular_input_file_masses()
+    !Read default masses!
+    CALL read_molecular_input_file_default_masses()
+    IF (drude_mass>0.001d0) CALL subtract_drude_masses()
+    !Read atomic masses
+    CALL read_molecular_input_file_atomic_masses()
     !Read constraints!
     CALL read_molecular_input_file_constraints()
     !Read drudes!
@@ -3085,9 +3210,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       ALLOCATE(molecule_list(n)%list_of_elements(b),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ALLOCATE(molecule_list(n)%list_of_atom_masses(b),STAT=allocstatus)
+      ALLOCATE(molecule_list(n)%manual_atom_mass_specified(b),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       IF (READ_SEQUENTIAL) THEN
-       ALLOCATE(molecule_list(n)%snapshot(c,b),STAT=allocstatus)
+       ALLOCATE(molecule_list(n)%snapshot(b,c),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ELSE
        ALLOCATE(molecule_list(n)%trajectory(b,c,number_of_steps),STAT=allocstatus)
@@ -3097,12 +3223,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      ENDDO
     END SUBROUTINE read_molecular_input_file_header
 
-    SUBROUTINE read_molecular_input_file_masses()
+    SUBROUTINE read_molecular_input_file_default_masses()
     IMPLICIT NONE
-    CHARACTER(LEN=1) :: shortstring
+    CHARACTER(LEN=2) :: shortstring
      COM_mass_list(:)=0.0d0
-     custom_masses=.FALSE.
-     WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'masses'"
+     custom_default_masses=.FALSE.
+     WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'default_masses'"
      !Skip over headerlines in molecular input file
      REWIND 3
      DO n=1,headerlines_molecular,1
@@ -3116,6 +3242,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        WRITE(*,'("done (none found, end of file encountered).")')
        EXIT
       ENDIF
+      !support for synonyms
+      IF (TRIM(inputstring)=="default_masses") inputstring="masses"
       IF (ios==0) THEN
        IF (TRIM(inputstring)=="masses") THEN
         WRITE(*,'("found in line ",I0,".")') n+headerlines_molecular
@@ -3123,46 +3251,45 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         READ(3,IOSTAT=ios,FMT=*) inputstring,a
         IF (ios/=0) THEN
          !something went wrong
-         custom_masses=.FALSE.
+         custom_default_masses=.FALSE.
         ELSE
          !keyword ok - read the section.
          IF (a>0) THEN
-          custom_masses=.TRUE.
-          WRITE(*,FMT='(" Trying to read ",I0," custom masses...")',ADVANCE="NO") a
+          custom_default_masses=.TRUE.
+          WRITE(*,FMT='(" Trying to read ",I0," custom default masses...")',ADVANCE="NO") a
           DO m=1,a,1
            READ(3,IOSTAT=ios,FMT=*) shortstring,mass_input
            IF (ios/=0) THEN
             !wrong format... abort.
-            custom_masses=.FALSE.
+            custom_default_masses=.FALSE.
             EXIT
            ELSE
-            IF (ANY(ALPHABET_small==IACHAR(shortstring))) THEN
+            IF (ANY(ALPHABET_small==IACHAR(shortstring(1:1)))) THEN
              !lowercase letter found! Check if already specified.
-             IF (COM_mass_list(IACHAR(shortstring))>0.001d0) THEN
+             IF (COM_mass_list(IACHAR(shortstring(1:1)))>0.001d0) THEN
               WRITE(*,*)
-              CALL report_error(58,exit_status=IACHAR(shortstring))
+              CALL report_error(58,exit_status=IACHAR(shortstring(1:1)))
              ENDIF
              IF (mass_input<0.0d0) THEN
               WRITE(*,*)
-              CALL report_error(59,exit_status=IACHAR(shortstring))
+              CALL report_error(59,exit_status=IACHAR(shortstring(1:1)))
              ENDIF
-             COM_mass_list(IACHAR(shortstring))=mass_input
+             COM_mass_list(IACHAR(shortstring(1:1)))=mass_input
             ELSE
-             IF (shortstring=="X") THEN
+             IF (shortstring(1:1)=="X") THEN
               IF (drude_mass>0.001d0) THEN
                WRITE(*,*)
-               CALL report_error(58,exit_status=IACHAR(shortstring))
+               CALL report_error(58,exit_status=IACHAR(shortstring(1:1)))
               ENDIF
               drude_mass=mass_input
              ELSE
-              WRITE(*,*)
-              CALL report_error(60,exit_status=IACHAR(shortstring))
+              CALL change_default_mass(shortstring,mass_input)
              ENDIF
             ENDIF
            ENDIF
           ENDDO
-          !test if custom_masses still true. If not, print error message.
-          IF (custom_masses) THEN
+          !test if custom_default_masses still true. If not, print error message.
+          IF (custom_default_masses) THEN
            WRITE(*,'("done.")') 
           ELSE
            WRITE(*,'("failed.")') 
@@ -3178,7 +3305,159 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        ENDIF
       ENDIF
      ENDDO
-    END SUBROUTINE read_molecular_input_file_masses
+    END SUBROUTINE read_molecular_input_file_default_masses
+
+    SUBROUTINE change_default_mass(element_name_input,new_mass)
+    IMPLICIT NONE
+    REAL,INTENT(IN) :: new_mass
+    REAL :: old_mass
+    LOGICAL,SAVE :: print_blank=.TRUE.
+    !If you change this part, then also change Module_SETTINGS and atomic_weight
+    CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+    CHARACTER(LEN=32) :: element_name_full
+     IF (print_blank) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,*)
+      print_blank=.FALSE.
+     ENDIF
+     SELECT CASE (TRIM(element_name_input))
+     CASE ("H")
+      old_mass=mass_hydrogen
+      mass_hydrogen=new_mass
+      element_name_full="Hydrogen"
+     CASE ("F")
+      old_mass=mass_fluorine
+      mass_fluorine=new_mass
+      element_name_full="Fluorine"
+     CASE ("B")
+      old_mass=mass_boron
+      mass_boron=new_mass
+      element_name_full="Boron"
+     CASE ("Cl")
+      old_mass=mass_chlorine
+      mass_chlorine=new_mass
+      element_name_full="Chlorine"
+     CASE ("Br")
+      old_mass=mass_bromine
+      mass_bromine=new_mass
+      element_name_full="Bromine"
+     CASE ("I")
+      old_mass=mass_iodine
+      mass_iodine=new_mass
+      element_name_full="Iodine"
+     CASE ("N")
+      old_mass=mass_nitrogen
+      mass_nitrogen=new_mass
+      element_name_full="Nitrogen"
+     CASE ("O")
+      old_mass=mass_oxygen
+      mass_oxygen=new_mass
+      element_name_full="Oxygen"
+     CASE ("C")
+      old_mass=mass_carbon
+      mass_carbon=new_mass
+      element_name_full="Carbon"
+     CASE ("S")
+      old_mass=mass_sulfur
+      mass_sulfur=new_mass
+      element_name_full="Sulfur"
+     CASE ("P")
+      old_mass=mass_phosphorus
+      mass_phosphorus=new_mass
+      element_name_full="Phosphorus"
+     CASE ("Li")
+      old_mass=mass_lithium
+      mass_lithium=new_mass
+      element_name_full="Lithium"
+     CASE DEFAULT
+      CALL report_error(60,exit_status=IACHAR(element_name_input(1:1)))
+      RETURN
+     END SELECT
+     IF (VERBOSE_OUTPUT) WRITE(*,'(" Changing mass of ",A," from ",F0.3," to ",F0.4,"")')&
+     &TRIM(element_name_full),old_mass,new_mass
+    END SUBROUTINE change_default_mass
+
+    SUBROUTINE read_molecular_input_file_atomic_masses()
+    IMPLICIT NONE
+    INTEGER :: molecule_type_index,atom_index
+     !initialise logicals
+     DO molecule_type_index=1,number_of_molecule_types,1
+      molecule_list(molecule_type_index)%manual_atom_mass_specified(:)=.FALSE.
+     ENDDO
+     custom_atom_masses=.FALSE.
+     WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'atomic_masses'"
+     !Skip over headerlines in molecular input file
+     REWIND 3
+     DO n=1,headerlines_molecular,1
+      READ(3,*)
+     ENDDO
+     !search for masses section.
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF (ios<0) THEN
+       !end of file encountered
+       WRITE(*,'("done (none found, end of file encountered).")')
+       EXIT
+      ENDIF
+      IF (ios==0) THEN
+       !support for synonyms
+       IF (TRIM(inputstring)=="atom_masses") inputstring="atomic_masses"
+       IF (TRIM(inputstring)=="atomic_masses") THEN
+        WRITE(*,'("found in line ",I0,".")') n+headerlines_molecular
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,a
+        IF (ios/=0) THEN
+         !something went wrong
+         CALL report_error(109)
+         custom_atom_masses=.FALSE.
+        ELSE
+         !keyword ok - read the section.
+         IF (a>0) THEN
+          custom_atom_masses=.TRUE.
+          WRITE(*,FMT='(" Trying to read ",I0," custom atomic masses...")',ADVANCE="NO") a
+          DO m=1,a,1
+           READ(3,IOSTAT=ios,FMT=*) molecule_type_index,atom_index,mass_input
+           IF (ios/=0) THEN
+            !wrong format... abort.
+            custom_atom_masses=.FALSE.
+            EXIT
+           ELSE
+            !check molecule_type_index and atom_index
+            IF ((molecule_type_index>0).AND.(molecule_type_index<=number_of_molecule_types)) THEN
+             !valid molecule type - check atom_index
+             IF ((atom_index>0).AND.(atom_index<=molecule_list(molecule_type_index)%number_of_atoms)) THEN
+              IF (molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)) CALL report_error(112)
+              molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=mass_input
+              molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)=.TRUE.
+             ELSE
+              WRITE(*,*)
+              CALL report_error(111,exit_status=atom_index)
+             ENDIF
+            ELSE
+             WRITE(*,*)
+             CALL report_error(110,exit_status=molecule_type_index)
+            ENDIF
+           ENDIF
+          ENDDO
+          !test if custom_atom_masses still true. If not, print error message.
+          IF (custom_atom_masses) THEN
+           WRITE(*,'("done.")') 
+          ELSE
+           WRITE(*,'("failed.")') 
+           CALL report_error(109)
+           DO molecule_type_index=1,number_of_molecule_types,1
+            molecule_list(molecule_type_index)%manual_atom_mass_specified(:)=.FALSE.
+           ENDDO
+          ENDIF
+         ENDIF
+        ENDIF
+        EXIT
+       ELSEIF (TRIM(inputstring)=="quit") THEN
+        WRITE(*,'("done (none found before ",A,").")') "'quit'"
+        EXIT
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE read_molecular_input_file_atomic_masses
 
     SUBROUTINE read_molecular_input_file_constraints()
     IMPLICIT NONE
@@ -3354,6 +3633,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     DEALLOCATE(molecule_list(n)%list_of_atom_masses,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+    DEALLOCATE(molecule_list(n)%manual_atom_mass_specified,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     IF (READ_SEQUENTIAL) THEN
      DEALLOCATE(molecule_list(n)%snapshot,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
@@ -3476,8 +3757,6 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      !The trajectory will be read step-wise. Thus, we have to initialise the sequential access.
      CALL initialise_sequential_access()
     ELSE
-     !Flush I/O to ease identification of bottlenecks
-     CALL FLUSH()
      !Read the whole trajectory. This is quite some effort.
      CALL load_trajectory_body()
      !IF necessary, wrap trajectory
@@ -3499,7 +3778,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IMPLICIT NONE
     CHARACTER(LEN=32) :: dummystring,edump,xdump,ydump,zdump
     REAL(KIND=SP) :: element_mass
-    INTEGER :: current_atom_index,n
+    INTEGER :: current_atom_index,n,skipped_masses
      SELECT CASE (TRAJECTORY_TYPE)
      CASE ("lmp")
       BOX_VOLUME_GIVEN=.TRUE.
@@ -3556,6 +3835,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      !define the number of lines to skip when advancing through the trajectory file
      lines_to_skip=headerlines_to_skip+total_number_of_atoms
      number_of_drude_particles=0
+     !skipped_masses counts how many masses were already specified manually.
+     skipped_masses=0
      !Get the elements - assumes consistent ordering
      DO molecule_type_index=1,number_of_molecule_types,1
       IF ((ERROR_CODE)==70)  ERROR_CODE=ERROR_CODE_DEFAULT
@@ -3565,7 +3846,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        IF (TRIM(element_name)=="X") number_of_drude_particles=number_of_drude_particles+1
        molecule_list(molecule_type_index)%list_of_elements(atom_index)=element_name
        element_mass=atomic_weight(element_name)
-       molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=element_mass
+       IF (molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)) THEN
+        skipped_masses=skipped_masses+1
+        element_mass=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+       ELSE
+        molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=element_mass
+       ENDIF
        IF ((element_mass<0.001d0).AND.(ERROR_CODE/=62)) CALL report_error(62,exit_status=atom_index)
        molecule_list(molecule_type_index)%mass=molecule_list(molecule_type_index)%mass+element_mass
       ENDDO
@@ -3588,17 +3874,67 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       IF (ndrudes_check/=number_of_drude_particles) CALL report_error(88)
      ENDIF
      REWIND 3
+     IF (DEVELOPERS_VERSION) WRITE(*,'("  ! skipped ",I0," previously specified atomic masses.")') skipped_masses
+     IF ((skipped_masses>0).AND.(.NOT.(custom_atom_masses))) CALL report_error(0)
      CALL report_trajectory_properties() !report all the useful general properties
     END SUBROUTINE load_trajectory_header_information
 
     SUBROUTINE load_trajectory_body()
     IMPLICIT NONE
-     IF (VERBOSE_OUTPUT) WRITE(*,FMT='(A26)',ADVANCE="NO") " reading the trajectory..."
+    INTEGER :: item_timestep,current,previous,step,progress_counter
+    LOGICAL :: use_scaling
+     use_scaling=.FALSE.
+     previous=-1
+     current=-1
+     step=-1
+     IF (VERBOSE_OUTPUT) THEN
+      WRITE(*,FMT='(A26)',ADVANCE="NO") " reading the trajectory..."
+      IF (number_of_steps>100) THEN
+       WRITE(*,*)
+       WRITE(*,*) "0% - - - - - 50% - - - - - 100%"
+       WRITE(*,ADVANCE="NO",FMT='(" ")')
+       progress_counter=0
+      ELSE
+       progress_counter=40
+      ENDIF
+     ENDIF
+     !Flush I/O to ease identification of bottlenecks
+     CALL FLUSH()
      REWIND 3
      !The outer loop iterates over the timesteps.
      DO stepcounter=1,number_of_steps,1 !gives third dimension of trajectory
       !first, skip the head of the trajectory
       DO dummy=1,headerlines_to_skip,1
+       IF (dummy==2) THEN
+        READ(3,IOSTAT=ios,FMT=*) item_timestep
+        IF (ios/=0) THEN
+         IF (ERROR_CODE/=107) THEN
+          IF (VERBOSE_OUTPUT) WRITE(*,'("issue at step ",I0,", Headerline ",I0,".")') stepcounter,dummy
+          CALL report_error(107,exit_status=stepcounter)
+         ENDIF
+        ELSE
+         !check timestep item for consistency
+         previous=current
+         current=item_timestep
+         IF (((previous+step)/=current).AND.(previous>0)) THEN
+          !at least the first two steps have been read, and there has been a change in 'step'.
+          IF (step>0) THEN
+           !'step' has already been initialised - there must have been an issue!
+           use_scaling=.FALSE.
+           IF (ERROR_CODE/=108) THEN
+            IF (VERBOSE_OUTPUT) WRITE(*,'("issue at step ",I0,", Headerline ",I0,".")')&
+            &stepcounter,dummy
+            CALL report_error(108)
+           ENDIF
+          ELSE
+           !step not yet initialised. ideally, this situation is encountered exactly once.
+           use_scaling=.TRUE.
+           step=current-previous
+          ENDIF
+         ENDIF
+        ENDIF
+        CYCLE
+       ENDIF
        READ(3,IOSTAT=ios,FMT=*)
        IF (ios/=0) THEN
         IF (VERBOSE_OUTPUT) WRITE(*,'("stopped at step ",I0,", Headerline ",I0,".")') stepcounter,dummy
@@ -3626,8 +3962,25 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         ENDDO
        ENDDO 
       ENDDO
+      !Show progress
+      IF ((number_of_steps>100).AND.(MOD(stepcounter,number_of_steps/31)==0).AND.(progress_counter<31)) THEN
+       WRITE(*,ADVANCE="NO",FMT='("#")')
+       progress_counter=progress_counter+1
+       CALL FLUSH()
+      ENDIF
      ENDDO
-     IF (VERBOSE_OUTPUT) WRITE(*,'("done.")') 
+     IF (VERBOSE_OUTPUT) THEN
+      IF (number_of_steps>100) THEN
+       WRITE(*,*)
+       WRITE(*,FMT='(" ")',ADVANCE="NO")
+      ENDIF
+      WRITE(*,'("done.")')
+     ENDIF
+     !set TIME_SCALING_FACTOR
+     IF ((use_scaling).AND.(step>1)) THEN
+      WRITE(*,'(" Setting time scaling factor to ",I0," based on ITEM: TIMESTEP")') step
+      TIME_SCALING_FACTOR=step
+     ENDIF
     END SUBROUTINE load_trajectory_body
 
     SUBROUTINE initialise_sequential_access()
@@ -3690,33 +4043,33 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
   REAL(KIND=SP) FUNCTION atomic_weight(element_name) !this function returns the atomic weight for a given element.
   IMPLICIT NONE
-  !If you change this part, then also change Module_SETTINGS
+  !If you change this part, then also change Module_SETTINGS and change_atomic_mass!
   CHARACTER(LEN=*),INTENT(IN) :: element_name
    SELECT CASE (TRIM(element_name))
    CASE ("H")
-    atomic_weight=01.008
+    atomic_weight=mass_hydrogen
    CASE ("F")
-    atomic_weight=18.998
+    atomic_weight=mass_fluorine
    CASE ("B")
-    atomic_weight=10.81
+    atomic_weight=mass_boron
    CASE ("Cl")
-    atomic_weight=35.45
+    atomic_weight=mass_chlorine
    CASE ("Br")
-    atomic_weight=79.904
+    atomic_weight=mass_bromine
    CASE ("I")
-    atomic_weight=126.904
+    atomic_weight=mass_iodine
    CASE ("N")
-    atomic_weight=(14.007-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
    CASE ("O")
-    atomic_weight=(15.999-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_oxygen) !IF you change this part, THEN change Module_Main, too!
    CASE ("C")
-    atomic_weight=(12.011-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_carbon) !IF you change this part, THEN change Module_Main, too!
    CASE ("S")
-    atomic_weight=(32.066-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_sulfur) !IF you change this part, THEN change Module_Main, too!
    CASE ("P")
-    atomic_weight=(30.974-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_phosphorus) !IF you change this part, THEN change Module_Main, too!
    CASE ("Li")
-    atomic_weight=(6.94-drude_mass) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=(mass_lithium) !IF you change this part, THEN change Module_Main, too!
    CASE ("X")
     atomic_weight=(drude_mass) !IF you change this part, THEN change Module_Main, too!
    CASE DEFAULT
@@ -3788,7 +4141,8 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   END SUBROUTINE check_timestep
 
   !Constructs a histogram of jump velocity with increasing jump time.
-  SUBROUTINE jump_analysis(delta_steps,bin_count_in,molecule_type_index_in,startstep_in,endstep_in,maxvel_in)
+  !For use_velocity=FALSE, see 10.1021/acs.jpcb.5b01093
+  SUBROUTINE jump_analysis(delta_steps,bin_count_in,molecule_type_index_in,startstep_in,endstep_in,use_velocity,maximum_in)
   IMPLICIT NONE
   !$ INTERFACE
   !$  FUNCTION OMP_get_num_threads()
@@ -3796,8 +4150,9 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   !$  END FUNCTION OMP_get_num_threads
   !$ END INTERFACE
   INTEGER,INTENT(IN) :: delta_steps,bin_count_in,molecule_type_index_in,startstep_in,endstep_in
-  REAL,INTENT(IN),OPTIONAL :: maxvel_in
-  REAL :: maximum_velocity,stepsize
+  REAL,INTENT(IN),OPTIONAL :: maximum_in
+  LOGICAL,INTENT(IN) :: use_velocity
+  REAL :: maximum,stepsize
   INTEGER :: allocstatus,deallocstatus,ios,bin_count,type_counter
   INTEGER(KIND=DP) :: within_bin,out_of_bounds
   INTEGER,DIMENSION(:,:),ALLOCATABLE :: jump_histogram
@@ -3826,8 +4181,8 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ENDIF
    IF (molecule_type_index_in>0) THEN
     WRITE(*,'(" Molecule type ",I0," (",A,"):")')&
-    &molecule_type_index_in,TRIM(give_sum_formula(type_counter))
-    CALL optimize_maxvel(molecule_type_index_in)
+    &molecule_type_index_in,TRIM(give_sum_formula(molecule_type_index_in))
+    CALL optimize_stepsize(molecule_type_index_in)
     jump_histogram(:,:)=0
     CALL fill_histogram(molecule_type_index_in)
     CALL write_histogram(molecule_type_index_in)
@@ -3837,7 +4192,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
      out_of_bounds=0
      WRITE(*,'(" Molecule type ",I0," out of ",I0," (",A,"):")')&
      &type_counter,give_number_of_molecule_types(),TRIM(give_sum_formula(type_counter))
-     CALL optimize_maxvel(type_counter)
+     CALL optimize_stepsize(type_counter)
      jump_histogram(:,:)=0
      CALL fill_histogram(type_counter)
      CALL write_histogram(type_counter)
@@ -3851,42 +4206,56 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
 
    CONTAINS
 
-    SUBROUTINE optimize_maxvel(molecule_type_index)
+    SUBROUTINE optimize_stepsize(molecule_type_index)
     IMPLICIT NONE
     INTEGER,INTENT(IN) :: molecule_type_index
     INTEGER :: molecule_index
-    REAL :: jump_velocity,jump_vector(3)
+    REAL :: jump_velocity,jump_vector(3),jump_gyradius
     LOGICAL :: optimize
      optimize=.TRUE.
-     IF (PRESENT(maxvel_in)) THEN
-      IF (maxvel_in>0.0) THEN
+     IF (PRESENT(maximum_in)) THEN
+      IF (maximum_in>0.0) THEN
        optimize=.FALSE.
-       maximum_velocity=maxvel_in
+       maximum=maximum_in
       ENDIF
      ENDIF
      IF (optimize) THEN
-      !get maximum velocity from first step
-      maximum_velocity=0.0
-      DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
-       jump_vector(:)=give_center_of_mass(2,molecule_type_index,molecule_index)-&
-       &give_center_of_mass(1,molecule_type_index,molecule_index)
-       jump_velocity=SQRT(SUM(jump_vector(:)**2))/FLOAT(TIME_SCALING_FACTOR)
-       IF (jump_velocity>maximum_velocity) maximum_velocity=jump_velocity
-      ENDDO
+      IF (use_velocity) THEN
+       !get maximum velocity from first step
+       maximum=0.0
+       DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+        jump_vector(:)=give_center_of_mass(2,molecule_type_index,molecule_index)-&
+        &give_center_of_mass(1,molecule_type_index,molecule_index)
+        jump_velocity=SQRT(SUM(jump_vector(:)**2))/FLOAT(TIME_SCALING_FACTOR)
+        IF (jump_velocity>maximum) maximum=jump_velocity
+       ENDDO
+      ELSE
+       !get maximum gyradius from last step
+       maximum=0.0
+       DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+        jump_gyradius=chain_gyradius(1,delta_steps,molecule_type_index,molecule_index)
+        IF (jump_gyradius>maximum) maximum=jump_gyradius
+       ENDDO
+      ENDIF
      ENDIF
-     IF (VERBOSE_OUTPUT) WRITE(*,'("   Highest binned velocity "ES9.3", largest time difference ",I0," steps.")')&
-     &maximum_velocity,delta_steps
-     stepsize=(maximum_velocity)/FLOAT(bin_count)
-    END SUBROUTINE optimize_maxvel
+     IF (use_velocity) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,'("   Highest binned velocity "ES9.3", largest time difference ",I0," steps.")')&
+      &maximum,delta_steps
+     ELSE
+      IF (VERBOSE_OUTPUT) WRITE(*,'("   Highest binned gyradius "ES9.3", largest time difference ",I0," steps.")')&
+      &maximum,delta_steps
+     ENDIF
+     stepsize=(maximum)/FLOAT(bin_count)
+    END SUBROUTINE optimize_stepsize
 
     SUBROUTINE fill_histogram(molecule_type_index)
     IMPLICIT NONE
     INTEGER,INTENT(IN) :: molecule_type_index
     INTEGER :: molecule_index,timestep,time_shift,number_of_timesteps,binpos,jump_histogram_local(bin_count,delta_steps)
-    REAL :: jump_velocity,jump_vector(3),jump_time
+    REAL :: jump_velocity,jump_vector(3),jump_time,jump_gyradius
      number_of_timesteps=give_number_of_timesteps()
      !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
-     !$OMP PRIVATE(time_shift,jump_time,molecule_index,jump_vector,jump_velocity,binpos,jump_histogram_local)
+     !$OMP PRIVATE(time_shift,jump_time,molecule_index,jump_vector,jump_velocity,binpos,jump_histogram_local,jump_gyradius)
      !$OMP SINGLE
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,'(A,I0,A)') "   ### Parallel execution on ",OMP_get_num_threads()," threads (jump histogram)"
@@ -3901,10 +4270,17 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       DO time_shift=1,MIN((number_of_timesteps-timestep),delta_steps),1
        jump_time=FLOAT(time_shift*TIME_SCALING_FACTOR)
        DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
-        jump_vector(:)=give_center_of_mass(timestep+time_shift,molecule_type_index,molecule_index)-&
-        &give_center_of_mass(timestep,molecule_type_index,molecule_index)
-        jump_velocity=SQRT(SUM(jump_vector(:)**2))/jump_time
-        binpos=(INT(jump_velocity/stepsize)+1)
+        IF (use_velocity) THEN
+         !compute jump velocity
+         jump_vector(:)=give_center_of_mass(timestep+time_shift,molecule_type_index,molecule_index)-&
+         &give_center_of_mass(timestep,molecule_type_index,molecule_index)
+         jump_velocity=SQRT(SUM(jump_vector(:)**2))/jump_time
+         binpos=(INT(jump_velocity/stepsize)+1)
+        ELSE
+         !compute radius of gyration of chain
+         jump_gyradius=chain_gyradius(timestep,time_shift,molecule_type_index,molecule_index)
+         binpos=(INT(jump_gyradius/stepsize)+1)
+        ENDIF
         IF (.NOT.((binpos>bin_count).OR.(binpos<0))) THEN
          !$OMP ATOMIC
          within_bin=within_bin+1
@@ -3927,11 +4303,31 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
      !$ ENDIF
     END SUBROUTINE fill_histogram
 
+    REAL FUNCTION chain_gyradius(timestep,time_shift,molecule_type_index,molecule_index)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: timestep,time_shift,molecule_type_index,molecule_index
+    REAL :: line_segment(0:time_shift,3),rgc(3)
+    INTEGER :: n
+     !first, get the member of the trajectory segment
+     DO n=0,time_shift,1
+      line_segment(n,:)=give_center_of_mass(timestep+n,molecule_type_index,molecule_index)
+     ENDDO
+     !Compute radius of gyration of trajectory segment
+     DO n=1,3,1
+      !first, compute rgc=geometric centre of trajectory segment (equal to centre of mass in this case)
+      rgc(n)=SUM(line_segment(:,n))/FLOAT(time_shift+1)
+      !Then, subtract rgc to give the vector (rj-rgc)
+      line_segment(:,n)=line_segment(:,n)-rgc(n)
+     ENDDO
+     chain_gyradius=SUM(line_segment(:,1)**2+line_segment(:,2)**2+line_segment(:,3)**2)
+     chain_gyradius=SQRT(chain_gyradius/FLOAT(time_shift+1))
+    END FUNCTION chain_gyradius
+
     SUBROUTINE write_histogram(molecule_type_index)
     IMPLICIT NONE
     INTEGER,INTENT(IN) :: molecule_type_index
     INTEGER :: time_shift,binpos
-    REAL :: jump_velocity,jump_probability_histogram(bin_count,delta_steps)
+    REAL :: jump_quantity,jump_probability_histogram(bin_count,delta_steps)
     CHARACTER(LEN=1024) :: fstring
     LOGICAL :: connected
      !normalise histogram
@@ -3940,24 +4336,43 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       &FLOAT(jump_histogram(:,time_shift))/FLOAT(SUM(jump_histogram(:,time_shift)))
      ENDDO
      !Print results
-     WRITE(fstring,'(2A,I0,A,I0,A,I0)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
-     &"jump_probability_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in
-     IF (VERBOSE_OUTPUT) THEN
-      WRITE(*,'("   within bin ",I0,", out of bounds ",I0,".")') within_bin,out_of_bounds
-      WRITE(*,'(3A)') "   Writing jump velocity histogram (probability) to file '",TRIM(fstring),"'"
-     ENDIF
      INQUIRE(UNIT=3,OPENED=connected)
      IF (connected) CALL report_error(27,exit_status=3)
-     OPEN(UNIT=3,FILE=TRIM(fstring))
-     WRITE(3,'(A,I0,A)') "This file contains the probabilities of any molecule of type ",molecule_type_index&
-     &," to jump with the indicated velocity."
-     WRITE(3,*) "jump_velocity jump_time probability"
-     DO binpos=1,bin_count,1
-      jump_velocity=FLOAT(binpos)*stepsize-0.5*stepsize
-      DO time_shift=1,delta_steps,1
-       WRITE(3,*) jump_velocity,time_shift*TIME_SCALING_FACTOR,jump_probability_histogram(binpos,time_shift)
+     IF (use_velocity) THEN
+      WRITE(fstring,'(2A,I0,A,I0,A,I0)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+      &"jump_velocity_probability_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in
+      IF (VERBOSE_OUTPUT) THEN
+       WRITE(*,'("   within bin ",I0,", out of bounds ",I0,".")') within_bin,out_of_bounds
+       WRITE(*,'(3A)') "   Writing jump velocity histogram (probability) to file '",TRIM(fstring),"'"
+      ENDIF
+      OPEN(UNIT=3,FILE=TRIM(fstring))
+      WRITE(3,'(A,I0,A)') "This file contains the probabilities of any molecule of type ",molecule_type_index&
+      &," to jump with the indicated velocity."
+      WRITE(3,*) "jump_velocity jump_time probability"
+      DO binpos=1,bin_count,1
+       jump_quantity=FLOAT(binpos)*stepsize-0.5*stepsize
+       DO time_shift=1,delta_steps,1
+        WRITE(3,*) jump_quantity,time_shift*TIME_SCALING_FACTOR,jump_probability_histogram(binpos,time_shift)
+       ENDDO
       ENDDO
-     ENDDO
+     ELSE
+      WRITE(fstring,'(2A,I0,A,I0,A,I0)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+      &"jump_gyradius_probability_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in
+      IF (VERBOSE_OUTPUT) THEN
+       WRITE(*,'("   within bin ",I0,", out of bounds ",I0,".")') within_bin,out_of_bounds
+       WRITE(*,'(3A)') "   Writing jump gyradius histogram (probability) to file '",TRIM(fstring),"'"
+      ENDIF
+      OPEN(UNIT=3,FILE=TRIM(fstring))
+      WRITE(3,'(A,I0,A)') "This file contains the probabilities of any molecule of type ",molecule_type_index&
+      &," to perform a jump with the given gyradius."
+      WRITE(3,*) "jump_gyradius jump_time probability"
+      DO binpos=1,bin_count,1
+       jump_quantity=FLOAT(binpos)*stepsize-0.5*stepsize
+       DO time_shift=1,delta_steps,1
+        WRITE(3,*) jump_quantity,time_shift*TIME_SCALING_FACTOR,jump_probability_histogram(binpos,time_shift)
+       ENDDO
+      ENDDO
+     ENDIF
      CLOSE(UNIT=3)
     END SUBROUTINE write_histogram
 
@@ -6700,7 +7115,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      standard_deviation=standard_deviation+(local_average_h-average_h)**2!sum over the squares of the deviations from the global average
     ENDDO
     standard_deviation=standard_deviation/(DFLOAT(give_number_of_timesteps()-1))!Correct for number of observations
-    standard_deviation=DSQRT(standard_deviation)
+    standard_deviation=SQRT(standard_deviation)
     WRITE(*,'(" absolute value of <h>: ",E11.5,", standard sample deviation: ",E11.5)')average_h,standard_deviation
     IF (VERBOSE_OUTPUT) WRITE(*,*) "(standard deviation calculated from the snapshot-wise ensemble averages)"
    ENDIF
@@ -7039,6 +7454,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
     REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared !mean squared displacement, dimension is the time shift given in timesteps
  REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: x_unsquared !mean displacement (=drift), first dimension = time shift, remaining dimensions = xyz of drift
     INTEGER(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_num !number of averages taken for the positions
+ INTEGER :: msd_exponent=2 !the exponent... 2 is for MSD, 4 can be used to manually construct the non-gaussian parameter
  LOGICAL :: verbose_print=verbose_print_default
  !PRIVATE/PUBLIC declarations
  PRIVATE :: operation_mode,initialise_diffusion,number_of_projections,tmax,projections,tstep
@@ -7109,6 +7525,14 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    PRINT *,"in intervals of 10 timesteps."
    WRITE(*,'(" The default is currently set to ",I0,".")') tstep_default
    tstep=user_input_integer(1,(tmax/10))
+   PRINT *,"Would you like to use specify a custom exponent for the displacement? (y/n)"
+   PRINT *,"(the default is '2' for the mean squared displacement)"
+   IF (user_input_logical()) THEN
+    PRINT *,"Please enter the exponent n you would like to use for <x**n>"
+    msd_exponent=user_input_integer(0,4)
+   ELSE
+    msd_exponent=2
+   ENDIF
    !tstep and tmax have sensible values.
    PRINT *,"Finally, would you like the detailed drift to be printed? (y/n)"
    printdrift=user_input_logical()
@@ -7138,6 +7562,8 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    ELSE
     WRITE(8,'(" ### do not print detailed drift.")')
    ENDIF
+   IF (msd_exponent/=2) WRITE(8,'(" exponent ",I0," ### custom exponent - computing <x**",I0,">")')&
+   &msd_exponent,msd_exponent
    WRITE(8,*) "quit"
    WRITE(8,*)
    WRITE(8,*) "This is an input file for the calculation of mean-squared displacements."
@@ -7165,6 +7591,8 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
     IF (ios/=0) CALL report_error(30,exit_status=ios)
     READ(3,IOSTAT=ios,FMT=*) operation_mode!read the operation mode.
     IF (ios/=0) CALL report_error(30,exit_status=ios)
+    !support for synonyms
+    IF (TRIM(operation_mode)=="mxd") operation_mode="msd"
     !Now read the body of the diffusion input file in line with the requested operation mode:
     SELECT CASE (TRIM(operation_mode))
     CASE ("msd")
@@ -7195,6 +7623,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
      tmax=tmax_default
      tstep=tstep_default
      verbose_print=verbose_print_default
+     msd_exponent=2
     END SUBROUTINE set_defaults
 
     SUBROUTINE check_input_and_allocate_memory()
@@ -7275,7 +7704,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
        IF (ios/=0) THEN
         CALL report_error(32,exit_status=ios)
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'tstep' to default (=",tstep_default,")"
-        tstep=1
+        tstep=tstep_default
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'tstep' to ",tstep
        ENDIF
@@ -7289,6 +7718,31 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,*) "setting 'verbose_print' to ",verbose_print
        ENDIF
+      CASE ("exponent")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,msd_exponent
+       IF (ios/=0) THEN
+        CALL report_error(32,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'exponent' to default (=2)"
+        msd_exponent=2
+       ELSE
+        IF (VERBOSE_OUTPUT) THEN
+         WRITE(*,'(A,I0)') " setting 'exponent' to ",msd_exponent
+         WRITE(*,ADVANCE="NO",FMT='(" (Will report r^",I0)') msd_exponent
+        ENDIF
+       ENDIF
+       SELECT CASE (msd_exponent)
+       CASE (1)
+        WRITE(*,'(" - mean displacement)")') msd_exponent
+       CASE (2)
+        WRITE(*,'(" - mean squared displacement)")') msd_exponent
+       CASE (0)
+        WRITE(*,'(" - unit projection for debug purposes)")') msd_exponent
+       CASE (4)
+        WRITE(*,'(" - use with MSD for non-gaussian parameter alpha2)")') msd_exponent
+       CASE DEFAULT
+        WRITE(*,'(" - exponent of unknown use)")') msd_exponent
+       END SELECT
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DIFFUSION_INPUT)
        EXIT
@@ -7329,18 +7783,35 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
   !gives information about what is actually calculated and printed.
   SUBROUTINE print_helpful_info()
   IMPLICIT NONE
+  CHARACTER(LEN=32) :: msd_exponent_str,power_terminology
+   WRITE(msd_exponent_str,'(I0)') msd_exponent
+   SELECT CASE (msd_exponent)
+   CASE (1)
+    power_terminology=" "
+   CASE (2)
+    power_terminology=" squared "
+   CASE (3)
+    power_terminology=" cube "
+   CASE (4)
+    power_terminology=" fourth power "
+   CASE DEFAULT
+    WRITE(power_terminology,'(" power ",I0," ")') msd_exponent
+   END SELECT
+    WRITE(*,'(" - exponent of unknown use)")') msd_exponent
    ! provide the user with information about what will be reported
    WRITE(*,*) "These quantities will be calculated and reported:"
    IF (verbose_print) THEN
     WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<R**2>':        mean squared displacement, not corrected"
+    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">':        mean",&
+    &TRIM(power_terminology),"displacement, not corrected"
     WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
-    WRITE(*,*) "   '<R**2>-<R>**2': drift corrected mean squared displacement, equals to <(X-drift)**2>"
+    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
+    &TRIM(power_terminology),"displacement, equals to <(X-drift)**"//TRIM(msd_exponent_str)//">"
     WRITE(*,*) "   'drift_x(y/z)':  the x, y and z components of the drift vector (average over box)"
     WRITE(*,*) "   '#(N)':          number of averages taken to obtain this value"
    ELSE
     WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<R**2>':   mean squared displacement, not corrected"
+    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">':   mean",TRIM(power_terminology),"displacement, not corrected"
     WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
    ENDIF
    WRITE(*,'(" the time scaling factor is ",I0)') TIME_SCALING_FACTOR
@@ -7364,7 +7835,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
   REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared_temp !mean squared displacement, dimension is the time shift given in timesteps
   REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: x_unsquared_temp !mean displacement (=drift), first dimension = time shift, remaining dimensions = xyz of drift
   INTEGER(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_num_temp !number of averages taken for the positions
-   !get #timesteps, so that function doesn't have to be called every time.
+  !get #timesteps, so that function doesn't have to be called every time.
    number_of_timesteps=give_number_of_timesteps()
    !the molecule_type_index can be initialised from the projections array:
    molecule_type_index=projections(4,projection_number)
@@ -7423,10 +7894,10 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
       !first, the shift of the center of mass of the current molecule is stored in 'projektionsvektor'.
       projektionsvektor=give_center_of_mass(starting_timestep+current_distance,molecule_type_index,molecule_index)!final position...
       projektionsvektor=projektionsvektor-initial_positions(molecule_index,:)!... minus initial position.
-      !Then, the projection is applied - is all entries are one, then the 'normal', three-dimensional mean squared displacement is calculated.
+      !Then, the projection is applied - if all entries are one, then the 'normal', three-dimensional mean squared displacement is calculated.
       projektionsvektor(:)=DFLOAT(projections(1:3,projection_number))*projektionsvektor(:)
       !add the found distance to x_squared.
-      squared_clip=squared_clip+SUM((projektionsvektor(:))**2)!squared_clip collects the quantity x²+y²+z² (or parts thereof)
+      squared_clip=squared_clip+SUM((projektionsvektor(:))**msd_exponent)!squared_clip collects the quantity x²+y²+z² (or parts thereof)
       !unlike x_squared, x_unsquared is sign-sensitive and has to be collected in a clipboard variable.
       vector_clip=vector_clip+projektionsvektor
      ENDDO
@@ -7476,6 +7947,8 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: array_pos,ios,i
   LOGICAL :: connected
   CHARACTER(LEN=1024) :: filename_diffusion_output
+  CHARACTER(LEN=32) :: msd_exponent_str
+   WRITE(msd_exponent_str,'(I0)') msd_exponent
    INQUIRE(UNIT=3,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=3)
    !generate filename, depending on operation mode
@@ -7494,22 +7967,23 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    &,TRIM(FILENAME_DIFFUSION_INPUT),"'"
    IF (verbose_print) THEN
     !also print the full drift information
-    WRITE(3,'(8A15)') "timeline","<R**2>","<R>","<R**2>-<R>**2","drift_x","drift_y","drift_z","#(N)"
+    WRITE(3,'(8A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">",&
+    &"<R>","<R**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str),"drift_x","drift_y","drift_z","#(N)"
     WRITE(3,6) 0,0.,0.,0.,0.,0.,0.,0
    ELSE
     !only write the basics
-    WRITE(3,'(3A15)') "timeline","<R**2>","<R>"!timestep*scaling, mean squared displacement and mean displacement
+    WRITE(3,'(3A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">","<R>"!timestep*scaling, mean squared displacement and mean displacement
     WRITE(3,2) 0,0.,0.
    ENDIF
    DO array_pos=1,tmax/tstep,1 !zeroth entry is already there.
     IF (verbose_print) THEN
-     WRITE(3,6) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos),&!timeline and <R**2>
+     WRITE(3,6) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos),&!timeline and <R**msd_exponent>
      &SQRT(SUM(x_unsquared(array_pos,:)**2)),&!<R>=SQRT(<x>²+<y>²+<z>²)
-     &x_squared(array_pos)-SUM((x_unsquared(array_pos,:))**2),&!<(R-drift)**2>
+     &x_squared(array_pos)-SUM((x_unsquared(array_pos,:))**msd_exponent),&!<(R-drift)**msd_exponent>
      &(x_unsquared(array_pos,i),i=1,3),x_num(array_pos)!the drift vector as well as the number of taken averages.
     ELSE
      !only the basics...
-     WRITE(3,2) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos),&!timeline and <R**2>
+     WRITE(3,2) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos),&!timeline and <R**msd_exponent>
      &SQRT(SUM(x_unsquared(array_pos,:)**2))!The average drift, i.e. the drift of the center of mass of that particular molecule type.
     ENDIF
    ENDDO
@@ -8793,13 +9267,17 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
   SUBROUTINE write_distribution_functions(reference_number)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: reference_number
-  REAL :: shift_b,trace,integral
+  REAL :: shift_b,trace,number_integral,energy_integral
   REAL :: a,b,previous
-  INTEGER :: binpos_a,binpos_b,ios
-  CHARACTER(LEN=1024) :: filename_distribution_output,filename_trace,headerline,unitline,filename_number_integral
+  INTEGER :: binpos_a,binpos_b,ios,reference_charge
+  CHARACTER(LEN=1024) :: filename_trace,filename_distribution_output,filename_number_integral,filename_energy_integral
+  CHARACTER(LEN=1024) :: headerline,unitline
   LOGICAL :: connected
+   reference_charge=give_charge_of_molecule(references(4,reference_number))
    INQUIRE(UNIT=3,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=3)
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
    INQUIRE(UNIT=10,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=10)
    IF (ALL(references(1:3,reference_number)==0)) THEN
@@ -8842,31 +9320,47 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      WRITE(filename_trace,'(A,"_xcharge")') TRIM(filename_trace)
      WRITE(filename_distribution_output,'(A,"_xcharge")') TRIM(filename_distribution_output)
     ENDIF
-    WRITE(filename_number_integral,'(A,"_nintegral")') TRIM(filename_trace)
+    WRITE(filename_number_integral,'(A,"_numberintegral")') TRIM(filename_trace)
+    WRITE(filename_energy_integral,'(A,"_energyintegral")') TRIM(filename_trace)
     IF (subtract_uniform) WRITE(filename_distribution_output,'(A,"_-trace")') TRIM(filename_distribution_output)
     WRITE(filename_distribution_output,'(A,"_pdf")') TRIM(filename_distribution_output)
     !filenames are complete now.
     IF (VERBOSE_OUTPUT) THEN
      WRITE(*,*) "  writing trace (rdf) into file: ",TRIM(filename_trace)
      WRITE(*,*) "  writing number integral into file: ",TRIM(filename_number_integral)
+     IF (reference_charge/=0) WRITE(*,*) "  writing (Coulomb) energy integral into file: ",&
+     &TRIM(filename_energy_integral)
     ENDIF
     OPEN(UNIT=3,FILE=TRIM(filename_trace),IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
+   
     OPEN(UNIT=10,FILE=TRIM(filename_number_integral),IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
     WRITE(3,'(A," radial distribution function (trace of pdf)")') TRIM(headerline)
     WRITE(3,'("distance g(r)")')
-    WRITE(10,'(A," number integral INT(4*pi*r^2*g(r))dR")') TRIM(headerline)
+    WRITE(10,'(A," number integral INT(4*pi*r^2*rho*g(r))dR")') TRIM(headerline)
     WRITE(10,'("distance n(r)")')
-    integral=0.0
+    number_integral=0.0
+    IF (reference_charge/=0) THEN
+     OPEN(UNIT=4,FILE=TRIM(filename_energy_integral),IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(4,'(A," (Coulomb) energy integral INT(z*e^2*r*rho*g(r)/(2*epsilon0))dR")') TRIM(headerline)
+     WRITE(4,'("distance E(r)[J/mol]")')
+     energy_integral=0.0
+     WRITE(4,*) 0.0,0.0
+    ENDIF
     WRITE(10,*) 0.0,0.0
     previous=0.0
     DO binpos_a=1,bin_count_a,1
      trace=SUM(distribution_function(binpos_a,:))/FLOAT(bin_count_b)
      a=(FLOAT(binpos_a)*step_a) !upper limit - integral runs over whole section
      !trapezoidal integration
-     integral=integral+number_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
-     WRITE(10,*) a,integral
+     number_integral=number_integral+number_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
+     WRITE(10,*) a,number_integral
+     IF (reference_charge/=0) THEN
+      energy_integral=energy_integral+energy_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
+      WRITE(4,*) a,energy_integral
+     ENDIF
      a=a-0.5*step_a !using the middle to report everything else
      WRITE(3,*) a,trace
      previous=trace
@@ -8910,6 +9404,20 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      !evaluate the integral
      number_integral_trapezoid=4.0*pi*(upper-lower)
     END FUNCTION number_integral_trapezoid
+
+    REAL FUNCTION energy_integral_trapezoid(g_a,g_b,radius_a,radius_b)
+    IMPLICIT NONE
+    REAL,INTENT(IN) :: g_a,g_b,radius_a,radius_b
+    REAL :: m,n,upper,lower
+     n=(radius_b*g_a-radius_a*g_b)/(radius_b-radius_a)
+     m=(g_b-n)/(radius_b)
+     upper=(m/3.0)*(radius_b**3)+(n/2.0)*(radius_b**2)
+     lower=(m/3.0)*(radius_a**3)+(n/2.0)*(radius_a**2)
+     !evaluate the integral
+     energy_integral_trapezoid=&
+     &(FLOAT(reference_charge)*(elementary_charge**2)/(2.0*vacuum_permittivity))*(upper-lower)*&
+     &avogadro*1.0e10!conversion to J/mol
+    END FUNCTION energy_integral_trapezoid
 
   END SUBROUTINE write_distribution_functions
 
@@ -8963,6 +9471,7 @@ CHARACTER(LEN=1024) :: filename_msd="diffusion.inp" !diffusion module standard f
 CHARACTER(LEN=1024) :: filename_distribution="distribution.inp" !distribution module standard filename
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
+ CALL set_default_masses()
  TIME_OUTPUT=TIME_OUTPUT_DEFAULT
  VERBOSE_OUTPUT=VERBOSE_OUTPUT_DEFAULT
  ERROR_OUTPUT=ERROR_OUTPUT_DEFAULT
@@ -8993,7 +9502,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 29_Mar_2020"
+ PRINT *, "   Date of Release: 09_Apr_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -9514,7 +10023,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    This keyword expects exactly three integers:"
    PRINT *,"    The molecule type index, and the range of analysis, given as first step and last step."
    PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
-   PRINT *," - 'jump_analysis': (simple mode available)"
+   PRINT *," - 'jump_velocity': (simple mode available)"
    PRINT *,"    Computes a histogram / probability distribution of jump velocities."
    PRINT *,"    This keyword expects exactly three integers:"
    PRINT *,"    The molecule type index, the range of analysis, given as first step and last step,"
@@ -9522,6 +10031,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    If a molecule type index of 0 is specified, then all molecule types are considered."
    PRINT *," - 'show_settings':"
    PRINT *,"    Writes settings and useful information to the standard output"
+   PRINT *," - 'print_atomic_masses':"
+   PRINT *,"    Writes atomic masses to the standard output, using the molecular input file format."
    PRINT *," - 'show_drude':"
    PRINT *,"    Writes detailed current information about drude particles."
    PRINT *," - 'verbose_output':"
@@ -9546,20 +10057,32 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"Following this fixed section, the rest of the input file is read."
    PRINT *,"(Until either a 'quit' statement or the end of file are encountered)"
    PRINT *,"In that free-format section, the following optional subsections can be placed:"
-   PRINT *," - 'masses':"
-   PRINT *,"    this keyword triggers the specification of custom masses."
+   PRINT *," - 'default_masses':"
+   PRINT *,"    this keyword triggers the specification of custom default masses."
    PRINT *,"    it expects an integer, which is the number of subsequent lines to read."
-   PRINT *,"    This is only available for single lowercase letters (a,b,c,...,z)."
-   PRINT *,"    An exception is 'X', which is treated as drude particle."
+   PRINT *,"    This is available for single lowercase letters (a,b,c,...,z) and element names."
+   PRINT *,"    (Including 'X', which is treated as drude particl)"
    PRINT *,"    If e.g. the trajectory contains an anion of mass 123.4, abbreviated as 'a',"
    PRINT *,"    and a cation of mass 432.1, abbreviated as 'c', then this section should be added:"
    PRINT *,"      masses 2"
    PRINT *,"      a 123.4"
-   PRINT *,"      b 432.1"
+   PRINT *,"      c 432.1"
    PRINT *,"    Furthermore, the support of drude particles can be turned on by adding:"
    PRINT *,"      masses 1"
    PRINT *,"      X 0.4"
    PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li - but not H and F."
+   PRINT *,"    This keyword changes the defaults, i.e. ALL atoms of type a,X,P,.... see also:"
+   PRINT *," - 'atomic_masses':"
+   PRINT *,"    this keyword triggers the specification of custom atomic masses."
+   PRINT *,"    it expects an integer, which is the number of subsequent lines to read."
+   PRINT *,"    each line must have two integers and one real:"
+   PRINT *,"    molecule type index, atom index, and atomic mass."
+   PRINT *,"    This allows the user to specify atomic weights, which can be used two introduce charges."
+   PRINT *,"    The order is important:"
+   PRINT *,"      1) The program starts with its own defaults, such as 12.011 for carbon."
+   PRINT *,"      2) If necessary, these values are changed by 'default_masses'"
+   PRINT *,"      3) Any positive drude mass 'X', if present, is subtracted from N,O,C,S,P,Li."
+   PRINT *,"      4) After that, masses of particular atoms are overwritten by 'atomic_masses'."
    PRINT *," - 'constraints':"
    PRINT *,"    this keyword triggers the specification of custom constraints."
    PRINT *,"    it expects an integer, which is the number of subsequent lines to read."
@@ -9602,6 +10125,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    then only shifts by 1,10,20,...,tmax are computed."
    PRINT *," -  'print_verbose':"
    PRINT *,"    If yes (T), then the detailed drift is printed, too."
+   PRINT *," - 'exponent':"
+   PRINT *,"    Expects an integer, which is used as exponent in the displacement."
+   PRINT *,"    Thus, 'exponent 2' is the normal MSD, but others can be used, too."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *
@@ -9847,7 +10373,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     & molecule_list(n,:),molecule_list(n,3),molecule_list(n,1:2)
    ENDDO
    IF (turn_on_drudes) THEN
-    WRITE(8,'(" masses 1 ### The following line specifies a custom mass.")')
+    WRITE(8,'(" default_masses 1 ### The following line specifies a custom mass.")')
     WRITE(8,'(" X",F7.3," ### By that, the support for drude particles is turned on.")') drude_mass
    ENDIF
    IF (manual_drude_assignment) THEN
@@ -9959,6 +10485,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *,"Please specify the time scaling factor (as an integer)."
     PRINT *,"(e.g. when dumping every 100fs, type '100' to get the right time unit)"
     TIME_SCALING_FACTOR=user_input_integer(1,1000000000)
+   ELSE
+    TIME_SCALING_FACTOR=-1
    ENDIF
    !Now, write the general input file.
    PRINT *,"The file '",TRIM(FILENAME_GENERAL_INPUT),"' will be opened now. Please do not change it during write."
@@ -9973,7 +10501,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    WRITE(8,*) '"',TRIM(PATH_TRAJECTORY),'"'," ### path to trajectory"
    WRITE(8,*) '"',TRIM(PATH_INPUT),'"'," ### path to other input files"
    WRITE(8,*) '"',TRIM(PATH_OUTPUT),'"'," ### output folder"
-   WRITE(8,'(A,I0,A)') " time_scaling ",TIME_SCALING_FACTOR,&
+   IF (TIME_SCALING_FACTOR>0) WRITE(8,'(A,I0,A)') " time_scaling ",TIME_SCALING_FACTOR,&
    &" ### factor to scale the timestep with to arrive at a useful time unit."
    IF (manual_box_edge) WRITE(8,'(A,2E16.8,A)') " cubic_box_edge ",lower,upper," ### lower and upper cubic box boundaries."
    CLOSE(UNIT=8)
@@ -10625,7 +11153,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
-      CALL append_string("jump_analysis_simple ### jump analysis with default values.")
+      CALL append_string("jump_velocity_simple ### jump analysis with default values.")
       CYCLE
      ENDIF
      IF (nsteps==1) THEN
@@ -10658,7 +11186,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Please specify the maximum jump length (in timesteps):"
      deltasteps=user_input_integer(1,deltasteps)
      WRITE(fstring,'(A,I0," ",I0," ",I0," ",I0,A)')&
-     &"jump_analysis ",molecule_type_index,startstep,endstep,deltasteps,&
+     &"jump_velocity ",molecule_type_index,startstep,endstep,deltasteps,&
      &" ### compute histogram / probability distribution of jump velocities."
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
@@ -10932,6 +11460,8 @@ INTEGER :: ios,n
      EXIT
     CASE ("show_settings")
      CALL show_settings()
+    CASE ("print_atomic_masses")
+     CALL print_atomic_masses()
     CASE ("show_drude")
      CALL show_drude_settings()
     CASE ("verbose_output")
@@ -11230,6 +11760,10 @@ INTEGER :: ios,n
       CALL report_error(19,exit_status=ios)
       EXIT
      ELSE
+      IF (inputinteger<1) THEN
+       CALL report_error(106,exit_status=inputinteger)
+       inputinteger=TIME_SCALING_FACTOR_DEFAULT
+      ENDIF
       WRITE(*,'(" scaling timelines with ",I0)') inputinteger
       TIME_SCALING_FACTOR=inputinteger
      ENDIF
@@ -11321,15 +11855,18 @@ INTEGER :: ios,n
        WRITE(*,*) "parallel operation is not available with sequential read."
        PARALLEL_OPERATION=.FALSE.
       ENDIF
-      WRITE(*,*) "setting 'PARALLEL_OPERATION' to ",PARALLEL_OPERATION
+      !$ IF (.FALSE.) THEN
+       WRITE(*,*) "keyword 'parallel_operation' has no effect (Compiler not OpenMP compliant)"
+      !$ ENDIF
+      !$ WRITE(*,*) "setting 'PARALLEL_OPERATION' to ",PARALLEL_OPERATION
      ENDIF
-    CASE ("jump_analysis_simple")
+    CASE ("jump_velocity_simple")
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Constructing a histogram of jump duration vs jump velocity."
      inputinteger=give_number_of_timesteps()/10
      IF (inputinteger<10) inputinteger=give_number_of_timesteps()
-     CALL jump_analysis(inputinteger,100,-1,1,give_number_of_timesteps())
-    CASE ("jump_analysis")
+     CALL jump_analysis(inputinteger,100,-1,1,give_number_of_timesteps(),.TRUE.)
+    CASE ("jump_velocity")
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,startstep,endstep,inputinteger2
@@ -11340,7 +11877,12 @@ INTEGER :: ios,n
      WRITE(*,*) "Constructing a histogram of jump duration vs jump velocity."
      CALL check_timesteps(startstep,endstep)
      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-     CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep)
+     CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep,.TRUE.)
+    CASE ("DEBUG")
+     !Here is some space for testing stuff
+     WRITE(*,*) "################################"
+     CALL jump_analysis(200,100,2,1,give_number_of_timesteps(),.FALSE.)
+     WRITE(*,*) "################################"
     CASE DEFAULT
      CALL report_error(20,n+HEADER_LINES)!HEADER_LINES = number of fixed lines in general input file
     END SELECT
@@ -11394,9 +11936,11 @@ INTEGER :: ios,n
    WRITE(*,'(" currently assuming ",I0," as time difference between steps")') TIME_SCALING_FACTOR
    WRITE(*,*) "assuming Angström as distance unit and femtoseconds as time unit."
    WRITE(*,*) "Using these constants:"
-   WRITE(*,'("    boltzmann constant: ",E15.7E2," J/K")') boltzmann
-   WRITE(*,'("    avogadro constant:  ",E15.9E2," 1/mol")') avogadro
-   WRITE(*,'("    elementary charge:  ",E15.9E2," C")') elementary_charge
+   WRITE(*,'("    boltzmann constant:  ",E15.7E2," J/K")') boltzmann
+   WRITE(*,'("    avogadro constant:   ",E15.9E2," 1/mol")') avogadro
+   WRITE(*,'("    elementary charge:   ",E15.9E2," C")') elementary_charge
+   WRITE(*,'("    archimedes constant: ",E15.9E2)') pi
+   WRITE(*,'("    vacuum permittivity: ",E15.9E2," F/m")') vacuum_permittivity
   END SUBROUTINE show_settings
 
 END SUBROUTINE run_analysis
