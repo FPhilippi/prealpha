@@ -1,4 +1,4 @@
-! RELEASED ON 09_Apr_2020 AT 10:25
+! RELEASED ON 10_Apr_2020 AT 13:05
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1311,11 +1311,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      atomic_mass=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
      native_mass=atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
      element_name=molecule_list(molecule_type_index)%list_of_elements(atom_index)
-     WRITE(*,FMT='("   ",I0," ",I0," ",F0.3,"( ")',ADVANCE="NO") molecule_type_index,atom_index,atomic_mass
+     WRITE(*,FMT='("   ",I0," ",I0," ",F0.3," (")',ADVANCE="NO") molecule_type_index,atom_index,atomic_mass
      IF (ABS(atomic_mass-native_mass)>0.001) THEN
       WRITE(*,'(A,", default mass was ",F0.3,")")') TRIM(element_name),native_mass
      ELSE
-      WRITE(*,'(" Element ",A,")")') TRIM(element_name)
+      WRITE(*,'("Element ",A,")")') TRIM(element_name)
      ENDIF
     ENDDO
    ENDDO
@@ -3154,7 +3154,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   LOGICAL :: file_exists,connected
   INTEGER :: ios,n,allocstatus,a,b,c,totalcharge,headerlines_molecular,m
-  CHARACTER(LEN=11) :: inputstring
+  CHARACTER(LEN=16) :: inputstring
   REAL(KIND=SP) :: mass_input
    file_position=-1
    dihedrals_initialised=.FALSE.
@@ -7728,20 +7728,20 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) THEN
          WRITE(*,'(A,I0)') " setting 'exponent' to ",msd_exponent
-         WRITE(*,ADVANCE="NO",FMT='(" (Will report r^",I0)') msd_exponent
+         WRITE(*,ADVANCE="NO",FMT='(" (Will report <|R|^",I0)') msd_exponent
         ENDIF
        ENDIF
        SELECT CASE (msd_exponent)
        CASE (1)
-        WRITE(*,'(" - mean displacement)")') msd_exponent
+        WRITE(*,'("> - mean displacement)")')
        CASE (2)
-        WRITE(*,'(" - mean squared displacement)")') msd_exponent
+        WRITE(*,'("> - mean squared displacement)")')
        CASE (0)
-        WRITE(*,'(" - unit projection for debug purposes)")') msd_exponent
+        WRITE(*,'("> - unit projection for debug purposes)")')
        CASE (4)
-        WRITE(*,'(" - use with MSD for non-gaussian parameter alpha2)")') msd_exponent
+        WRITE(*,'("> - use with MSD for non-gaussian parameter alpha2)")')
        CASE DEFAULT
-        WRITE(*,'(" - exponent of unknown use)")') msd_exponent
+        WRITE(*,'("> - exponent of unknown use)")')
        END SELECT
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DIFFUSION_INPUT)
@@ -7787,31 +7787,30 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    WRITE(msd_exponent_str,'(I0)') msd_exponent
    SELECT CASE (msd_exponent)
    CASE (1)
-    power_terminology=" "
+    power_terminology=""
    CASE (2)
-    power_terminology=" squared "
+    power_terminology=" squared"
    CASE (3)
-    power_terminology=" cube "
+    power_terminology=" cube"
    CASE (4)
-    power_terminology=" fourth power "
+    power_terminology=" fourth power"
    CASE DEFAULT
     WRITE(power_terminology,'(" power ",I0," ")') msd_exponent
    END SELECT
-    WRITE(*,'(" - exponent of unknown use)")') msd_exponent
    ! provide the user with information about what will be reported
    WRITE(*,*) "These quantities will be calculated and reported:"
    IF (verbose_print) THEN
     WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">':        mean",&
-    &TRIM(power_terminology),"displacement, not corrected"
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':        mean",&
+    &TRIM(power_terminology)," displacement, not corrected"
     WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
-    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
-    &TRIM(power_terminology),"displacement, equals to <(X-drift)**"//TRIM(msd_exponent_str)//">"
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
+    &TRIM(power_terminology)," displacement, equals to <(X-drift)**"//TRIM(msd_exponent_str)//">"
     WRITE(*,*) "   'drift_x(y/z)':  the x, y and z components of the drift vector (average over box)"
     WRITE(*,*) "   '#(N)':          number of averages taken to obtain this value"
    ELSE
     WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<R**"//TRIM(msd_exponent_str)//">':   mean",TRIM(power_terminology),"displacement, not corrected"
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':   mean",TRIM(power_terminology)," displacement, not corrected"
     WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
    ENDIF
    WRITE(*,'(" the time scaling factor is ",I0)') TIME_SCALING_FACTOR
@@ -7897,7 +7896,9 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
       !Then, the projection is applied - if all entries are one, then the 'normal', three-dimensional mean squared displacement is calculated.
       projektionsvektor(:)=DFLOAT(projections(1:3,projection_number))*projektionsvektor(:)
       !add the found distance to x_squared.
-      squared_clip=squared_clip+SUM((projektionsvektor(:))**msd_exponent)!squared_clip collects the quantity x²+y²+z² (or parts thereof)
+      squared_clip=squared_clip+SQRT(SUM(projektionsvektor(:)**2))**msd_exponent !squared_clip collects the quantity x²+y²+z² (or parts thereof)
+      !if only the MSD is required, the following line will work just fine, and is faster:
+      ! --> squared_clip=squared_clip+SUM((projektionsvektor(:))**2)
       !unlike x_squared, x_unsquared is sign-sensitive and has to be collected in a clipboard variable.
       vector_clip=vector_clip+projektionsvektor
      ENDDO
@@ -9502,7 +9503,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 09_Apr_2020"
+ PRINT *, "   Date of Release: 10_Apr_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -11453,6 +11454,9 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="read_sequential") inputstring="sequential_read"!support for synonyms
     IF (TRIM(inputstring)=="time_scaling_factor") inputstring="time_scaling"!support for synonyms
     IF (TRIM(inputstring)=="parallel_execution") inputstring="parallel_operation"!support for synonyms
+    IF (TRIM(inputstring)=="print_atom_masses") inputstring="print_atomic_masses"!support for synonyms
+    IF (TRIM(inputstring)=="print_atomic_weights") inputstring="print_atomic_masses"!support for synonyms
+    IF (TRIM(inputstring)=="print_atom_weights") inputstring="print_atomic_masses"!support for synonyms
     !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
     SELECT CASE (TRIM(inputstring))
     CASE ("quit")
@@ -11746,7 +11750,7 @@ INTEGER :: ios,n
      !$  EXIT
      !$ ENDIF
      !$ IF (inputinteger<1) THEN
-     !$  inputinteger=OMP_get_num_threads()
+     !$  inputinteger=OMP_get_max_threads()
      !$ ELSEIF (inputinteger>OMP_get_num_procs()) THEN
      !$  CALL report_error(42,exit_status=inputinteger)
      !$  inputinteger=OMP_get_num_procs()
@@ -11936,7 +11940,7 @@ INTEGER :: ios,n
    WRITE(*,'(" currently assuming ",I0," as time difference between steps")') TIME_SCALING_FACTOR
    WRITE(*,*) "assuming Angström as distance unit and femtoseconds as time unit."
    WRITE(*,*) "Using these constants:"
-   WRITE(*,'("    boltzmann constant:  ",E15.7E2," J/K")') boltzmann
+   WRITE(*,'("    boltzmann constant:  ",E15.9E2," J/K")') boltzmann
    WRITE(*,'("    avogadro constant:   ",E15.9E2," 1/mol")') avogadro
    WRITE(*,'("    elementary charge:   ",E15.9E2," C")') elementary_charge
    WRITE(*,'("    archimedes constant: ",E15.9E2)') pi
