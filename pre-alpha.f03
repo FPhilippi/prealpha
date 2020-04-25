@@ -1,4 +1,4 @@
-! RELEASED ON 10_Apr_2020 AT 13:05
+! RELEASED ON 25_Apr_2020 AT 18:05
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -210,6 +210,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !110 invalid molecule_type_index, ignore line
  !111 invalid atom_index, ignore line
  !112 atomic mass already specified, will be overwritten.
+ !113 "simple" keyword not available
+ !114 "prealpha_simple.inp" will be overwritten
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -634,6 +636,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 111: Invalid atom index. This line is ignored."
     CASE (112)
      WRITE(*,*) " #  WARNING 112: Atomic mass already specified - will be overwritten."
+    CASE (113)
+     WRITE(*,*) " #  WARNING 113: Simple mode not (yet) available for this keyword."
+    CASE (114)
+     WRITE(*,*) " #  WARNING 114: Overwriting existing 'prealpha_simple.inp'."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: unspecified error"
     END SELECT
@@ -1177,18 +1183,18 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL,PARAMETER :: default_mass_phosphorus=30.974
  REAL,PARAMETER :: default_mass_lithium=6.94
  !variables
- REAL :: mass_hydrogen
- REAL :: mass_fluorine
- REAL :: mass_boron
- REAL :: mass_chlorine
- REAL :: mass_bromine
- REAL :: mass_iodine
- REAL :: mass_nitrogen
- REAL :: mass_oxygen
- REAL :: mass_carbon
- REAL :: mass_sulfur
- REAL :: mass_phosphorus
- REAL :: mass_lithium
+ REAL :: mass_hydrogen=default_mass_hydrogen
+ REAL :: mass_fluorine=default_mass_fluorine
+ REAL :: mass_boron=default_mass_boron
+ REAL :: mass_chlorine=default_mass_chlorine
+ REAL :: mass_bromine=default_mass_bromine
+ REAL :: mass_iodine=default_mass_iodine
+ REAL :: mass_nitrogen=default_mass_nitrogen
+ REAL :: mass_oxygen=default_mass_oxygen
+ REAL :: mass_carbon=default_mass_carbon
+ REAL :: mass_sulfur=default_mass_sulfur
+ REAL :: mass_phosphorus=default_mass_phosphorus
+ REAL :: mass_lithium=default_mass_lithium
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1556,7 +1562,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    DO molecule_type_index=1,number_of_molecule_types,1 !iterate over all molecule types.
     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !for each molecule type, look at the atoms one by one and assign their values.
      !checking the atom represented by atom_index:
-     IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))=="X") THEN
+     IF ((TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))=="X").OR.&
+     &(TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))=="D")) THEN
       !this atom is a drude particle. First, change flag to '0'
       molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag=0
       !THEN, check which atom this drude belongs to by searching for the closest distance.
@@ -1564,7 +1571,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       !initialise current_atom_index to -1, if it stays like that then there was no core available!
       current_atom_index=-1
       DO atom_index_observed=1,molecule_list(molecule_type_index)%number_of_atoms,1
-       IF ((TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index_observed))/="X").AND.&
+       IF (((TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index_observed))/="X").AND.&
+       &(TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index_observed))/="D")).AND.&
        &(molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_observed)%drude_flag==-1)) THEN
         !The observed atom is not a drude particle, and has not yet been assigned a drude particle.
         ! No need to check for (atom_index_observed/=atom_index) because of /= "X"
@@ -2394,6 +2402,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   SUBROUTINE show_drude_settings()
   IMPLICIT NONE
   INTEGER :: drude_flag,molecule_type_index,atom_index,number_of_assigned_DC_pairs
+   IF (drudes_assigned) THEN
+    WRITE(*,*) "Printing detailed drude information."
+   ELSE
+    CALL report_error(91)
+    RETURN
+   ENDIF
    number_of_assigned_DC_pairs=0 !counter for the number of assigned drude pairs
    WRITE(*,*) "Printing detailed drude information."
    DO molecule_type_index=1,number_of_molecule_types,1 !iterate over all molecule types.
@@ -3276,23 +3290,21 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
              ENDIF
              COM_mass_list(IACHAR(shortstring(1:1)))=mass_input
             ELSE
-             IF (shortstring(1:1)=="X") THEN
+             IF ((shortstring(1:1)=="X").OR.(shortstring(1:1)=="D")) THEN
               IF (drude_mass>0.001d0) THEN
                WRITE(*,*)
                CALL report_error(58,exit_status=IACHAR(shortstring(1:1)))
               ENDIF
-              drude_mass=mass_input
-             ELSE
-              CALL change_default_mass(shortstring,mass_input)
              ENDIF
+             CALL change_default_mass(shortstring,mass_input)
             ENDIF
            ENDIF
           ENDDO
           !test if custom_default_masses still true. If not, print error message.
           IF (custom_default_masses) THEN
-           WRITE(*,'("done.")') 
+           WRITE(*,'(" done.")') 
           ELSE
-           WRITE(*,'("failed.")') 
+           WRITE(*,'(" failed.")') 
            CALL report_error(61)
            COM_mass_list(:)=0.0d0
           ENDIF
@@ -3368,6 +3380,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       old_mass=mass_lithium
       mass_lithium=new_mass
       element_name_full="Lithium"
+     CASE ("D","X")
+      old_mass=drude_mass
+      drude_mass=new_mass
+      element_name_full="drude particle"
      CASE DEFAULT
       CALL report_error(60,exit_status=IACHAR(element_name_input(1:1)))
       RETURN
@@ -3843,7 +3859,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
        READ(3,IOSTAT=ios,FMT=*) element_name
        IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
-       IF (TRIM(element_name)=="X") number_of_drude_particles=number_of_drude_particles+1
+       IF ((TRIM(element_name)=="X").OR.(TRIM(element_name)=="D")) number_of_drude_particles=number_of_drude_particles+1
        molecule_list(molecule_type_index)%list_of_elements(atom_index)=element_name
        element_mass=atomic_weight(element_name)
        IF (molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)) THEN
@@ -3860,7 +3876,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        DO atom_index=1,dummy,1!skip over the remaining ones
         READ(3,IOSTAT=ios,FMT=*) element_name
         IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
-        IF (TRIM(element_name)=="X") number_of_drude_particles=number_of_drude_particles+1
+        IF ((TRIM(element_name)=="X").OR.(TRIM(element_name)=="D")) number_of_drude_particles=number_of_drude_particles+1
         !While 'skipping', also check if there are some violations so far.
         current_atom_index=(MOD(atom_index-1,molecule_list(molecule_type_index)%number_of_atoms)+1)
         IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(current_atom_index))/=TRIM(element_name)) THEN
@@ -3905,7 +3921,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      DO stepcounter=1,number_of_steps,1 !gives third dimension of trajectory
       !first, skip the head of the trajectory
       DO dummy=1,headerlines_to_skip,1
-       IF (dummy==2) THEN
+       IF ((dummy==2).AND.(TRAJECTORY_TYPE=="lmp")) THEN
         READ(3,IOSTAT=ios,FMT=*) item_timestep
         IF (ios/=0) THEN
          IF (ERROR_CODE/=107) THEN
@@ -4071,6 +4087,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    CASE ("Li")
     atomic_weight=(mass_lithium) !IF you change this part, THEN change Module_Main, too!
    CASE ("X")
+    atomic_weight=(drude_mass) !IF you change this part, THEN change Module_Main, too!
+   CASE ("D")
     atomic_weight=(drude_mass) !IF you change this part, THEN change Module_Main, too!
    CASE DEFAULT
     !the 'convert' keyword produces a trajectory with a,b,c,...,z as element names.
@@ -4525,12 +4543,12 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   !SUBROUTINE to center the molecule provided in the specified unit in xyz format.
   !If addhead is .TRUE. THEN a line with the number of atoms and a blank line are added. note that 'addhead' defaults to .FALSE.!
   !If the outputunit is present, THEN it is opened with "append"!
-  SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header)
+  SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header,geometric_center)
   IMPLICIT NONE
   INTEGER,INTENT(IN),OPTIONAL :: outputunit
   INTEGER,INTENT(IN) :: unit_number
   INTEGER :: number_of_atoms,ios
-  LOGICAL,OPTIONAL :: addhead
+  LOGICAL,OPTIONAL :: addhead,geometric_center
   CHARACTER(LEN=*),OPTIONAL :: custom_header
   TYPE :: atom
    CHARACTER (LEN=1) :: atom_type='X'
@@ -4585,6 +4603,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     SUBROUTINE read_center_write()
     IMPLICIT NONE
     INTEGER :: n
+    REAL :: weigh
      !Iterate over the body of the XYZ file, read data into 
      DO n=1,number_of_atoms,1
       READ(unit_number,IOSTAT=ios,FMT=*) molecule(n)%atom_type,molecule(n)%atom_position(:)
@@ -4594,8 +4613,17 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       ENDIF
       molecule(n)%mass=atomic_weight(molecule(n)%atom_type)
       center_of_mass%mass=center_of_mass%mass+molecule(n)%mass
-      center_of_mass%atom_position(:)=center_of_mass%atom_position(:)+molecule(n)%mass*molecule(n)%atom_position(:)
+      weigh=molecule(n)%mass
+      IF (PRESENT(geometric_center)) THEN
+       !for the centroid, the atomic position are weighed equally.
+       IF (geometric_center) weigh=1.0
+      ENDIF
+      center_of_mass%atom_position(:)=center_of_mass%atom_position(:)+weigh*molecule(n)%atom_position(:)
      END DO
+     IF (PRESENT(geometric_center)) THEN
+      !for the centroid, normalisation is by the number of atoms
+      IF (geometric_center) center_of_mass%mass=FLOAT(number_of_atoms)
+     ENDIF
      !normalize sum of positions by total mass, so that the center of mass is obtained
      center_of_mass%atom_position(:)=center_of_mass%atom_position(:)/center_of_mass%mass
      !subtract the centre of mass from atomic coordinates:
@@ -4980,7 +5008,8 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
       element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
       DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
        !Sort of high accuracy should be kept here because of the way I use this routine.
-       WRITE(3,'(A2,3E19.10)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+       !reduced to 16.8 from 18.10
+       WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
       ENDDO
      ENDDO
     ENDDO
@@ -7461,9 +7490,33 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
  PRIVATE :: finalise_diffusion,make_diffusion_functions,x_num,x_squared,x_unsquared
  PRIVATE :: tmax_default,tstep_default,verbose_print_default,verbose_print
  PRIVATE :: write_diffusion_functions
- PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input
+ PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input,write_simple_diffusion
 
  CONTAINS
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distribution'
+  SUBROUTINE write_simple_diffusion()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: n,ios,tstep_local
+   FILENAME_DIFFUSION_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(FILENAME_DIFFUSION_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(FILENAME_DIFFUSION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   tstep_local=(give_number_of_timesteps()-1)/10000
+   IF (tstep_local<5) tstep_local=1
+   WRITE(8,'("default")')
+   WRITE(8,'("tmax ",I0)') give_number_of_timesteps()-1
+   WRITE(8,'("tstep ",I0)') tstep_local
+   WRITE(8,'("print_verbose F")')
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_diffusion
 
   !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_input_for_self_diffusion'
@@ -8053,6 +8106,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
   REAL :: box_dimensions(2,3),box_size(3)!low and high for x,y,z and difference between high and low
   REAL :: maximum_distance_squared
   CHARACTER(LEN=2),DIMENSION(:),ALLOCATABLE :: list_of_elements !--> Turned on support for  2-letter elements!
+  CHARACTER(LEN=1) :: drude_symbol="0"
   REAL,DIMENSION(:,:),ALLOCATABLE :: coordinates !first dimension nlines_total, second dimension the three coordinates
   TYPE :: single_molecule
    CHARACTER(LEN=1024) :: sum_formula
@@ -8073,10 +8127,10 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
     !$ CALL OMP_set_num_threads(threadnum)
     !$ ENDIF
    PRINT *,"Trying to perform molecule recognition on trajectory file:"
+   trajectory_command_line=ADJUSTL(trajectory_command_line)
    WRITE(*,'(A,A,A)') ' "',TRIM(trajectory_command_line),'"'
    PRINT *,"Expecting a sorted, unwrapped lammps trajectory with cartesian coordinates!"
    PRINT *,"(Specify 'element xu yu zu' and 'sort ID' in lammps)"
-   trajectory_command_line=ADJUSTL(trajectory_command_line)
    INQUIRE(FILE=TRIM(trajectory_command_line),EXIST=file_exists)
    IF (file_exists) THEN
     INQUIRE(UNIT=3,OPENED=connected)
@@ -8165,7 +8219,19 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
       molecule_list(lines)%member(:)=.FALSE.
       READ(3,IOSTAT=ios,FMT=*) list_of_elements(lines),coordinates(lines,:)
       CALL wrap_vector(coordinates(lines,:))
-      IF (ADJUSTL(TRIM(list_of_elements(lines)))=="X") number_of_drude_particles=number_of_drude_particles+1
+      IF ((ADJUSTL(TRIM(list_of_elements(lines)))=="X").OR.(ADJUSTL(TRIM(list_of_elements(lines)))=="D")) THEN
+       !a drude particle has been found
+       number_of_drude_particles=number_of_drude_particles+1
+       IF (ADJUSTL(TRIM(list_of_elements(lines)))/=drude_symbol) THEN
+        !drude symbol doesn't match - yet?
+        IF ((drude_symbol=="X").OR.(drude_symbol=="D")) THEN
+         !has already been initialised - Both X and D present!
+         drude_symbol="B"
+        ELSE
+         drude_symbol=ADJUSTL(TRIM(list_of_elements(lines)))
+        ENDIF
+       ENDIF
+      ENDIF
       IF (ios/=0) THEN
        CALL report_error(95)
        CLOSE(UNIT=3)
@@ -8270,7 +8336,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
     INTEGER :: molecule_type_counter,linecounter1,linecounter2,linecounter3,merged_molecule_types,newest_molecule_type
     INTEGER :: written_atoms
     LOGICAL :: file_exists,write_xyz_files
-    CHARACTER(LEN=1024) :: working_directory,xyz_filename
+    CHARACTER(LEN=1024) :: working_directory,xyz_filename,trajectory_filename_only
      WRITE(*,'(" Starting cutoff-based molecule recognition.")')
      IF (DEVELOPERS_VERSION) THEN
       CALL initialise_connectivity()
@@ -8339,9 +8405,10 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
      ENDDO
      WRITE(*,'(" Merged molecules into ",I0," types.")') merged_molecule_types
      working_directory=""
-     DO i=LEN(TRIM(trajectory_command_line)),1,-1
+     DO i=LEN(TRIM(trajectory_command_line))-1,1,-1
       IF (IACHAR("/")==IACHAR(trajectory_command_line(i:i)))THEN
        working_directory=TRIM(trajectory_command_line(1:i))
+       trajectory_filename_only=TRIM(trajectory_command_line(i+1:LEN(TRIM(trajectory_command_line))))
        WRITE(*,'(A,A,A)') ' Write into directory "',TRIM(working_directory),'"'
        EXIT
       ENDIF
@@ -8376,7 +8443,8 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
          ENDIF
         ENDDO
         CALL center_xyz(3,.TRUE.,custom_header=&
-        &"Example molecule '"//TRIM(molecule_list(molecule_type_counter)%sum_formula)//"'")
+        &"Example molecule '"//TRIM(molecule_list(molecule_type_counter)%sum_formula)//"'"&
+        &,geometric_center=.TRUE.)
         CLOSE(UNIT=3)
         newest_molecule_type=newest_molecule_type+1
        ENDIF
@@ -8384,7 +8452,8 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
      ELSE
       PRINT *,"A file of the type 'MolRec_Type_N.xyz' already exists - no structures will be written."
      ENDIF
-     INQUIRE(FILE=TRIM(FILENAME_MOLECULAR_INPUT),EXIST=file_exists)
+     !here begins the part that outputs a molecular input file.
+     INQUIRE(FILE=TRIM(working_directory)//TRIM(FILENAME_MOLECULAR_INPUT),EXIST=file_exists)
      IF (file_exists) THEN
       PRINT *,"Molecular input file with name '"//TRIM(FILENAME_MOLECULAR_INPUT)//"' already exists."
       PRINT *,"Please use the following lines until the 'quit' statement as your molecular input file:"
@@ -8400,8 +8469,14 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
        ENDIF
       ENDDO
       IF (number_of_drude_particles/=0) THEN
-       WRITE(*,*) "  masses 1 ### The following line specifies a custom mass."
-       WRITE(*,*) "  X  0.400 ### By that, the support for drude particles is turned on."
+       IF (drude_symbol=="B") THEN
+        WRITE(*,*) "  masses 2 ### Both 'D' and 'X' have been found..."
+        WRITE(*,*) "  X  0.400 ### By that, the support for drude particles is turned on."
+        WRITE(*,*) "  D  0.400 ### By that, the support for drude particles is turned on."
+       ELSE
+        WRITE(*,*) "  masses 1 ### The following line specifies a custom mass."
+        WRITE(*,*) "  "//drude_symbol//"  0.400 ### By that, the support for drude particles is turned on."
+       ENDIF
       ENDIF
       WRITE(*,*) "  quit"
      ELSE
@@ -8425,14 +8500,75 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
         ENDIF
        ENDDO
        IF (number_of_drude_particles/=0) THEN
-        WRITE(8,*) "masses 1 ### The following line specifies a custom mass."
-        WRITE(8,*) "X  0.400 ### By that, the support for drude particles is turned on."
+        IF (drude_symbol=="B") THEN
+         WRITE(8,*) "  masses 2 ### Both 'D' and 'X' have been found..."
+         WRITE(8,*) "  X  0.400 ### By that, the support for drude particles is turned on."
+         WRITE(8,*) "  D  0.400 ### By that, the support for drude particles is turned on."
+        ELSE
+         WRITE(8,*) "  masses 1 ### The following line specifies a custom mass."
+         WRITE(8,*) "  "//drude_symbol//"  0.400 ### By that, the support for drude particles is turned on."
+        ENDIF
        ENDIF
        WRITE(8,*) "quit"
        CLOSE(UNIT=8)
       ENDIF
      ENDIF
      PRINT *,"Charges and number of timesteps need to be adjusted manually."
+     !here begins the part that outputs a general input file
+     INQUIRE(FILE=TRIM(working_directory)//TRIM(FILENAME_GENERAL_INPUT),EXIST=file_exists)
+     IF (file_exists) THEN
+      PRINT *,"General input file with name '"//TRIM(FILENAME_GENERAL_INPUT)//"' already exists."
+      PRINT *,"Please use the following lines until the 'quit' statement as your general input file:"
+      WRITE(*,*) '  "'//TRIM(trajectory_filename_only)//'" ### trajectory filename'
+      WRITE(*,*) '  "./molecular.inp" ### inputfile for module MOLECULAR'
+      WRITE(*,*) '  "./" ### path to trajectory'
+      WRITE(*,*) '  "./" ### path to other input files'
+      WRITE(*,*) '  "./" ### output folder'
+      IF (number_of_drude_particles/=0) &
+      &WRITE(*,*) '  show_drude'
+      WRITE(*,*) '  show_settings'
+      WRITE(*,*) '  print_atomic_masses'
+      WRITE(*,*) '  dump_example'
+      WRITE(*,*) '  sequential_read T'
+      WRITE(*,*) '  #parallel_operation T'
+      WRITE(*,*) '  #set_threads_simple T'
+      WRITE(*,*) '  #trajectory_type lmp'
+      WRITE(*,*) '  quit'
+     ELSE
+      !write molecular input file
+      PRINT *,"Writing general input file '"//TRIM(FILENAME_GENERAL_INPUT)//"'."
+      INQUIRE(UNIT=8,OPENED=connected)
+      IF (connected) CALL report_error(27,exit_status=8)
+      OPEN(UNIT=8,FILE=TRIM(working_directory)//TRIM(FILENAME_GENERAL_INPUT),IOSTAT=ios)
+      IF (ios/=0) THEN
+       CALL report_error(95,exit_status=ios)
+      ELSE
+       WRITE(8,*) '"'//TRIM(trajectory_filename_only)//'" ### trajectory filename'
+       WRITE(8,*) '"./molecular.inp" ### inputfile for module MOLECULAR'
+       WRITE(8,*) '"./" ### path to trajectory'
+       WRITE(8,*) '"./" ### path to other input files'
+       WRITE(8,*) '"./" ### output folder'
+       IF (number_of_drude_particles/=0) &
+       &WRITE(8,*) 'show_drude'
+       WRITE(8,*) 'show_settings'
+       WRITE(8,*) 'print_atomic_masses'
+       WRITE(8,*) 'dump_example'
+       WRITE(8,*) 'sequential_read T'
+       WRITE(8,*) '#parallel_operation T'
+       WRITE(8,*) '#set_threads_simple T'
+       WRITE(8,*) '#trajectory_type lmp'
+       WRITE(8,*) 'quit'
+       WRITE(8,*)
+       WRITE(8,*) ''
+       WRITE(8,*) ''
+       WRITE(8,*) ''
+       WRITE(8,*) 'diffusion_simple'
+       WRITE(8,*) 'distribution_simple'
+       WRITE(8,*) 'This is the general input file.'
+       WRITE(8,*) 'It controls the behaviour of the trajectory analyser.'
+       CLOSE(UNIT=8)
+      ENDIF
+     ENDIF
     END SUBROUTINE recognise_molecules
 
     !find all atoms connected to each other by close contacts.
@@ -8593,9 +8729,37 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PRIVATE :: operation_mode,number_of_references,sampling_interval,references,weigh_charge,subtract_uniform,maxdist
  PRIVATE :: distribution_function
- PUBLIC :: user_distribution_input,perform_distribution_analysis
+ PUBLIC :: user_distribution_input,perform_distribution_analysis,write_simple_sumrules
 
  CONTAINS
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distribution'
+  SUBROUTINE write_simple_sumrules()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: n,ios
+   FILENAME_DISTRIBUTION_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(FILENAME_DISTRIBUTION_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(FILENAME_DISTRIBUTION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'("pdf ",I0)') give_number_of_molecule_types()
+   DO n=1,give_number_of_molecule_types(),1
+    WRITE(8,'("+0 +0 +1 ",I0," -1")') n
+   ENDDO
+   WRITE(8,'("maxdist_optimize")')
+   WRITE(8,'("subtract_uniform F")')
+   WRITE(8,'("weigh_charge T")')
+   WRITE(8,'("sampling_interval 1")')
+   WRITE(8,'("bin_count_a 300")')
+   WRITE(8,'("bin_count_b 1")')
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_sumrules
 
   !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_input_for_distribution'
@@ -8675,7 +8839,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     IF (separate_bins) THEN
      PRINT *,"Please enter bin count for independent variable a):"
      bin_count_a=user_input_integer(10,1000)
-     PRINT *,"Please enter bin count for independent variable a):"
+     PRINT *,"Please enter bin count for independent variable b):"
      bin_count_b=user_input_integer(10,1000)
     ELSE
      PRINT *,"Please enter bin count (to be used for both independent variables):"
@@ -8972,16 +9136,16 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
        IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
       END SELECT
       !check bin counts
-      IF (bin_count_a<10) THEN
-       bin_count_a=10
-       CALL report_error(104,exit_status=10)
+      IF (bin_count_a<1) THEN
+       bin_count_a=1
+       CALL report_error(104,exit_status=1)
       ELSEIF (bin_count_a>1000) THEN
        bin_count_a=1000
        CALL report_error(104,exit_status=1000)
       ENDIF
-      IF (bin_count_b<10) THEN
-       bin_count_b=10
-       CALL report_error(104,exit_status=10)
+      IF (bin_count_b<1) THEN
+       bin_count_b=1
+       CALL report_error(104,exit_status=1)
       ELSEIF (bin_count_b>1000) THEN
        bin_count_b=1000
        CALL report_error(104,exit_status=1000)
@@ -9503,7 +9667,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 10_Apr_2020"
+ PRINT *, "   Date of Release: 25_Apr_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -9638,7 +9802,6 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    ENDDO
    !If no statement was present, then try to get the type from the extension.
    IF (trajectory_statement_absent) THEN
-    PRINT *
     SELECT CASE (FILENAME_TRAJECTORY(LEN(TRIM(FILENAME_TRAJECTORY))-3:LEN(TRIM(FILENAME_TRAJECTORY))))
     CASE (".lmp",".LMP")
      PRINT *,"Assuming lammps trajectory based on file extension."
@@ -10044,9 +10207,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *,"These keywords require separate input files (explained below):"
    PRINT *," - 'rmm-vcf'       (requests feature 'Velocity Correlation Coefficients')"
-   PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement')"
+   PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (simple mode available)"
    PRINT *," - 'dihedral'      (requests feature 'Dihedral Conditions')"
    PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
+   PRINT *," - 'distribution'  (requests feature 'polar/cylindrical distribution function) (simple mode available)"
    PRINT *
    PRINT *,"Molecular input file:"
    PRINT *,"This file contains information about the system, located in the same folder as the executable"
@@ -10062,7 +10226,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    this keyword triggers the specification of custom default masses."
    PRINT *,"    it expects an integer, which is the number of subsequent lines to read."
    PRINT *,"    This is available for single lowercase letters (a,b,c,...,z) and element names."
-   PRINT *,"    (Including 'X', which is treated as drude particl)"
+   PRINT *,"    (Including 'X' and 'D', which are treated as drude particles)"
    PRINT *,"    If e.g. the trajectory contains an anion of mass 123.4, abbreviated as 'a',"
    PRINT *,"    and a cation of mass 432.1, abbreviated as 'c', then this section should be added:"
    PRINT *,"      masses 2"
@@ -10574,7 +10738,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 10 - Print information about drude particles."
     PRINT *," 11 - Compute temperature for drude particles."
     PRINT *," 12 - Write trajectory with drude particles merged into cores."
-    SELECT CASE (user_input_integer(0,12))
+    PRINT *," 13 - Print atomic masses (in format suitable for a molecular input file)"
+    SELECT CASE (user_input_integer(0,13))
     CASE (0)!done here.
      EXIT
     CASE (1)!compute VACFs...
@@ -10726,6 +10891,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A," ### write trajectory without drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
+    CASE (13)!show the atomic masses at this point
+     CALL append_string("print_atomic_masses ### print atomic masses")
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -10790,7 +10958,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 19 - Calculate close contact distances (inter- and intramolecular)."
     PRINT *," 20 - Calculate polar or cylindrical distribution function."
     PRINT *," 21 - Jump analysis / jump velocity distribution"
-    SELECT CASE (user_input_integer(0,21))
+    PRINT *," 22 - Print atomic masses (in format suitable for a molecular input file)"
+    SELECT CASE (user_input_integer(0,22))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -11191,6 +11360,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      &" ### compute histogram / probability distribution of jump velocities."
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (22)!show the atomic masses at this point
+     CALL append_string("print_atomic_masses ### print atomic masses")
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -11458,6 +11630,7 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="print_atomic_weights") inputstring="print_atomic_masses"!support for synonyms
     IF (TRIM(inputstring)=="print_atom_weights") inputstring="print_atomic_masses"!support for synonyms
     !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
+    IF (VERBOSE_OUTPUT) WRITE(*,'(" Line ",I0,": ",A)')  n+HEADER_LINES,"'"//TRIM(inputstring)//"'"
     SELECT CASE (TRIM(inputstring))
     CASE ("quit")
      WRITE(*,*) "exiting analysis."
@@ -11549,7 +11722,7 @@ INTEGER :: ios,n
      IF (are_drudes_assigned()) THEN
       WRITE(*,*) "Writing trajectory with drude particles merged into cores - simple mode."
       startstep=1
-      endstep=1
+      endstep=give_number_of_timesteps()
       CALL check_timesteps(startstep,endstep)
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       CALL remove_drudes(startstep,endstep)
@@ -11593,6 +11766,8 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,", NOT using centre of mass)"
      ENDIF
      CALL dump_single(inputlogical,startstep,endstep,inputinteger,inputinteger2)
+    CASE ("dump_single_simple")
+     CALL report_error(113)
     CASE ("dump_cut") !Module DEBUG
      IF (BOX_VOLUME_GIVEN) THEN
       BACKSPACE 7
@@ -11620,6 +11795,8 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+    CASE ("dump_cut_simple")
+     CALL report_error(113)
     CASE ("dump_dimers") !Module DEBUG
      IF (BOX_VOLUME_GIVEN) THEN
       BACKSPACE 7
@@ -11640,6 +11817,8 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+    CASE ("dump_dimers_simple")
+     CALL report_error(113)
     CASE ("cubic_box_edge")
      IF (BOX_VOLUME_GIVEN) CALL report_error(92)
      BACKSPACE 7
@@ -11656,6 +11835,8 @@ INTEGER :: ios,n
       WRITE(*,'("   lower bound: ",E12.6)') lower
       WRITE(*,'("   upper bound: ",E12.6)') upper
      ENDIF
+    CASE ("cubic_box_edge_simple")
+     CALL report_error(113)
     CASE ("convert") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
@@ -11757,6 +11938,13 @@ INTEGER :: ios,n
      !$ ENDIF
      !$ CALL OMP_set_num_threads(inputinteger)
      !$ WRITE(*,'(" number of threads set to ",I0)') inputinteger
+    CASE ("set_threads_simple")
+     !$ IF (.FALSE.) THEN
+      WRITE(*,*) "keyword 'set_threads_simple' has no effect (Compiler not OpenMP compliant)"
+     !$ ENDIF
+     !$ inputinteger=OMP_get_max_threads()
+     !$ CALL OMP_set_num_threads(inputinteger)
+     !$ WRITE(*,'(" number of threads set to ",I0)') inputinteger
     CASE ("time_scaling") !Module SETTINGS
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger
@@ -11779,7 +11967,7 @@ INTEGER :: ios,n
       EXIT
      ENDIF
      WRITE(*,*) "prefix set to '",TRIM(ADJUSTL(OUTPUT_PREFIX)),"'"
-    CASE ("dump_example") !Module DEBUG
+    CASE ("dump_example","dump_example_simple") !Module DEBUG
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      CALL dump_example()
      WRITE(*,*) "Example molecules written to output folder."
@@ -11795,6 +11983,8 @@ INTEGER :: ios,n
      FILENAME_AUTOCORRELATION_INPUT=dummy
      WRITE(*,*) "(Auto)correlation module invoked."
      CALL perform_autocorrelation()
+    CASE ("correlation_simple")
+     CALL report_error(113)
     CASE ("dihedral") !Module AUTOCORRELATION
      !the (INFORMATION_IN_TRAJECTORY=="VEL") test is done in perform_autocorrelation()!
      !same for the wrap test.
@@ -11807,6 +11997,8 @@ INTEGER :: ios,n
      FILENAME_AUTOCORRELATION_INPUT=dummy
      WRITE(*,*) "(Auto)correlation module invoked."
      CALL perform_autocorrelation()
+    CASE ("dihedral_simple")
+     CALL report_error(113)
     CASE ("diffusion") !Module DIFFUSION
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -11818,7 +12010,16 @@ INTEGER :: ios,n
        CALL report_error(19,exit_status=ios)
        EXIT
       ENDIF
-       FILENAME_DIFFUSION_INPUT=dummy
+      FILENAME_DIFFUSION_INPUT=dummy
+      WRITE(*,*) "Diffusion module invoked."
+      CALL perform_diffusion_analysis()
+     ENDIF
+    CASE ("diffusion_simple")
+     IF (WRAP_TRAJECTORY) THEN
+      CALL report_error(72)
+     ELSE
+      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+      CALL write_simple_diffusion()
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
@@ -11833,6 +12034,16 @@ INTEGER :: ios,n
       ENDIF
        FILENAME_DISTRIBUTION_INPUT=dummy
       WRITE(*,*) "Distribution module invoked."
+      CALL perform_distribution_analysis()
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("distribution_simple")
+     IF (BOX_VOLUME_GIVEN) THEN
+      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+      WRITE(*,*) "Distribution module invoked - simple mode:"
+      WRITE(*,*) "Sum rules and Coulomb energy integral."
+      CALL write_simple_sumrules()
       CALL perform_distribution_analysis()
      ELSE
       CALL report_error(41)
@@ -11888,7 +12099,11 @@ INTEGER :: ios,n
      CALL jump_analysis(200,100,2,1,give_number_of_timesteps(),.FALSE.)
      WRITE(*,*) "################################"
     CASE DEFAULT
-     CALL report_error(20,n+HEADER_LINES)!HEADER_LINES = number of fixed lines in general input file
+     IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,'(" (is commented out)")')
+     ELSE
+      CALL report_error(20,n+HEADER_LINES)!HEADER_LINES = number of fixed lines in general input file
+     ENDIF
     END SELECT
     CALL timing()
    ENDDO
