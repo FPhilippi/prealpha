@@ -1,4 +1,4 @@
-! RELEASED ON 03_May_2020 AT 10:06
+! RELEASED ON 12_May_2020 AT 15:55
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -212,6 +212,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !112 atomic mass already specified, will be overwritten.
  !113 "simple" keyword not available
  !114 "prealpha_simple.inp" will be overwritten
+ !115 couldn't allocate memory for vc_components
+ !116 vc_components contains invalid molecule type
+ !117 vc_components contains invalid "self/distinct" flag
+ !118 component number < 1
+ !119 molecule_index out of bounds...
+ !120 no charged particles - cannot calculate conductivity.
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -640,8 +646,29 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 113: Simple mode not (yet) available for this keyword."
     CASE (114)
      WRITE(*,*) " #  WARNING 114: Overwriting existing 'prealpha_simple.inp'."
+    CASE (115)
+     WRITE(*,*) " #  SEVERE ERROR 115: Couldn't allocate memory for vc_components."
+     WRITE(*,*) " #  give more RAM!"
+     CALL finalise_global()
+     STOP
+    CASE (116)
+     WRITE(*,*) " #  ERROR 116: Invalid molecule type in velocity correlation component (see EXIT STATUS)."
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (117)
+     WRITE(*,*) " #  ERROR 117: Invalid self/distinct flag in velocity correlation component."
+     WRITE(*,*) " #  self contributions require the two molecule type indices to be the same."
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (118)
+     WRITE(*,*) " #  ERROR 118: Number of components < 1 (see EXIT STATUS)."
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (119)
+     WRITE(*,*) " #  ERROR 119: specified molecule index (see EXIT STATUS) is out of bounds."
+     WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
+    CASE (120)
+     WRITE(*,*) " #  ERROR 120: No charged particles - cannot calculate electrical conductivity."
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
     CASE DEFAULT
-     WRITE(*,*) " #  ERROR: unspecified error"
+     WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
    ENDIF
    IF (error_count>MAXITERATIONS) THEN
@@ -975,8 +1002,43 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    !$  ENDIF
    !$ ENDIF
    !Flush I/O to ease identification of bottlenecks
-   CALL FLUSH()
+   CALL refresh_IO()
   END SUBROUTINE timing_parallel_sections
+  
+  !prints the progress, is initialised by passing the number of total iterations.
+  SUBROUTINE print_progress(total_iterations_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN),OPTIONAL :: total_iterations_in
+  INTEGER,SAVE :: progress_counter,total_iterations,iteration_counter
+  LOGICAL,SAVE :: printsteps
+   IF (PRESENT(total_iterations_in)) THEN
+    !initialise
+    IF (total_iterations_in>100) THEN
+     WRITE(*,*) "0% - - - - - 50% - - - - - 100%"
+     CALL refresh_IO()
+     WRITE(*,ADVANCE="NO",FMT='(" ")')
+     progress_counter=0
+     total_iterations=total_iterations_in
+     printsteps=.TRUE.
+     iteration_counter=0
+    ELSE
+     progress_counter=40
+     printsteps=.FALSE.
+    ENDIF
+   ELSE
+    iteration_counter=iteration_counter+1
+    IF ((printsteps).AND.(MOD(iteration_counter,total_iterations/31)==0).AND.(progress_counter<31)) THEN
+     WRITE(*,ADVANCE="NO",FMT='("#")')
+     CALL refresh_IO()
+     progress_counter=progress_counter+1
+    ENDIF
+   ENDIF
+  END SUBROUTINE print_progress
+
+  SUBROUTINE refresh_IO()
+  IMPLICIT NONE
+   CALL FLUSH()
+  END SUBROUTINE refresh_IO
 
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
@@ -1206,6 +1268,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  LOGICAL :: drudes_assigned=.FALSE.
  LOGICAL :: drudes_allocated=.FALSE.
  LOGICAL :: drude_details=.FALSE. ! will be TRUE when reduced mass, minimum_drude_distance and maximum_drude_distance are initialised.
+ LOGICAL :: use_barycentre=.FALSE.
  INTEGER,DIMENSION(:,:),ALLOCATABLE :: dihedral_member_indices !list of atom indices used for reporting dihedral angles.
  INTEGER :: number_of_dihedrals,molecule_type_index_for_dihedrals!number of dihedrals to report, type of molecule they belong to.
  INTEGER :: headerlines_to_skip!header lines in trajectory file, e.g. 9 for a lammps file or 2 for xyz format.
@@ -1246,6 +1309,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  LOGICAL :: custom_default_masses !if 'T', then the user has specified his own default masses for lowercase letters or elements.
  LOGICAL :: custom_atom_masses !if 'T', then the user has manually specified atom masses.
  LOGICAL :: custom_constraints !if 'T', then the user has specified custom constraints on some molecules.
+ !use_firstatom_as_com=.TRUE. ONLY with whole trajectory, NOT with read_sequential.
+ LOGICAL :: use_firstatom_as_com=.FALSE. ! If 'T', then the first atom in any molecule is used instead of centre of mass.
  INTEGER :: file_position=-1!at which timestep the file to read is positioned. The first step is 1.
  INTEGER :: number_of_steps=0 !number of timesteps in whole trajectory
  INTEGER :: number_of_molecule_types=0 !number of different molecules, usually two (cation and anion)
@@ -1260,7 +1325,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
  PRIVATE :: fragments_initialised,fragment_list_base,fragment_list_tip,number_of_tip_atoms,number_of_base_atoms
  PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments,custom_constraints
- PRIVATE :: custom_atom_masses
+ PRIVATE :: custom_atom_masses,use_firstatom_as_com
  !PRIVATE/PUBLIC declarations
  PRIVATE :: report_trajectory_properties,reset_trajectory_file
  PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
@@ -1275,7 +1340,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: give_intermolecular_contact_distance,give_smallest_atom_distance,give_smallest_atom_distance_squared
  PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
  PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
- PUBLIC :: print_atomic_masses
+ PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter
  CONTAINS
 
   SUBROUTINE set_default_masses()
@@ -1651,6 +1716,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
    give_number_of_drude_particles=number_of_drude_particles
   END FUNCTION give_number_of_drude_particles
+
+  LOGICAL FUNCTION give_comboost()
+  IMPLICIT NONE
+   give_comboost=use_firstatom_as_com
+  END FUNCTION give_comboost
 
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_distance&
   &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2)
@@ -2180,7 +2250,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION))&
    !$ &WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (wrapping)"
    !$OMP END SINGLE
-   !$OMP DO
+   !$OMP DO SCHEDULE(STATIC,1)
    DO stepcounter=1,number_of_steps,1
     DO molecule_type_index=1,number_of_molecule_types,1
      DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
@@ -2388,6 +2458,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
    WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
    WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
+   WRITE(*,'("    ",A," ",L1)') "use_firstatom_as_com      ",use_firstatom_as_com
+   WRITE(*,'("    ",A," ",L1)') "use_barycentre            ",use_barycentre
    WRITE(*,'("    ",A," ",I0)') "total_number_of_atoms     ",total_number_of_atoms
    WRITE(*,'("    ",A," ",I0)') "number_of_molecule_types  ",number_of_molecule_types
    WRITE(*,'("    ",A," ",I0)') "number_of_drude_particles ",number_of_drude_particles
@@ -2551,6 +2623,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    file_position=timestep
    !If necessary, wrap into box
    IF (WRAP_TRAJECTORY) CALL wrap_snap()
+   !If necessary, change to barycentric reference frame.
+   IF (use_barycentre) CALL remove_barycenter_sequential()
    CONTAINS
 
     SUBROUTINE read_snapshot_body()
@@ -3024,6 +3098,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   REAL(KIND=WORKING_PRECISION) :: give_center_of_mass(3),weighted_pos(3)!higher precision, because intermediate result.
   INTEGER :: atom_index
   INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+   IF (use_firstatom_as_com) THEN
+    give_center_of_mass(:)=DBLE(molecule_list(molecule_type_index)%trajectory(1,molecule_index,timestep)%coordinates(:))
+    RETURN
+   ENDIF
    IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
    give_center_of_mass(:)=0.0d0
    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
@@ -3042,6 +3120,114 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    !finally, the center of mass has to be normalised by the total mass.
    give_center_of_mass(:)=give_center_of_mass(:)/DBLE(molecule_list(molecule_type_index)%mass)
   END FUNCTION give_center_of_mass
+
+  FUNCTION give_box_center_of_mass(timestep)
+  IMPLICIT NONE
+  REAL :: give_box_center_of_mass(3)
+  REAL(KIND=WORKING_PRECISION) :: pos_atom(3),weighted_pos(3),total_mass
+  INTEGER :: atom_index
+  INTEGER,INTENT(IN) :: timestep
+  INTEGER :: molecule_type_index,molecule_index
+   IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+   weighted_pos(:)=0.0d0
+   total_mass=0.0d0
+   DO molecule_type_index=1,number_of_molecule_types,1
+    total_mass=total_mass+DBLE(molecule_list(molecule_type_index)%total_molecule_count)*&
+    &molecule_list(molecule_type_index)%mass
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     pos_atom(:)=0.0d0
+     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+      !first, the current atom's position is added to pos_atom.
+      !added support for sequential read.
+      IF (READ_SEQUENTIAL) THEN
+       pos_atom(:)=pos_atom(:)+&
+       &DBLE(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:))
+      ELSE
+       pos_atom(:)=pos_atom(:)+&
+       &DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
+      ENDIF
+      !then, this position is weighted with the atom's mass
+     ENDDO
+     !since every atom 'atom_index' in a molecule type is the same, we can take advantage of:
+     !m1*r1+m1*r2+m2*r3+m2*r4=m1*(r1+r2)+m2*(r3+r4)
+     weighted_pos(:)=weighted_pos(:)+&
+     &pos_atom(:)*molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+    ENDDO
+   ENDDO
+   !finally, the center of mass has to be normalised by the total mass.
+   give_box_center_of_mass(:)=(weighted_pos(:)/total_mass)
+  END FUNCTION give_box_center_of_mass
+
+  SUBROUTINE remove_barycenter_sequential()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index,atom_index
+  REAL :: box_COM(3)
+  !needs file_position to be up to date!
+  box_COM(:)=give_box_center_of_mass(file_position)
+  DO molecule_type_index=1,number_of_molecule_types,1
+   DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)=&
+     &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)-box_COM(:)
+    ENDDO
+   ENDDO
+  ENDDO
+  END SUBROUTINE remove_barycenter_sequential
+
+  SUBROUTINE remove_barycenter_fulltraj()
+  IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER :: stepcounter,molecule_type_index,molecule_index,atom_index
+  REAL :: box_COM(3)
+   IF (READ_SEQUENTIAL) CALL report_error(0)
+   IF (VERBOSE_OUTPUT) WRITE(*,*) "Removing box centre-of-mass from every step."
+   !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+   !$OMP PRIVATE(box_COM,molecule_type_index,molecule_index,atom_index)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (remove barycentre)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
+   !$OMP END SINGLE
+   !$OMP DO SCHEDULE(STATIC,1)
+   DO stepcounter=1,number_of_steps,1
+    box_COM(:)=give_box_center_of_mass(stepcounter)
+    DO molecule_type_index=1,number_of_molecule_types,1
+     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+       molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates(:)=&
+       &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates(:)-box_COM(:)
+      ENDDO
+     ENDDO
+    ENDDO
+   ENDDO
+   !$OMP END DO
+   !$OMP END PARALLEL
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+   !$  CALL timing_parallel_sections(.FALSE.)
+   !$ ENDIF
+  END SUBROUTINE remove_barycenter_fulltraj
+
+  SUBROUTINE switch_to_barycenter()
+  IMPLICIT NONE
+   IF (use_barycentre) THEN
+    PRINT *,"Already using barycentric reference frame."
+    RETURN
+   ENDIF
+   use_barycentre=.TRUE.
+   PRINT *,"Switching to barycentric reference frame."
+   IF (READ_SEQUENTIAL) THEN
+    CALL reset_trajectory_file()
+    CALL remove_barycenter_sequential()
+   ELSE
+    CALL remove_barycenter_fulltraj()
+   ENDIF
+  END SUBROUTINE switch_to_barycenter
 
   !writes the specified molecule in xyz format into the specified unit. unit is not overwritten if opened with APPEND!
   !the blanks are not added!
@@ -3170,6 +3356,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: ios,n,allocstatus,a,b,c,totalcharge,headerlines_molecular,m
   CHARACTER(LEN=16) :: inputstring
   REAL(KIND=SP) :: mass_input
+   !Turn COMboost off. Use ONLY with whole trajectory, NOT with read_sequential.
+   use_firstatom_as_com=.FALSE.
+   use_barycentre=.FALSE.
    file_position=-1
    dihedrals_initialised=.FALSE.
    ! first, check if file exists. If not, switch to user input for this part.
@@ -3218,7 +3407,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       IF (ios/=0) CALL report_error(7,exit_status=ios)
       molecule_list(n)%charge=a
       molecule_list(n)%number_of_atoms=b
+      IF (b<1) CALL report_error(80,exit_status=b)
       molecule_list(n)%total_molecule_count=c
+      IF (c<1) CALL report_error(119,exit_status=c)
       total_number_of_atoms=total_number_of_atoms+b*c
       totalcharge=totalcharge+a*c
       ALLOCATE(molecule_list(n)%list_of_elements(b),STAT=allocstatus)
@@ -3235,6 +3426,18 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       ENDIF
       !at this point, the list_of_elements and mass are not specified. This information will be read from the lammps trajectory.
      ENDDO
+     !Check if COM trajectory
+     use_firstatom_as_com=.TRUE.
+     DO n=1,number_of_molecule_types,1
+      IF (molecule_list(n)%number_of_atoms>1) THEN
+       use_firstatom_as_com=.FALSE.
+       EXIT
+      ENDIF
+     ENDDO
+     IF ((use_firstatom_as_com).AND.(VERBOSE_OUTPUT)) THEN
+      PRINT *,"All molecules have only 1 atom - turn on com boost."
+      PRINT *,"(centre-of-mass position = position of this atom)"
+     ENDIF
     END SUBROUTINE read_molecular_input_file_header
 
     SUBROUTINE read_molecular_input_file_default_masses()
@@ -3903,7 +4106,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
     SUBROUTINE load_trajectory_body()
     IMPLICIT NONE
-    INTEGER :: item_timestep,current,previous,step,progress_counter
+    INTEGER :: item_timestep,current,previous,step
     LOGICAL :: use_scaling
      use_scaling=.FALSE.
      previous=-1
@@ -3911,17 +4114,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      step=-1
      IF (VERBOSE_OUTPUT) THEN
       WRITE(*,FMT='(A26)',ADVANCE="NO") " reading the trajectory..."
-      IF (number_of_steps>100) THEN
-       WRITE(*,*)
-       WRITE(*,*) "0% - - - - - 50% - - - - - 100%"
-       WRITE(*,ADVANCE="NO",FMT='(" ")')
-       progress_counter=0
-      ELSE
-       progress_counter=40
-      ENDIF
+      IF (number_of_steps>100) WRITE(*,*)
+      CALL print_progress(number_of_steps)
      ENDIF
      !Flush I/O to ease identification of bottlenecks
-     CALL FLUSH()
+     CALL refresh_IO()
      REWIND 3
      !The outer loop iterates over the timesteps.
      DO stepcounter=1,number_of_steps,1 !gives third dimension of trajectory
@@ -3985,11 +4182,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        ENDDO 
       ENDDO
       !Show progress
-      IF ((number_of_steps>100).AND.(MOD(stepcounter,number_of_steps/31)==0).AND.(progress_counter<31)) THEN
-       WRITE(*,ADVANCE="NO",FMT='("#")')
-       progress_counter=progress_counter+1
-       CALL FLUSH()
-      ENDIF
+      CALL print_progress()
      ENDDO
      IF (VERBOSE_OUTPUT) THEN
       IF (number_of_steps>100) THEN
@@ -4288,7 +4481,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
      !$ ENDIF
      !$OMP END SINGLE
      jump_histogram_local(:,:)=0
-     !$OMP DO
+     !$OMP DO SCHEDULE(STATIC,1)
      DO timestep=startstep_in,endstep_in-1,1
       !the jump distance will be evaluated between timestep and timestep+time_shift.
       !timestep+time_shift must not exceed the number of timesteps.
@@ -4885,7 +5078,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     ENDIF
    !$ ENDIF
    !Flush I/O to ease identification of bottlenecks
-   CALL FLUSH()
+   CALL refresh_IO()
   END SUBROUTINE timing
 
   !dumps a snapshot of the given timestep in .xyz format in either separate files or in one file per molecule type.
@@ -5652,6 +5845,8 @@ END MODULE DEBUG
 !This Module is capable of calculating autocorrelation functions. Currently implemented:
 !the intermittent autocorrelation function for a binary operator, based on an arbitrary set of dihedral constraints.
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
+!reorientational autocorrelation functions.
+!relative mean molecular velocity correlation functions.
 MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
@@ -5667,6 +5862,12 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  INTEGER(KIND=GENERAL_PRECISION),PARAMETER :: tmax_default=1000
  INTEGER(KIND=GENERAL_PRECISION),PARAMETER :: bin_count_default=100
  !Variables.
+ TYPE,PRIVATE :: vc_component
+        INTEGER :: reference_type=-1 ! reference molecule_type_index for velocity correlation
+  INTEGER :: observed_type=-1 ! observed molecule_type_index
+  LOGICAL :: self=.FALSE. ! if true, then this component is a self-correlation - the types must be identical
+    END TYPE vc_component
+ TYPE(vc_component),ALLOCATABLE :: vc_components(:) ! list of velocity correlation components to be calculated.
  INTEGER :: legendre_order !the order of the legendre polynomial to use, usually 2, maybe 1.
  LOGICAL,ALLOCATABLE :: autocorr_array(:,:)!first dimension: number of timesteps. second dimension: number of molecules per step.
  LOGICAL :: fold=fold_default !when true, then on top of the values a,b,... specified in the dihedral_list, (360-b),(360-a)... will be considered, too.
@@ -5683,7 +5884,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  INTEGER(KIND=GENERAL_PRECISION) :: tmax=tmax_default!max number of timesteps into the future for the autocorrelation function. Default is 1000 (maximaler shift)
  INTEGER :: sampling_interval=sampling_interval_default!every so many steps will be sampled
  INTEGER(KIND=WORKING_PRECISION) :: global_incidence,number_of_entries_in_array
- CHARACTER (LEN=16) :: operation_mode="dihedral"!operation mode of the autocorrelation module.
+ CHARACTER (LEN=32) :: operation_mode="dihedral"!operation mode of the autocorrelation module.
  CHARACTER (LEN=32),ALLOCATABLE :: formatted_dihedral_names(:)
  INTEGER :: molecule_type_index,number_of_dihedral_conditions,bin_count=bin_count_default
  !PRIVATE/PUBLIC declarations
@@ -5692,20 +5893,139 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  PRIVATE :: global_incidence,dump_verbose,number_of_entries_in_array,PES_subset_independent,PES_subset_dependent,average_h
  PRIVATE :: tmax,calculate_autocorrelation_function_from_binary_array,molecule_type_index_b,export_dihedral,export_list
  PRIVATE :: fold_default,dump_verbose_default,skip_autocorr_default,tmax_default,bin_count_default,legendre_order
- PUBLIC :: perform_autocorrelation,user_dihedral_input,user_vacf_input,user_reorientation_input
+ PUBLIC :: perform_autocorrelation,user_dihedral_input,user_vacf_input,user_reorientation_input,write_simple_conductivity
+ PUBLIC :: user_vcf_components_input,user_conductivity_input
 
  CONTAINS
 
   !WRITING input file to unit 8, which shouldn't be open.
+  !'header' is either vcf or cacf.
+  !has to be compliant with 'read_vc_components' and 'read_velocity_correlation_body' in 'AUTOCORRELATION' module
+  SUBROUTINE user_vcf_components_input&
+  &(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_vc_components,header)
+  IMPLICIT NONE
+  CHARACTER (LEN=*) :: filename_vc_components,header
+  LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+  INTEGER,INTENT(IN) :: number_of_molecules,nsteps
+  INTEGER :: maxmol,allocstatus,deallocstatus,ios,ncomponents,n
+  LOGICAL :: connected
+   SELECT CASE (TRIM(header))
+   CASE ("cacf")
+    PRINT *,"Generating input for electric current autocorrelation function."
+    PRINT *,"You now have to define the CACF components."
+   CASE ("vcf")
+    PRINT *,"Generating input for velocity correlation functions."
+    PRINT *,"You now have to define the VCF components."
+   END SELECT
+   maxmol=number_of_molecules
+   IF (number_of_molecules==-1) maxmol=10000!unknown molecule number... expect the worst.
+   PRINT *,"How many of these custom components would you like to define?"
+   ncomponents=user_input_integer(1,10000)
+   ALLOCATE(vc_components(ncomponents),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(11,exit_status=allocstatus)
+   PRINT *,"For each of these components, you need to specify:"
+   PRINT *," - the molecule type indices of the species to be correlated"
+   PRINT *," - whether you want the self or distinct contributions."
+   DO n = 1,ncomponents,1
+    WRITE(*,'(" Reading the information for custom component number ",I0,":")') n
+    PRINT *,"Please enter the first molecule type index:"
+    vc_components(n)%reference_type=user_input_integer(1,maxmol)
+    PRINT *,"Please enter the second molecule type index:"
+    vc_components(n)%observed_type=user_input_integer(1,maxmol)
+    IF (vc_components(n)%reference_type==vc_components(n)%observed_type) THEN
+     PRINT *,"Would you like to compute self (y) or distinct (n) contributions?"
+     vc_components(n)%self=user_input_logical()
+    ELSE
+     vc_components(n)%self=.FALSE.
+    ENDIF
+   ENDDO
+   PRINT *,"How many steps do you want the shift of the (auto)correlation functions to be?"
+   PRINT *,"A good starting value is usually 2500 (with 2fs steps / time_scaling 2)."
+   WRITE(*,'(" The default is currently set to ",I0,".")') tmax_default
+   tmax=user_input_integer(1,(nsteps-1))
+   !tmax is initialised now.
+   PRINT *,"Every how many steps would you like to use?"
+   WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+   sampling_interval=user_input_integer(1,nsteps)
+   parallelisation_possible=.TRUE.
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   ENDIF
+   WRITE(*,FMT='(A)',ADVANCE="NO") " writing "//TRIM(header)//" input file..."
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_vc_components),IOSTAT=ios)!input path is added for the VCF file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'(A,I0,A)') " "//TRIM(header)//" ",ncomponents," ### type of analysis + number of components"
+   DO n = 1,ncomponents,1
+    WRITE(8,'(" ",I0," ",I0," ",L1)') vc_components(n)%reference_type,vc_components(n)%observed_type,vc_components(n)%self
+   ENDDO
+   WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+   WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used")') sampling_interval
+   WRITE(8,*) "quit"
+   WRITE(8,*)
+   WRITE(8,*) "This is an input file for the calculation of "//TRIM(header)//" components."
+   WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
+   ENDFILE 8
+   CLOSE(UNIT=8)
+   DEALLOCATE(vc_components,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   WRITE(*,*) "done"
+  END SUBROUTINE user_vcf_components_input
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_velocity_correlation_body' in 'AUTOCORRELATION' module
+  SUBROUTINE user_conductivity_input&
+  &(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_conductivity)
+  IMPLICIT NONE
+  CHARACTER (LEN=*) :: filename_conductivity
+  LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+  INTEGER,INTENT(IN) :: number_of_molecules,nsteps
+  INTEGER :: maxmol,allocstatus,deallocstatus,ios,ncomponents,n
+  LOGICAL :: connected
+   PRINT *,"Generating input for electrical conductivity."
+   PRINT *,"How many steps do you want the shift of the (auto)correlation functions to be?"
+   PRINT *,"A good starting value is usually 10000 (with 20fs steps / time_scaling 20)."
+   WRITE(*,'(" The default is currently set to ",I0,".")') tmax_default
+   tmax=user_input_integer(1,(nsteps-1))
+   !tmax is initialised now.
+   PRINT *,"Every how many steps would you like to use?"
+   WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+   sampling_interval=user_input_integer(1,nsteps)
+   parallelisation_possible=.TRUE.
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   ENDIF
+   WRITE(*,FMT='(A)',ADVANCE="NO") " writing conductivity input file..."
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_conductivity),IOSTAT=ios)!input path is added for the VCF file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'(A)') " conductivity ### type of analysis"
+   WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+   WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used")') sampling_interval
+   WRITE(8,*) "quit"
+   WRITE(8,*)
+   WRITE(8,*) "This is an input file for the calculation of electrical conductivity."
+   WRITE(8,*) "To actually perform the implied calculation, it has to be referenced in 'general.inp'."
+   ENDFILE 8
+   CLOSE(UNIT=8)
+   WRITE(*,*) "done"
+  END SUBROUTINE user_conductivity_input
+
+  !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_input_for_rmmvcf' in 'AUTOCORRELATION' module
-  SUBROUTINE user_vacf_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_rmmvcf)
+  SUBROUTINE user_vacf_input&
+  &(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_rmmvcf)
   IMPLICIT NONE
   CHARACTER (LEN=*) :: filename_rmmvcf
   LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
   INTEGER,INTENT(IN) :: number_of_molecules,nsteps
   INTEGER :: maxmol,ios
   LOGICAL :: connected
-   PRINT *,"Generating VACF input."
+   PRINT *,"Generating VACF input. (in particular, RMM-VCF)"
    !the case 'number_of_molecules==1' has already been caught earlier, in the calling routine.
    IF (number_of_molecules==2) THEN
     PRINT *,"Only two molecule types are present, which will be used as input."
@@ -6055,26 +6375,41 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     OPEN(UNIT=3,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_AUTOCORRELATION_INPUT),&
     &ACTION='READ',IOSTAT=ios)
     IF (ios/=0) CALL report_error(14,exit_status=ios)
-    READ(3,IOSTAT=ios,FMT=*) molecule_type_index
-    IF (ios/=0) THEN
-     READ(3,IOSTAT=ios,FMT=*) operation_mode
-     IF (ios/=0) CALL report_error(14,exit_status=ios)
-     IF (TRIM(operation_mode)=="rmm-vcf") THEN
-      BACKSPACE 3 !rmm-vcf can handle 'no' input for the indices, it then just takes the first two.
-      molecule_type_index=1
-      molecule_type_index_b=2
-     ELSE
-      CALL report_error(14,exit_status=ios)!ERROR 14: incorrect format in autocorrelation.inp
+    READ(3,IOSTAT=ios,FMT=*) operation_mode
+    IF (ios/=0) operation_mode="UNK"
+    IF (TRIM(operation_mode)=="eccf") operation_mode="ecaf"!support for synonyms
+    IF (TRIM(operation_mode)=="cacf") operation_mode="ecaf"!support for synonyms
+    IF (TRIM(operation_mode)=="conductivity_components") operation_mode="ecaf"!support for synonyms
+    IF ((TRIM(operation_mode)=="rmm-vcf")&
+    &.OR.(TRIM(operation_mode)=="conductivity")&
+    &.OR.(TRIM(operation_mode)=="vcf")&
+    &.OR.(TRIM(operation_mode)=="ecaf")) THEN
+     molecule_type_index=1
+     molecule_type_index_b=2
+    ELSE
+     !The part in this level is kept for backwards compatibility.
+     REWIND 3
+     READ(3,IOSTAT=ios,FMT=*) molecule_type_index
+     IF (ios/=0) THEN
+      READ(3,IOSTAT=ios,FMT=*) operation_mode
+      IF (ios/=0) CALL report_error(14,exit_status=ios)
+      IF (TRIM(operation_mode)=="rmm-vcf") THEN
+       BACKSPACE 3 !rmm-vcf can handle 'no' input for the indices, it then just takes the first two.
+       molecule_type_index=1
+       molecule_type_index_b=2
+      ELSE
+       CALL report_error(14,exit_status=ios)!ERROR 14: incorrect format in autocorrelation.inp
+      ENDIF
      ENDIF
+     IF ((molecule_type_index>give_number_of_molecule_types()).OR.(molecule_type_index<1)) THEN
+      !the specified molecule type doesn't exist.
+      CALL report_error(33,exit_status=molecule_type_index)
+      CLOSE(UNIT=3)
+      RETURN
+     ENDIF
+     READ(3,IOSTAT=ios,FMT=*) operation_mode!read the operation mode.
+     IF (ios/=0) CALL report_error(14,exit_status=ios)
     ENDIF
-    IF ((molecule_type_index>give_number_of_molecule_types()).OR.(molecule_type_index<1)) THEN
-     !the specified molecule type doesn't exist.
-     CALL report_error(33,exit_status=molecule_type_index)
-     CLOSE(UNIT=3)
-     RETURN
-    ENDIF
-    READ(3,IOSTAT=ios,FMT=*) operation_mode!read the operation mode.
-    IF (ios/=0) CALL report_error(14,exit_status=ios)
     !Now read the body of the autocorrelation input file in line with the requested operation mode:
     SELECT CASE (TRIM(operation_mode))
     CASE ("dihedral")
@@ -6108,6 +6443,34 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       CALL report_error(40)!Warn the user about the unusual format of the input file (velocities).
       CALL read_input_for_rmmvcf()!uses unit 3!!
      ENDIF
+    CASE ("conductivity")
+     WRITE(*,*) "Calculating electrical conductivity from electric current autocorrelation function."
+     WRITE(*,*) "See, for example, equation (10) in J. Chem. Phys., 2002, 116, 3018–3026."
+     CALL report_error(40)!Warn the user about the unusual format of the input file (velocities).
+     CALL read_velocity_correlation_body()
+    CASE ("vcf")
+     WRITE(*,*) "Calculating custom velocity correlation functions."
+     WRITE(*,*) "See, for example, equations (A6) to (A10) in J. Phys. Chem. B, 2011, 115, 13212–13221."
+     IF (VERBOSE_OUTPUT) THEN
+      WRITE(*,*) "Normalisation follows the convention given in the above paper."
+      WRITE(*,*) "Thus, what will be reported are the quantities enclosed in <...>."
+      WRITE(*,*) "(i.e. including Nan*(Nan-1), but not N or 1/3 in (A9))"
+     ENDIF
+     CALL report_error(40)
+     CALL read_vc_components()
+     IF (ERROR_CODE==118) RETURN
+     CALL read_velocity_correlation_body()
+    CASE ("ecaf")
+     WRITE(*,*) "Calculating custom components of the microscopic charge current autocorrelation function."
+     WRITE(*,*) "See also: THEORY OF SIMPLE LIQUIDS (Hansen / McDonald), fourth edition, chapter 7.7 and 10.5."
+     IF (VERBOSE_OUTPUT) THEN
+      WRITE(*,*) "Reported quantities are not normalised (apart from the number of ensemble averages)."
+      WRITE(*,*) "Thus, the SUM(zi*zj*<vi*vj>) will be reported (not including elementary charge)."
+     ENDIF
+     CALL report_error(40)
+     CALL read_vc_components()
+     IF (ERROR_CODE==118) RETURN
+     CALL read_velocity_correlation_body()
     CASE DEFAULT
      CALL report_error(14)
     END SELECT
@@ -6118,6 +6481,171 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     CALL report_error(21)!No input - no output. easy as that.
    ENDIF
    CONTAINS
+
+    SUBROUTINE read_vc_components()
+    IMPLICIT NONE
+    INTEGER :: ncomponents,n,allocstatus,a,b,c,d
+    CHARACTER(LEN=32) :: inputstring
+     REWIND 3
+     READ(3,IOSTAT=ios,FMT=*) inputstring,ncomponents
+     IF (ios/=0) CALL report_error(14) !no compromises!
+     IF (ncomponents<1) THEN
+      CALL report_error(118,ncomponents)
+      RETURN
+     ENDIF
+     IF (VERBOSE_OUTPUT) WRITE(*,'(" Reading ",I0," components:")') ncomponents
+     !allocate memory
+     IF (ALLOCATED(vc_components)) CALL report_error(0)
+     ALLOCATE(vc_components(ncomponents),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(115,exit_status=allocstatus)
+     DO n=1,ncomponents,1
+      READ(3,IOSTAT=ios,FMT=*) a,b
+      IF (ios/=0) CALL report_error(14)
+      IF (a==b) THEN
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) c,d,vc_components(n)%self
+       IF (ios/=0) CALL report_error(14)
+      ELSE
+       vc_components(n)%self=.FALSE.
+       !not the same molecule type, must be distinct.
+      ENDIF
+      vc_components(n)%reference_type=a
+      vc_components(n)%observed_type=b
+      IF (VERBOSE_OUTPUT) THEN
+       IF (vc_components(n)%self) THEN
+        WRITE(*,FMT='("   ",I0," is <v",I0,"*v",I0,"> (self)")',ADVANCE="NO")n,a,b
+       ELSE
+        WRITE(*,FMT='("   ",I0," is <v",I0,"*v",I0,"> (distinct)")',ADVANCE="NO")n,a,b
+       ENDIF
+       IF ((a<1).OR.(a>give_number_of_molecule_types())&
+       &.OR.(b<1).OR.(b>give_number_of_molecule_types())&
+       &.OR.((a/=b).AND.(vc_components(n)%self))) THEN
+        WRITE(*,'(" ! INVALID !")')
+       ELSE
+        WRITE(*,*)
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE read_vc_components
+
+    SUBROUTINE read_velocity_correlation_body()
+    IMPLICIT NONE
+    INTEGER :: n
+    CHARACTER(LEN=32) :: inputstring
+     !File should be positioned correctly already.
+     !Here, the indices are ready and the body of the input file can be read.
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "End-of-file condition in ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+       EXIT
+      ENDIF
+      SELECT CASE (TRIM(inputstring))
+      CASE ("tmax")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'tmax' to default (=",tmax_default,")"
+        tmax=tmax_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'tmax' to ",tmax
+       ENDIF
+      CASE ("sampling_interval")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') &
+        &"setting 'sampling_interval' to default (=",sampling_interval_default,")"
+        sampling_interval=sampling_interval_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
+       ENDIF
+      CASE ("quit")
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+       EXIT
+      CASE DEFAULT
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
+      END SELECT
+     ENDDO
+    END SUBROUTINE read_velocity_correlation_body
+
+    SUBROUTINE read_input_for_velocity_correlations()
+    IMPLICIT NONE
+    INTEGER :: n,a,b
+    CHARACTER(LEN=32) :: inputstring
+     REWIND 3
+     READ(3,IOSTAT=ios,FMT=*) a,b
+     IF (ios/=0) THEN
+      molecule_type_index=1!equal to molecule 'a'
+      molecule_type_index_b=2!equal to molecule 'b'
+     ELSE
+      !check if the molecule indices are sensible
+      IF ((((a>0).AND.(b>0)).AND.(a/=b)).AND.&
+       &((a<=give_number_of_molecule_types()).AND.(b<=give_number_of_molecule_types()))) THEN
+       !the indices are valid.
+       molecule_type_index=a
+       molecule_type_index_b=b
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(" invalid input for the indices (read ",I0," and ",I0,")")') a,b
+       molecule_type_index=1
+       molecule_type_index_b=2
+      ENDIF
+     ENDIF
+     WRITE(*,'(" Using molecule_type ",I0," (for a) and ",I0," (for b).")') &
+     &molecule_type_index,molecule_type_index_b
+     !skip over line with operation_mode
+     READ(3,*)
+     !Here, the indices are ready and the body of the input file can be read.
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "End-of-file condition in ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+       EXIT
+      ENDIF
+      SELECT CASE (TRIM(inputstring))
+      CASE ("tmax")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'tmax' to default (=",tmax_default,")"
+        tmax=tmax_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'tmax' to ",tmax
+       ENDIF
+      CASE ("sampling_interval")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') &
+        &"setting 'sampling_interval' to default (=",sampling_interval_default,")"
+        sampling_interval=sampling_interval_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
+       ENDIF
+      CASE ("skip_autocorrelation")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "setting 'skip_autocorr' to default (=",skip_autocorr_default,")"
+        skip_autocorr=skip_autocorr_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,*) "setting 'skip_autocorr' to ",skip_autocorr
+       ENDIF
+      CASE ("quit")
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
+       EXIT
+      CASE DEFAULT
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
+      END SELECT
+     ENDDO
+    END SUBROUTINE read_input_for_velocity_correlations
 
     SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
     IMPLICIT NONE
@@ -6529,8 +7057,13 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
     ENDIF
    ENDIF
+   IF (ALLOCATED(vc_components)) THEN
+    DEALLOCATE(vc_components,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+   ENDIF
   END SUBROUTINE finalise_autocorrelation
 
+  !The following SUBROUTINE is tailored toward the calculation of RMM-VCFs.
   SUBROUTINE cross_correlation()
   IMPLICIT NONE
   REAL(KIND=WORKING_PRECISION),ALLOCATABLE :: average_velocities(:,:,:)!ua and ub for rmm-vcf's. first dimension: timestep index, second dimension: 1 (=a) or 2 (=b), third dimension: vector with velocity.
@@ -6733,7 +7266,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      !first, initialise
      temp_function(:,:)=0.0d0
      !Here, the outer loop is chosen to be the starting step, i.e. 't0'
-     !$OMP DO
+     !$OMP DO SCHEDULE(STATIC,1)
      DO startstep=1,nsteps,sampling
       !Thus, first get the initial velocities of every particle for the two molecule types
       DO molecule_counter=1,na,1
@@ -6879,7 +7412,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       WRITE(*,'(" Check your results if this is far off from what you would expect!")') 
      ENDIF
      integral_cross=0.0d0
-     DO timeline=0,tmax,1
+     DO timeline=0,tmax-1,1
       WRITE(3,'(I15,E25.16,E25.16,F25.16)') timeline*TIME_SCALING_FACTOR,SNGL(correlation_function(timeline+1)),&
       &SNGL(integral_cross),SNGL(correlation_function(timeline+1)/firstvalue)
       area=correlation_function(timeline+2)+correlation_function(timeline+1)
@@ -6925,7 +7458,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      ENDIF
      integral_a=0.0d0
      integral_b=0.0d0
-     DO timeline=0,tmax,1
+     DO timeline=0,tmax-1,1
       WRITE(3,'(I15,2E25.16,F25.16,2E25.16,F25.20)') timeline*TIME_SCALING_FACTOR,& !I25: time variable "timeline"
       &SNGL(autocorrelation_function((timeline+1),1)),SNGL(integral_a),& !autocorrelation function for molecule a "lambdas_a(t)" and its "integral"
       &SNGL(autocorrelation_function((timeline+1),1)/firstvalue_a),& !The "normalised" function for molecule a
@@ -7005,8 +7538,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      INQUIRE(UNIT=3,OPENED=connected)
      IF (connected) CALL report_error(27,exit_status=3)
      IF (VERBOSE_OUTPUT) WRITE(*,*) "writing conductivity and diffusion data into file '",&
-     &TRIM(ADJUSTL(OUTPUT_PREFIX))//"conductivity","'"
-     OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"conductivity",IOSTAT=ios)
+     &TRIM(ADJUSTL(OUTPUT_PREFIX))//"conductivity_rmmvcf","'"
+     OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"conductivity_rmmvcf",IOSTAT=ios)
      IF (ios/=0) CALL report_error(26,exit_status=ios)
      WRITE(3,*) "This file contains transport quantities based on the input file '"&
      &,TRIM(FILENAME_AUTOCORRELATION_INPUT),"'"
@@ -7116,7 +7649,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     REAL(WORKING_PRECISION),ALLOCATABLE :: temp_function(:)
     REAL(WORKING_PRECISION),ALLOCATABLE :: initial_orientation(:,:)!variable to store initial position
     INTEGER,ALLOCATABLE :: x_num_temp(:)
-     !Compute velocity autocorrelation functions
+     !Compute reorientational autocorrelation functions
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Computing reorientational correlation function"
      time_correlation_function(:)=0.0d0
      x_num(:)=0
@@ -7141,7 +7674,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      !first, initialise
      temp_function(:)=0.0d0
      !Here, the outer loop is chosen to be the starting step, i.e. 't0'
-     !$OMP DO
+     !$OMP DO SCHEDULE(STATIC,1)
      DO startstep=1,nsteps,sampling
       DO molecule_counter=1,na,1
        !initial orientation = normalised vector from 'base atom' to 'tip atom' at the initial timestep
@@ -7237,7 +7770,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      WRITE(3,'(A15,2A25)') "timeline",TRIM(tcf_name),"integral"
      firstvalue=time_correlation_function(1)
      integral=0.0d0
-     DO timeline=0,tmax,1
+     DO timeline=0,tmax-1,1
       WRITE(3,'(I15,F25.16,E25.16)') timeline*TIME_SCALING_FACTOR,& !I25: time variable "timeline"
       &SNGL(time_correlation_function(timeline+1)),integral !time correlation function and its integral
       !integrating the trapezoids:
@@ -7495,7 +8028,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
    temp_function(:)=0.0_DP
    !iterate over molecules and pass chunks to the subroutine that iterates over timesteps
-   !$OMP DO
+   !$OMP DO SCHEDULE(STATIC,1)
    DO n=1,give_number_of_molecules_per_step(molecule_type_index),1
     temp_function(:)=temp_function(:)+iterate_timesteps(autocorr_array(:,n))
    ENDDO
@@ -7585,12 +8118,663 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
 
   END SUBROUTINE calculate_autocorrelation_function_from_binary_array
 
+  !The following subroutine calculates *only* the microscopic charge current time autocorrelation function.
+  !Handles the operation mode "conductivity".
+  SUBROUTINE overall_conductivity()
+  IMPLICIT NONE
+  REAL(WORKING_PRECISION),ALLOCATABLE :: correlation_function(:)
+  INTEGER :: nsteps
+  CALL initialise_overall_conductivity()
+  IF (.NOT.(ERROR_CODE==120)) THEN
+   CALL compute_overall_conductivity(sampling_interval)
+   CALL report_overall_conductivity()
+  ENDIF
+  CALL finalise_overall_conductivity()
+
+   CONTAINS
+
+    SUBROUTINE report_overall_conductivity()
+    IMPLICIT NONE
+    LOGICAL :: connected
+    INTEGER :: ios,timeline
+    REAL(KIND=WORKING_PRECISION) :: integral,area,conversion_factor
+     !Opening output file for conductivity
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "writing CACF into file '",&
+     &TRIM(ADJUSTL(OUTPUT_PREFIX))//"CACF","'"
+     OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"conductivity_CACF",IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(3,*) "This file contains the microscopic CACF and its running integral based on the input file '"&
+     &,TRIM(FILENAME_AUTOCORRELATION_INPUT),"'"
+     WRITE(3,*) "reference: e.g. equation (10) in J. Chem. Phys., 2002, 116, 3018–3026."
+     WRITE(3,'("    timeline      <j(t)j(0)>        integral")')
+     integral=0.0d0
+     DO timeline=0,tmax-1,1
+      WRITE(3,*) timeline*TIME_SCALING_FACTOR,& !time variable "timeline"
+      &SNGL(correlation_function(timeline+1)),SNGL(integral) !time correlation function and its integral
+      !integrating the trapezoids:
+      area=correlation_function(timeline+2)+correlation_function(timeline+1)
+      area=area*(DFLOAT(TIME_SCALING_FACTOR)/2.0d0)
+      integral=integral+area
+     ENDDO
+     ENDFILE 3
+     CLOSE(UNIT=3)
+     IF (BOX_VOLUME_GIVEN) THEN
+      conversion_factor=1.0d23/(3.0d0*boltzmann*298.15*give_box_volume())
+      WRITE(*,'(A,E16.8,A,E16.8,A)')" specific conductivity is",integral*conversion_factor," S/cm (integral =",integral,")"
+      WRITE(*,*)"(Calculated assuming T=298.15K, Angströms, and femtoseconds)"
+     ENDIF
+     IF (VERBOSE_OUTPUT) WRITE(*,'(" last area value is",E8.1," percent of total integral.")') 100.0*ABS(area)/integral
+    END SUBROUTINE report_overall_conductivity
+
+    SUBROUTINE initialise_overall_conductivity()
+    IMPLICIT NONE
+    INTEGER :: allocstatus,charge,molecule_type_counter
+    LOGICAL :: charged_particles_present
+     nsteps=give_number_of_timesteps()
+     IF ((tmax>(nsteps-1)).OR.(tmax<1)) THEN
+      tmax=(nsteps-1)
+      CALL report_error(28,exit_status=INT(tmax))
+     ENDIF
+     !allocate memory for the correlation_function (from t=0 to t=tmax)
+     ALLOCATE(correlation_function(tmax+1),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     correlation_function(:)=0.0d0
+     !check that there are charged particles!
+     charged_particles_present=.FALSE.
+     DO molecule_type_counter=1,give_number_of_molecule_types()
+      charge=give_charge_of_molecule(molecule_type_counter)
+      IF (charge/=0) THEN
+       charged_particles_present=.TRUE.
+       EXIT
+      ENDIF
+     ENDDO
+     IF (.NOT.(charged_particles_present)) CALL report_error(120)
+    END SUBROUTINE initialise_overall_conductivity
+
+    SUBROUTINE finalise_overall_conductivity()
+    IMPLICIT NONE
+    INTEGER :: deallocstatus
+     DEALLOCATE(correlation_function,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    END SUBROUTINE finalise_overall_conductivity
+
+    !This subroutine computes <vi,vj>, and relevant sums thereof, as given in vc_components.
+    !'sampling' is the sampling interval.
+    SUBROUTINE compute_overall_conductivity(sampling)
+    IMPLICIT NONE
+    !$ INTERFACE
+    !$  FUNCTION OMP_get_num_threads()
+    !$  INTEGER :: OMP_get_num_threads
+    !$  END FUNCTION OMP_get_num_threads
+    !$ END INTERFACE
+    INTEGER,INTENT(IN) :: sampling
+    INTEGER :: startstep,timeline
+    INTEGER :: allocstatus,deallocstatus
+    REAL(WORKING_PRECISION),ALLOCATABLE :: temp_function(:)
+     !Compute velocity correlation functions
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "Computing microscopic charge current time autocorrelation function (CACF)."
+     correlation_function(:)=0.0d0
+     !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+     !$OMP PRIVATE(temp_function)
+     !$OMP SINGLE
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (overall ecaf for conductivity)"
+     !$  CALL timing_parallel_sections(.TRUE.)
+     !$ ENDIF
+     !$OMP END SINGLE
+     !allocate memory for temporary functions (used for parallelisation)
+     ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     temp_function(:)=0.0d0
+     !Here, the outer loop is chosen to be the starting step, i.e. 't0'
+     !$OMP DO SCHEDULE(STATIC,1)
+     DO startstep=1,nsteps,sampling
+      CALL iterate_timesteps_microscopic_charge_current_tacf(startstep,temp_function)
+     ENDDO
+     !$OMP END DO
+     !CRITICAL directive to properly update the correlation_function
+     !$OMP CRITICAL
+     correlation_function(:)=correlation_function(:)+temp_function(:)
+     !$OMP END CRITICAL
+     !deallocate private memory used for parallelisation
+     DEALLOCATE(temp_function,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     !$OMP END PARALLEL
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+     !normalise by the number of startsteps / averages taken.
+     DO timeline=0,tmax,1
+      correlation_function(timeline+1)=correlation_function(timeline+1)/DFLOAT(1+(nsteps-(timeline+1))/sampling)
+     ENDDO
+     !multiply with e**2
+     correlation_function(:)=correlation_function(:)*(elementary_charge**2)
+    END SUBROUTINE compute_overall_conductivity
+
+    !Calculates <j(t)*j(0)> in equation (10) in J. Chem. Phys., 2002, 116, 3018–3026.
+    !Simple and quick.
+    SUBROUTINE iterate_timesteps_microscopic_charge_current_tacf&
+    &(startstep,temp_function)
+    IMPLICIT NONE
+    REAL(KIND=WORKING_PRECISION) :: initial_mcc(3),temp_mcc(3),molecular_mcc(3)
+    INTEGER :: molecule_counter,local_tmax,molecule_type_counter,timeline,charge
+    INTEGER,INTENT(IN) :: startstep
+    REAL(WORKING_PRECISION),INTENT(INOUT) :: temp_function(:)
+    REAL(WORKING_PRECISION) :: chargereal
+     !first, initialise
+     initial_mcc(:)=0.0d0
+     DO molecule_type_counter=1,give_number_of_molecule_types()
+      molecular_mcc(:)=0.0d0
+      charge=give_charge_of_molecule(molecule_type_counter)
+      IF (charge==0) CYCLE
+      chargereal=FLOAT(charge)
+      DO molecule_counter=1,give_number_of_molecules_per_step(molecule_type_counter),1
+       molecular_mcc(:)=molecular_mcc(:)+give_center_of_mass(startstep,molecule_type_counter,molecule_counter)
+      ENDDO
+      !here, molecular_mcc contains the sum of all velocities. Now, weigh with charge and add to initial_mcc.
+      initial_mcc(:)=initial_mcc(:)+molecular_mcc(:)*chargereal
+     ENDDO
+     !now, we have j(0)! Calculate j(t)
+     !Careful: startstep+timeline can of course not exceed the number of available steps.
+     IF ((startstep+tmax)>nsteps) THEN!still ok this way round, because the average positions should be allocated in the calling routine anyway.
+      local_tmax=(nsteps-startstep)
+     ELSE
+      local_tmax=tmax
+     ENDIF
+     DO timeline=0,local_tmax,1
+      !Calculate the j(t), which is the temp_mcc
+      temp_mcc(:)=0.0d0
+      DO molecule_type_counter=1,give_number_of_molecule_types()
+       molecular_mcc(:)=0.0d0
+       charge=give_charge_of_molecule(molecule_type_counter)
+       IF (charge==0) CYCLE
+       chargereal=FLOAT(charge)
+       DO molecule_counter=1,give_number_of_molecules_per_step(molecule_type_counter),1
+        molecular_mcc(:)=molecular_mcc(:)+give_center_of_mass(startstep+timeline,molecule_type_counter,molecule_counter)
+       ENDDO
+       !here, molecular_mcc contains the sum of all velocities. Now, weigh with charge and add to temp_mcc.
+       temp_mcc(:)=temp_mcc(:)+molecular_mcc(:)*chargereal
+      ENDDO
+      !correlate, and presto.
+      temp_function(timeline+1)=temp_function(timeline+1)+DOT_PRODUCT(initial_mcc(:),temp_mcc(:))
+     ENDDO
+    END SUBROUTINE iterate_timesteps_microscopic_charge_current_tacf
+
+  END SUBROUTINE overall_conductivity
+
+  !The following subroutine calculates velocity cross- and autocorrelation functions.
+  !this includes distinct contributions, which are expensive to compute.
+  !Handles the operation modes "vcf" and "ecaf".
+  SUBROUTINE velocity_correlation()
+  IMPLICIT NONE
+  REAL(WORKING_PRECISION),ALLOCATABLE :: correlation_function(:,:)! first entry is time shift. second dimension of the correlation_function corresponds to the entry in vc_components
+  INTEGER :: nsteps,ncomponents
+  LOGICAL :: normalise
+   IF (.NOT.(ALLOCATED(vc_components))) THEN
+    CALL report_error(0)
+    RETURN
+   ENDIF
+   ncomponents=SIZE(vc_components)
+   CALL check_vc_components()
+   !remind user of reference frames.
+   IF ((ERROR_CODE==116).OR.(ERROR_CODE==117)) RETURN
+   CALL initialise_velocity_correlation()
+   CALL compute_velocity_correlation(sampling_interval)
+   SELECT CASE (TRIM(operation_mode))
+   CASE ("vcf")
+    CALL report_vcfs()
+   CASE ("ecaf")
+    CALL report_ecaf()
+   CASE DEFAULT
+    CALL report_error(0)
+   END SELECT
+   CALL finalise_velocity_correlation
+
+   CONTAINS
+
+    SUBROUTINE report_vcfs()
+    IMPLICIT NONE
+    LOGICAL :: connected
+    INTEGER :: ios,timeline,component_counter,molecule_type_counter
+    REAL(KIND=WORKING_PRECISION) :: integral(ncomponents),area,conversion_factor,temperature
+    CHARACTER(LEN=64) :: component_name
+     !Opening output file for velocity correlation functions
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "writing vcf components into file '",&
+     &TRIM(ADJUSTL(OUTPUT_PREFIX))//"VCF_components","'"
+     OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"VCF_components",IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(3,*) "This file contains the VCF components based on the input file '"&
+     &,TRIM(FILENAME_AUTOCORRELATION_INPUT),"'"
+     WRITE(3,*) "See, for example, equations (A6) to (A10) in J. Phys. Chem. B, 2011, 115, 13212–13221."
+     WRITE(3,FMT='(A16)',ADVANCE="NO") "timeline"
+     DO component_counter=1,ncomponents,1
+      IF (vc_components(component_counter)%self) THEN
+       WRITE(component_name,FMT='(A,I0,A,I0,A)') "<vs",vc_components(component_counter)%reference_type,&
+       &"(0)*vs",vc_components(component_counter)%observed_type,"(t)>"
+       IF (DEVELOPERS_VERSION) THEN
+        temperature=1.0d7*give_mass_of_molecule(vc_components(component_counter)%reference_type)*&
+        &correlation_function(1,component_counter)/(3.0d0*boltzmann*avogadro)
+        WRITE(*,'("  ! T (from ",A,"):",3EN10.1)') TRIM(component_name),SNGL(temperature)
+       ENDIF
+      ELSE
+       WRITE(component_name,FMT='(A,I0,A,I0,A)') "<vd",vc_components(component_counter)%reference_type,&
+       &"(0)*vd",vc_components(component_counter)%observed_type,"(t)>"
+      ENDIF
+      WRITE(3,FMT='(A16)',ADVANCE="NO") TRIM(component_name)
+     ENDDO
+     WRITE(3,*)
+     integral(:)=0.0d0
+     DO timeline=0,tmax-1,1
+      WRITE(3,FMT='(I16)',ADVANCE="NO") timeline*TIME_SCALING_FACTOR !time variable "timeline"
+      DO component_counter=1,ncomponents,1
+       WRITE(3,FMT='(E16.8)',ADVANCE="NO") SNGL(correlation_function(timeline+1,component_counter)) !time correlation function
+       !integrating the trapezoids:
+       area=correlation_function(timeline+2,component_counter)+correlation_function(timeline+1,component_counter)
+       area=area*(DFLOAT(TIME_SCALING_FACTOR)/2.0d0)
+       integral(component_counter)=integral(component_counter)+area
+      ENDDO
+      WRITE(3,*)
+     ENDDO
+     ENDFILE 3
+     CLOSE(UNIT=3)
+     WRITE(*,*) "Diffusion properties from integrated velocity correlation components:"
+     WRITE(*,*) "(including the factor 'N' and '1/3', see J. Phys. Chem. B, 2011, 115, 13212–13221.)"
+     DO component_counter=1,ncomponents,1
+      IF (vc_components(component_counter)%self) THEN
+       conversion_factor=1.0d0
+       WRITE(component_name,FMT='(A,I0)') "Ds_",vc_components(component_counter)%reference_type
+      ELSE
+       conversion_factor=FLOAT(give_total_number_of_molecules_per_step())
+       WRITE(component_name,FMT='(A,I0,I0)') "Dd_",&
+       &vc_components(component_counter)%reference_type,vc_components(component_counter)%observed_type
+      ENDIF
+      conversion_factor=conversion_factor/3.0d1 !times 1/3 for dimension, and divide by 10 to convert to cm**2/s
+      WRITE(*,'("   ",A," =",E17.8," cm²/s")') TRIM(component_name),integral(component_counter)*conversion_factor
+     ENDDO
+     WRITE(*,*) "(Assuming femtoseconds and Angströms as input units)"
+    END SUBROUTINE report_vcfs
+
+    SUBROUTINE report_ecaf()
+    IMPLICIT NONE
+    LOGICAL :: connected
+    INTEGER :: ios,timeline,component_counter,i,j
+    REAL(KIND=WORKING_PRECISION) :: integral(ncomponents),area,conversion_factor,total,self,distinct
+    CHARACTER(LEN=64) :: component_name
+     !Opening output file for velocity correlation functions
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "writing CACF (ECAF, ECCF, ...) components into file '",&
+     &TRIM(ADJUSTL(OUTPUT_PREFIX))//"CACF_components","'"
+     OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"CACF_components",IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(3,*) "This file contains the CACF components based on the input file '"&
+     &,TRIM(FILENAME_AUTOCORRELATION_INPUT),"'"
+     WRITE(3,*) "See also: THEORY OF SIMPLE LIQUIDS (Hansen / McDonald), fourth edition, equation (10.5.2)"
+     WRITE(3,FMT='(A16)',ADVANCE="NO") "timeline"
+     DO component_counter=1,ncomponents,1
+      !i and j contain the molecule type index
+      i=vc_components(component_counter)%reference_type
+      j=vc_components(component_counter)%observed_type
+      IF (vc_components(component_counter)%self) THEN
+       WRITE(component_name,FMT='(A,I0,A,I0,A,I0,A,I0,A)') "z",i,"z",j,"<vs",i,"*vs",j,">"
+      ELSE
+       WRITE(component_name,FMT='(A,I0,A,I0,A,I0,A,I0,A)') "z",i,"z",j,"<vd",i,"*vd",j,">"
+      ENDIF
+      WRITE(3,FMT='(A17)',ADVANCE="NO") TRIM(component_name)
+      i=give_charge_of_molecule(i)
+      j=give_charge_of_molecule(j)
+      !now, i and j contain the charge of the corresponding molecules / molecule types.
+      correlation_function(:,component_counter)=correlation_function(:,component_counter)*FLOAT(i*j)
+     ENDDO
+     WRITE(3,*)
+     integral(:)=0.0d0
+     DO timeline=0,tmax-1,1
+      WRITE(3,FMT='(I16)',ADVANCE="NO") timeline*TIME_SCALING_FACTOR !time variable "timeline"
+      DO component_counter=1,ncomponents,1
+       WRITE(3,FMT='(E17.8)',ADVANCE="NO") SNGL(correlation_function(timeline+1,component_counter)) !time correlation function
+       !integrating the trapezoids:
+       area=correlation_function(timeline+2,component_counter)+correlation_function(timeline+1,component_counter)
+       area=area*(DFLOAT(TIME_SCALING_FACTOR)/2.0d0)
+       integral(component_counter)=integral(component_counter)+area
+      ENDDO
+      WRITE(3,*)
+     ENDDO
+     ENDFILE 3
+     CLOSE(UNIT=3)
+     WRITE(*,*) "Conductivities from integrated electric current autocorrelation function components:"
+     conversion_factor=(1.0d23*(elementary_charge**2))/(3.0d0*boltzmann*298.15*give_box_volume())
+     total=0.0d0
+     self=0.0d0
+     distinct=0.0d0
+     integral(:)=integral(:)*conversion_factor
+     DO component_counter=1,ncomponents,1
+      IF (vc_components(component_counter)%self) THEN
+       self=self+integral(component_counter)
+       WRITE(component_name,FMT='(A,I0)') "sigma_s_",vc_components(component_counter)%reference_type
+       WRITE(*,'("   ",A,"   =",EN13.4," S/cm")') TRIM(component_name),integral(component_counter)
+      ELSE
+       distinct=distinct+integral(component_counter)
+       WRITE(component_name,FMT='(A,I0,I0)') "sigma_d_",&
+       &vc_components(component_counter)%reference_type,vc_components(component_counter)%observed_type
+       WRITE(*,'("   ",A,"  =",EN13.4," S/cm")') TRIM(component_name),integral(component_counter)
+      ENDIF
+      total=total+integral(component_counter)
+     ENDDO
+     WRITE(component_name,FMT='(A10)') "sigma_self"
+     WRITE(*,'("   ",A," =",EN13.4," S/cm")') TRIM(component_name),self
+     WRITE(component_name,FMT='(A10)') "sigma_dist"
+     WRITE(*,'("   ",A," =",EN13.4," S/cm")') TRIM(component_name),distinct
+     WRITE(component_name,FMT='(A10)') "sigma_tot."
+     WRITE(*,'("   ",A10," =",EN13.4," S/cm")') TRIM(component_name),total
+     WRITE(*,*) "(Specific conductivity, assuming T=298.15K and femtoseconds/Angströms as input units)"
+    END SUBROUTINE report_ecaf
+
+    SUBROUTINE check_vc_components()
+    IMPLICIT NONE
+    INTEGER :: component_counter,ref,obs
+     DO component_counter=1,ncomponents,1
+      !This is a double check with extended output.
+      ref=vc_components(component_counter)%reference_type
+      obs=vc_components(component_counter)%observed_type
+      IF ((ref<1).OR.(ref>give_number_of_molecule_types())) THEN
+       CALL report_error(116,ref)
+       RETURN
+      ELSEIF ((obs<1).OR.(obs>give_number_of_molecule_types())) THEN
+       CALL report_error(116,obs)
+       RETURN
+      ELSEIF ((ref/=obs).AND.(vc_components(component_counter)%self)) THEN
+       CALL report_error(117)
+       RETURN
+      ENDIF
+     ENDDO
+    END SUBROUTINE check_vc_components
+
+    SUBROUTINE initialise_velocity_correlation()
+    IMPLICIT NONE
+    INTEGER :: allocstatus,component_counter
+     nsteps=give_number_of_timesteps()
+     IF ((tmax>(nsteps-1)).OR.(tmax<1)) THEN
+      tmax=(nsteps-1)
+      CALL report_error(28,exit_status=INT(tmax))
+     ENDIF
+     !allocate memory for the correlation_function (from t=0 to t=tmax)
+     ALLOCATE(correlation_function(tmax+1,ncomponents),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     correlation_function(:,:)=0.0d0
+     SELECT CASE (TRIM(operation_mode))!no further output necessary here, should be covered by initialise_autocorrelation
+     CASE ("vcf")
+      normalise=.TRUE.
+     CASE ("ecaf")
+      normalise=.FALSE.
+     CASE DEFAULT
+      CALL report_error(0)
+     END SELECT
+    END SUBROUTINE initialise_velocity_correlation
+
+    SUBROUTINE finalise_velocity_correlation()
+    IMPLICIT NONE
+    INTEGER :: deallocstatus
+     DEALLOCATE(correlation_function,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    END SUBROUTINE finalise_velocity_correlation
+
+    !This subroutine computes <vi,vj>, and relevant sums thereof, as given in vc_components.
+    !'sampling' is the sampling interval.
+    SUBROUTINE compute_velocity_correlation(sampling)
+    IMPLICIT NONE
+    !$ INTERFACE
+    !$  FUNCTION OMP_get_num_threads()
+    !$  INTEGER :: OMP_get_num_threads
+    !$  END FUNCTION OMP_get_num_threads
+    !$ END INTERFACE
+    INTEGER,INTENT(IN) :: sampling
+    INTEGER :: startstep,timeline,component_counter,nmolecules_ref
+    INTEGER :: allocstatus,deallocstatus
+    REAL(WORKING_PRECISION),ALLOCATABLE :: temp_function(:)
+     !Compute velocity correlation functions
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "Computing velocity correlation functions"
+     correlation_function(:,:)=0.0d0
+     !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+     !$OMP PRIVATE(temp_function,component_counter,nmolecules_ref)
+     !$OMP SINGLE
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (velocity correlation function)"
+     !$  CALL timing_parallel_sections(.TRUE.)
+     !$ ENDIF
+     !$OMP END SINGLE
+     !allocate memory for temporary functions (used for parallelisation)
+     ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
+     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     !Here, the outer loop is chosen to be the starting step, i.e. 't0'
+     !$OMP DO SCHEDULE(STATIC,1)
+     DO startstep=1,nsteps,sampling
+      DO component_counter=1,ncomponents,1
+       nmolecules_ref=give_number_of_molecules_per_step(vc_components(component_counter)%reference_type)
+       IF (vc_components(component_counter)%self) THEN
+        !self contributions
+        CALL iterate_timesteps_velocity_self_correlation&
+        &(component_counter,startstep,temp_function,nmolecules_ref)
+       ELSE
+        !distinct contributions...
+        IF (vc_components(component_counter)%reference_type&
+        &==vc_components(component_counter)%observed_type) THEN
+         CALL iterate_timesteps_velocity_distinct_correlation_sameref&
+         &(component_counter,startstep,temp_function,nmolecules_ref)
+        ELSE
+         CALL iterate_timesteps_velocity_distinct_correlation_differentref&
+         &(component_counter,startstep,temp_function,nmolecules_ref)
+        ENDIF
+       ENDIF
+       !CRITICAL directive to properly update the correlation_function
+       !ATOMIC could also work, not sure if they allow arrays
+       !$OMP CRITICAL
+       correlation_function(:,component_counter)=correlation_function(:,component_counter)+temp_function(:)
+       !$OMP END CRITICAL
+      ENDDO
+     ENDDO
+     !$OMP END DO
+     !deallocate private memory used for parallelisation
+     DEALLOCATE(temp_function,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+     !$OMP END PARALLEL
+     !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+     !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+     !$  CALL timing_parallel_sections(.FALSE.)
+     !$ ENDIF
+     !normalise by the number of startsteps / averages taken.
+     DO timeline=0,tmax,1
+      correlation_function(timeline+1,:)=correlation_function(timeline+1,:)/DFLOAT(1+(nsteps-(timeline+1))/sampling)
+     ENDDO
+    END SUBROUTINE compute_velocity_correlation
+
+    !Calculates <vs(t)*vs(0)> in equation A6/A7 in J. Phys. Chem. B, 2011, 115, 13212–13221.
+    !Does NOT include the factor 1/3, and does NOT include the normalisation by number of molecules!!
+    SUBROUTINE iterate_timesteps_velocity_self_correlation&
+    &(vc_component_number,startstep,temp_function,nmolecules_ref)
+    IMPLICIT NONE
+    REAL(KIND=WORKING_PRECISION) :: temp_value
+    INTEGER :: molecule_counter,local_tmax
+    INTEGER :: molecule_type_index
+    INTEGER :: timeline
+    INTEGER,INTENT(IN) :: startstep,vc_component_number,nmolecules_ref
+    REAL(WORKING_PRECISION),INTENT(INOUT) :: temp_function(:)
+    REAL(WORKING_PRECISION) :: initial_velocities(nmolecules_ref,3),norm_factor
+     !first, initialise
+     norm_factor=FLOAT(nmolecules_ref)
+     temp_function(:)=0.0d0
+     molecule_type_index=vc_components(vc_component_number)%reference_type
+     DO molecule_counter=1,nmolecules_ref,1
+      initial_velocities(molecule_counter,:)=give_center_of_mass(startstep,molecule_type_index,molecule_counter)
+     ENDDO
+     !Careful: startstep+timeline can of course not exceed the number of available steps.
+     IF ((startstep+tmax)>nsteps) THEN!still ok this way round, because the average positions should be allocated in the calling routine anyway.
+      local_tmax=(nsteps-startstep)
+     ELSE
+      local_tmax=tmax
+     ENDIF
+     DO timeline=0,local_tmax,1
+      temp_value=0.0d0
+      DO molecule_counter=1,nmolecules_ref,1
+       temp_value=temp_value+DOT_PRODUCT(&
+       &give_center_of_mass(startstep+timeline,molecule_type_index,molecule_counter),&
+       &initial_velocities(molecule_counter,:))
+      ENDDO
+      IF (normalise) THEN
+       temp_function(timeline+1)=temp_function(timeline+1)+(temp_value/norm_factor)
+      ELSE
+       temp_function(timeline+1)=temp_function(timeline+1)+temp_value
+      ENDIF
+     ENDDO
+    END SUBROUTINE iterate_timesteps_velocity_self_correlation
+    
+    !Calculates <vd(t)*vd(0)> in equation A8/A9 in J. Phys. Chem. B, 2011, 115, 13212–13221.
+    !Does NOT include the factor 1/3, and does NOT include the normalisation by number of molecules!!
+    SUBROUTINE iterate_timesteps_velocity_distinct_correlation_sameref&
+    &(vc_component_number,startstep,temp_function,nmolecules_ref)
+    IMPLICIT NONE
+    REAL(KIND=WORKING_PRECISION) :: temp_value
+    INTEGER :: molecule_counter_ref,molecule_counter_obs,local_tmax
+    INTEGER :: molecule_type_index
+    INTEGER :: timeline
+    INTEGER,INTENT(IN) :: startstep,vc_component_number,nmolecules_ref
+    REAL(WORKING_PRECISION),INTENT(INOUT) :: temp_function(:)
+    REAL(WORKING_PRECISION) :: initial_velocities(nmolecules_ref,3),norm_factor,temp_vector(3)
+     !first, initialise
+     norm_factor=FLOAT(nmolecules_ref*(nmolecules_ref-1))
+     temp_function(:)=0.0d0
+     molecule_type_index=vc_components(vc_component_number)%reference_type
+     DO molecule_counter_ref=1,nmolecules_ref,1
+      initial_velocities(molecule_counter_ref,:)=&
+      &give_center_of_mass(startstep,molecule_type_index,molecule_counter_ref)
+     ENDDO
+     !Careful: startstep+timeline can of course not exceed the number of available steps.
+     IF ((startstep+tmax)>nsteps) THEN!still ok this way round, because the average positions should be allocated in the calling routine anyway.
+      local_tmax=(nsteps-startstep)
+     ELSE
+      local_tmax=tmax
+     ENDIF
+     DO timeline=0,local_tmax,1
+      temp_value=0.0d0
+      DO molecule_counter_ref=1,nmolecules_ref,1
+       temp_vector(:)=0.0d0
+       DO molecule_counter_obs=1,nmolecules_ref,1
+        !it can happen that the two molecules are identical.
+        !in that case, the self contribution needs to be removed.
+        IF (molecule_counter_ref==molecule_counter_obs) CYCLE
+        temp_vector(:)=temp_vector(:)+give_center_of_mass(startstep+timeline,molecule_type_index,molecule_counter_obs)
+       ENDDO
+       temp_value=temp_value+DOT_PRODUCT(temp_vector(:),initial_velocities(molecule_counter_ref,:))
+      ENDDO
+      IF (normalise) THEN
+       temp_function(timeline+1)=temp_function(timeline+1)+(temp_value/norm_factor)
+      ELSE
+       temp_function(timeline+1)=temp_function(timeline+1)+temp_value
+      ENDIF
+     ENDDO
+    END SUBROUTINE iterate_timesteps_velocity_distinct_correlation_sameref
+
+    !Calculates <vd(t)*vd(0)> in equation A8/A9/A10 in J. Phys. Chem. B, 2011, 115, 13212–13221.
+    !Does NOT include the factor 1/3, and does NOT include the normalisation by number of molecules!!
+    SUBROUTINE iterate_timesteps_velocity_distinct_correlation_differentref&
+    &(vc_component_number,startstep,temp_function,nmolecules_ref)
+    IMPLICIT NONE
+    REAL(KIND=WORKING_PRECISION) :: temp_value
+    INTEGER :: molecule_counter_ref,molecule_counter_obs,local_tmax
+    INTEGER :: molecule_type_ref,molecule_type_obs
+    INTEGER :: timeline,nmolecules_obs
+    INTEGER,INTENT(IN) :: startstep,vc_component_number,nmolecules_ref
+    REAL(WORKING_PRECISION),INTENT(INOUT) :: temp_function(:)
+    REAL(WORKING_PRECISION) :: initial_velocities(nmolecules_ref,3),norm_factor
+     !first, initialise
+     temp_function(:)=0.0d0
+     molecule_type_ref=vc_components(vc_component_number)%reference_type
+     molecule_type_obs=vc_components(vc_component_number)%observed_type
+     nmolecules_obs=give_number_of_molecules_per_step(molecule_type_obs)
+     norm_factor=FLOAT(nmolecules_ref*nmolecules_obs)
+     DO molecule_counter_ref=1,nmolecules_ref,1
+      initial_velocities(molecule_counter_ref,:)=&
+      &give_center_of_mass(startstep,molecule_type_ref,molecule_counter_ref)
+     ENDDO
+     !Careful: startstep+timeline can of course not exceed the number of available steps.
+     IF ((startstep+tmax)>nsteps) THEN!still ok this way round, because the average positions should be allocated in the calling routine anyway.
+      local_tmax=(nsteps-startstep)
+     ELSE
+      local_tmax=tmax
+     ENDIF
+     DO timeline=0,local_tmax,1
+      temp_value=0.0d0
+      DO molecule_counter_ref=1,nmolecules_ref,1
+       DO molecule_counter_obs=1,nmolecules_obs,1
+        temp_value=temp_value+DOT_PRODUCT(&
+        &give_center_of_mass(startstep+timeline,molecule_type_obs,molecule_counter_obs),&
+        &initial_velocities(molecule_counter_ref,:))
+       ENDDO
+      ENDDO
+      IF (normalise) THEN
+       temp_function(timeline+1)=temp_function(timeline+1)+(temp_value/norm_factor)
+      ELSE
+       temp_function(timeline+1)=temp_function(timeline+1)+temp_value
+      ENDIF
+     ENDDO
+    END SUBROUTINE iterate_timesteps_velocity_distinct_correlation_differentref
+
+  END SUBROUTINE velocity_correlation
+
+  SUBROUTINE check_boost()
+  IMPLICIT NONE
+   IF (.NOT.(VERBOSE_OUTPUT)) RETURN
+   IF (.NOT.((give_comboost()).AND.(PARALLEL_OPERATION))) THEN
+    PRINT *,"These calculations are very (like, really) involved."
+   ENDIF
+   IF (.NOT.(give_comboost())) THEN
+    PRINT *,"They speed up significantly when performed on a centre-of-mass trajectory."
+    PRINT *,"(See also the keyword 'convert_simple')"
+   ENDIF
+   IF (.NOT.(PARALLEL_OPERATION)) THEN
+    PRINT *,"It is *NOT* advisable to use serial operation."
+   ENDIF
+  END SUBROUTINE check_boost
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'initialise_autocorrelation'
+  SUBROUTINE write_simple_conductivity()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: n,ios,tstep_local
+   FILENAME_AUTOCORRELATION_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_AUTOCORRELATION_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_AUTOCORRELATION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   tstep_local=(give_number_of_timesteps()-1)/10000
+   IF (tstep_local<5) tstep_local=1
+   WRITE(8,'("conductivity")')
+   WRITE(8,'("tmax ",I0)') give_number_of_timesteps()-1
+   WRITE(8,'("sampling_interval ",I0)') tstep_local
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_conductivity
+
   SUBROUTINE perform_autocorrelation()
   IMPLICIT NONE
   CALL initialise_autocorrelation()
-  IF ((ERROR_CODE/=21).AND.(ERROR_CODE/=39).AND.(ERROR_CODE/=33).AND.(ERROR_CODE/=83)) THEN
+  IF ((ERROR_CODE/=21).AND.(ERROR_CODE/=39).AND.(ERROR_CODE/=33).AND.(ERROR_CODE/=83).AND.(ERROR_CODE/=118)) THEN
    !do the actual analysis:
    SELECT CASE (TRIM(operation_mode))!no further output necessary here, should be covered by initialise_autocorrelation
+   CASE ("conductivity")
+    CALL check_boost()
+    CALL overall_conductivity()
+   CASE ("vcf","ecaf")
+    CALL check_boost()
+    CALL velocity_correlation()
    CASE ("dihedral")
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL dihedral_autocorrelation()!fill the array
@@ -7600,6 +8784,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     CALL reorientational_autocorrelation()
    CASE ("rmm-vcf")
     IF (INFORMATION_IN_TRAJECTORY=="POS") CALL report_error(56)
+    CALL check_boost()
     IF (WRAP_TRAJECTORY) THEN
      CALL report_error(72)
     ELSE
@@ -7610,7 +8795,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
    END SELECT
    CALL finalise_autocorrelation()
   ELSE
-   ERROR_CODE=-ERROR_CODE_DEFAULT
+   ERROR_CODE=ERROR_CODE_DEFAULT
    !resetting ERROR_CODE to avoid problems with a rare condition
    !(i.e. invoking perform_autocorrelation after error 21 or 39 or 33 without intermediate problems)
   ENDIF
@@ -8010,7 +9195,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,*) "These quantities will be calculated and reported:"
    IF (verbose_print) THEN
     WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':      mean",&
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':    mean",&
     &TRIM(power_terminology)," displacement, not corrected"
     WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
     WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
@@ -8077,7 +9262,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    x_unsquared_temp(:,:)=0.0d0
    !outer loop iterates over all the possible starting points
    !tmax can't be larger than #timesteps-1, in which case only the first timestep can be a starting point.
-   !$OMP DO
+   !$OMP DO SCHEDULE(STATIC,1)
    DO starting_timestep=1,number_of_timesteps,1
     !get the initial positions, so that module MOLECULAR doesn't have to REWIND every time.
     DO molecule_index=1,nmolecules,1
@@ -9403,7 +10588,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      !$OMP END SINGLE
      distribution_histogram_local(:,:)=0
      observed_type=molecule_type_index_obs
-     !$OMP DO
+     !$OMP DO SCHEDULE(STATIC,1)
      DO timestep=1,give_number_of_timesteps(),sampling_interval
       IF (all_surrounding_molecules) THEN
        DO observed_type=1,give_number_of_molecule_types(),1
@@ -9794,6 +10979,8 @@ LOGICAL :: file_exists,connected,smalltask!'smalltask' means that the analysis c
 LOGICAL :: anytask !is there any task at all?
 LOGICAL :: wrapping_is_sensible!this variable is initialised to .TRUE., and set to .FALSE. as soom as something like msd is requested.
 CHARACTER(LEN=1024) :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
+CHARACTER(LEN=1024) :: filename_vc_components="vc_components.inp",filename_cacf_components="cacf_components.inp" !correlation module standard filenames
+CHARACTER(LEN=1024) :: filename_conductivity="conductivity.inp"!correlation module standard filenames
 CHARACTER(LEN=1024) :: filename_msd="diffusion.inp" !diffusion module standard filename
 CHARACTER(LEN=1024) :: filename_distribution="distribution.inp" !distribution module standard filename
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
@@ -9829,7 +11016,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 03_May_2020"
+ PRINT *, "   Date of Release: 12_May_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -10170,7 +11357,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"   see also equation (11.11.1) in 'THEORY OF SIMPLE LIQUIDS' (Hansen / McDonald), 4th edition."
    PRINT *,"   Or, for ionic liquids, for example equation (2) in DOI: 10.1016/j.cplett.2007.03.084"
    PRINT *
-   PRINT *,"   Velocity Correlation Coefficients:"
+   PRINT *,"   Relative Mean Molecular Velocity Correlation Coefficients:"
    PRINT *,"   Unlike most other modules, this one needs atomic VELOCITIES instead of coordinates."
    PRINT *,"   Computes relative mean molecular velocity correlation coefficients based on:"
    PRINT *,"   Phys. Rev. E, 1994, 50, 1162–1170. DOI: 10.1103/PhysRevE.50.1162"
@@ -10195,6 +11382,19 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"   The equations for electrolytical conductivity can be found in:"
    PRINT *,"   J. Chem. Phys., 1993, 99, 3983–3989. DOI: 10.1063/1.466191"
    PRINT *,"   Note that quite a large number of averages has to be taken to obtain sensible values."
+   PRINT *
+   PRINT *,"   Custom components of velocity correlation functions:"
+   PRINT *,"   (and electric current autocorrelation function)"
+   PRINT *,"   Unlike most other modules, this one needs atomic VELOCITIES instead of coordinates."
+   PRINT *,"   You are left to choose the two molecule types to correlate freely."
+   PRINT *,"   Additionally, you can choose to compute self- or distinct contributions."
+   PRINT *,"   A good reference is, for example, J. Phys. Chem. B, 2011, 115, 13212–13221."
+   PRINT *,"   Requesting velocity correlation functions will compute the quantities in <...> brackets"
+   PRINT *,"   from equations (A6) to (A10) in above reference - i.e. not including the N, but Ncat, Nan,..."
+   PRINT *,"   Requesting CACFs, however, will compute the quantities in <...> brackets"
+   PRINT *,"   from equation (3). Essentially they are the same, but weighed with charges rather than 1/numbers"
+   PRINT *,"   Important note: the distinct contributions are extremely expensive to calculate."
+   PRINT *,"   If possible at all, it is advisable to use the RMM-VCFs, or even the 'conductivity_simple' keyword."
    PRINT *
    PRINT *,"   Mean Squared Displacement: (PARALLELISED)"
    PRINT *,"   Calculates the mean squared displacement including a drift correction."
@@ -10368,6 +11568,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Writes atomic masses to the standard output, using the molecular input file format."
    PRINT *," - 'show_drude':"
    PRINT *,"    Writes detailed current information about drude particles."
+   PRINT *," - 'switch_to_com'"
+   PRINT *,"    Irreversibly switches to the barycentric reference frame."
+   PRINT *,"    i.e. for all analyses below this keyword, the box' centre-of-mass is removed in every step."
+   PRINT *,"    (cannot be turned off again, until the program switches to the next general input file)"
+   PRINT *," - 'conductivity_simple'"
+   PRINT *,"    This is a special keyword that computes the overall electrical conductivity of the whole system."
+   PRINT *,"    It uses the autocorrelation module, but is much faster than the CACFs."
    PRINT *," - 'verbose_output':"
    PRINT *,"    Turned on (T) by default. If (F), then only very limited output is obtained."
    PRINT *," - 'time_output':"
@@ -10375,7 +11582,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *,"These keywords require separate input files (explained below):"
-   PRINT *," - 'rmm-vcf'       (requests feature 'Velocity Correlation Coefficients')"
+   PRINT *," - 'conductivity'  (requests feature 'cacf components' or 'conductivity_simple')"
+   PRINT *," - 'velocity'      (requests feature 'vcf components')"
+   PRINT *," - 'rmm-vcf'       (requests feature 'Relative Mean Molecular Velocity Correlation Coefficients')"
    PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (simple mode available)"
    PRINT *," - 'dihedral'      (requests feature 'Dihedral Conditions')"
    PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
@@ -10428,7 +11637,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    each drude particle is assigned by giving three integers (per line):"
    PRINT *,"    the molecule type index - atom index core - atom index drude."
    PRINT *
-   PRINT *,"velocity correlation input file:"
+   PRINT *,"relative mean molecular velocity correlation input file:"
    PRINT *,"The two molecules to correlate have to be given in the first line."
    PRINT *,"'rmm-vcf' is given in the second line, indicating the type of analysis."
    PRINT *,"Switches are read from the following lines. Available are:"
@@ -10443,6 +11652,37 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory.."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+   PRINT *,
+   PRINT *,"custom velocity correlation AND cacf components input file:"
+   PRINT *,"The first line gives the operation mode, followed by the number of custom components."
+   PRINT *,"The operation mode is either 'vcf' or 'cacf'."
+   PRINT *,"the custom compontents are specified below, one per line. Each line must contain, in this order:"
+   PRINT *," - the molecule type index of the first, reference molecule"
+   PRINT *," - the molecule type index of the second, observed molecule"
+   PRINT *," - 'T' if self contributions are to calculate, and 'F' for distinct contributions."
+   PRINT *,"Thus, the following 7 lines specify every unique vcf in a system with two constituents:"
+   PRINT *,"  vcf 6"
+   PRINT *,"  1 1 T"
+   PRINT *,"  1 1 F"
+   PRINT *,"  1 2 F"
+   PRINT *,"  2 1 F"
+   PRINT *,"  2 2 T"
+   PRINT *,"  2 2 F"
+   PRINT *,"(note that '1 2 F' and '2 1 F' are redundant and will/should give the same value)"
+   PRINT *,"'rmm-vcf' is given in the second line, indicating the type of analysis."
+   PRINT *,"Switches are then read from the following lines. Available are:"
+   PRINT *," - 'tmax':"
+   PRINT *,"    expects an integer, which is then taken as the maximum number of steps"
+   PRINT *,"    into the future for the autocorrelation function (the shift, so to say)."
+   PRINT *," - 'sampling_interval':"
+   PRINT *,"    Expects an integer. Every so many steps will be used as origin of the correlation functions."
+   PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory.."
+   PRINT *," - 'quit'"
+   PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+   PRINT *,"A rule of thumb as final remark: everything with an 'F' will be very, very, very slow."
+   PRINT *,"This is because the double sum over every distinct particle is evaluated."
+   PRINT *,"It is possible (and a lot faster) to just calculate the overall electrical conductivity."
+   PRINT *,"To request this, just put 'conductivity' in the first line."
    PRINT *
    PRINT *,"diffusion input file:"
    PRINT *,"The first line contains the expression 'msd', followed by the number of projections N."
@@ -10883,7 +12123,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Please choose another action you want the program to take later:"
     ENDIF
     PRINT *," 0  - No more actions needed."
-    PRINT *," 1  - Compute velocity correlation/autocorrelation functions"
+    PRINT *," 1  - Velocity (auto)correlation functions / components thereof."
     PRINT *," 2  - Change prefix. (Currently '",TRIM(OUTPUT_PREFIX),"')"
     PRINT *," 3  - Print settings."
     IF (TIME_OUTPUT) THEN
@@ -10908,31 +12148,57 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 11 - Compute temperature for drude particles."
     PRINT *," 12 - Write trajectory with drude particles merged into cores."
     PRINT *," 13 - Print atomic masses (in format suitable for a molecular input file)"
-    SELECT CASE (user_input_integer(0,13))
+    PRINT *," 14 - Electrical conductivity via CACF / components thereof."
+    SELECT CASE (user_input_integer(0,14))
     CASE (0)!done here.
      EXIT
     CASE (1)!compute VACFs...
+     PRINT *,"There are two possible ways to approach this:"
+     PRINT *,"  a) manually specify the components to be calculated."
+     PRINT *,"  b) calculate RMM-VCFs for two components - includes conductivity and Haven Ratio."
+     PRINT *,"Would you like to use the manual specification (y), or rather the RMM-VCFs (n)?"
      smalltask=.FALSE.
-     IF (number_of_molecules==1) THEN
-      PRINT *,"This module needs at least two types of molecules to be present."
-      PRINT *,"Only one is specified. If you want to force it:"
-      PRINT *,"Specify the molecule twice with half the number."
-     ELSE!number_of_molecules is unknown (-1) or large enough.
-      CALL user_vacf_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_rmmvcf)
+     IF (user_input_logical()) THEN
+      CALL user_vcf_components_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,&
+      &filename_vc_components,"vcf")
       IF (parallelisation_requested) THEN
        CALL append_string("parallel_operation T ### turn on parallel operation")
        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
        CALL append_string(fstring)
       ENDIF
       CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
-      CALL append_string('correlation "'//TRIM(OUTPUT_PREFIX)//TRIM(filename_rmmvcf)//'" ### compute velocity cross correlations')
+      CALL append_string('correlation "'//TRIM(OUTPUT_PREFIX)//TRIM(filename_vc_components)//&
+      &'" ### compute custom velocity cross correlations')
       IF (own_prefix) THEN
        own_prefix=.FALSE.
       ELSE
        analysis_number=analysis_number+1
       ENDIF
-     !enough information for the analysis.
-     SKIP_ANALYSIS=.FALSE.
+      !enough information for the analysis.
+      SKIP_ANALYSIS=.FALSE.
+     ELSE
+      IF (number_of_molecules==1) THEN
+       PRINT *,"This module needs at least two types of molecules to be present."
+       PRINT *,"Only one is specified. If you want to force it:"
+       PRINT *,"Specify the molecule twice with half the number."
+      ELSE!number_of_molecules is unknown (-1) or large enough.
+       CALL user_vacf_input&
+       &(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_rmmvcf)
+       IF (parallelisation_requested) THEN
+        CALL append_string("parallel_operation T ### turn on parallel operation")
+        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+        CALL append_string(fstring)
+       ENDIF
+       CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+       CALL append_string('correlation "'//TRIM(OUTPUT_PREFIX)//TRIM(filename_rmmvcf)//'" ### compute velocity cross correlations')
+       IF (own_prefix) THEN
+        own_prefix=.FALSE.
+       ELSE
+        analysis_number=analysis_number+1
+       ENDIF
+       !enough information for the analysis.
+       SKIP_ANALYSIS=.FALSE.
+      ENDIF
      ENDIF
     CASE (2)!set own prefix
      own_prefix=.TRUE.
@@ -10967,6 +12233,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"If you type '0' the program will (later) try to use the (permitted) maximum."
      nthreads=user_input_integer(0,64)
     CASE (8)!convert to centre of mass
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -10974,7 +12246,6 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       CYCLE
      ENDIF
      smalltask=.FALSE.
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      PRINT *,"Would you also like to write the appropriately adjusted molecular input file? (y/n)"
      IF (user_input_logical()) THEN
       CALL append_string("convert T ### reduce trajectory to centre of mass, write new molecular.inp")
@@ -10982,6 +12253,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       CALL append_string("convert F ### reduce trajectory to centre of mass, don't write new molecular.inp")
      ENDIF
     CASE (9)!compute instantaneous temperature.
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11011,7 +12288,6 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Now, enter the last timestep of the range."
      endstep=user_input_integer(startstep,nsteps)
      IF ((endstep-startstep)>10) smalltask=.FALSE.
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      WRITE(fstring,'("temperature ",I0," ",I0," ",I0)') molecule_type_index,startstep,endstep
      IF (molecule_type_index==-1) THEN
       WRITE(fstring,'(A," ### calculate temperature of every molecule type for timesteps ",I0,"-",I0)')&
@@ -11025,6 +12301,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      CALL append_string("show_drude ### print detailed information about drude assignments")
      PRINT *,"The corresponding section has been added to the input file."
     CASE (11) !drude temperature
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11037,12 +12319,17 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Now, enter the last timestep of the range."
      endstep=user_input_integer(startstep,nsteps)
      IF ((endstep-startstep)>50) smalltask=.FALSE.
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      WRITE(fstring,'("drude_temp ",I0," ",I0)') startstep,endstep
      WRITE(fstring,'(A," ### calculate drude temperature for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
     CASE (12) !remove drudes
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11055,7 +12342,6 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Now, enter the last timestep of the range."
      endstep=user_input_integer(startstep,nsteps)
      IF ((endstep-startstep)>50) smalltask=.FALSE.
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      WRITE(fstring,'("remove_drudes ",I0," ",I0)') startstep,endstep
      WRITE(fstring,'(A," ### write trajectory without drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
@@ -11063,6 +12349,52 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (13)!show the atomic masses at this point
      CALL append_string("print_atomic_masses ### print atomic masses")
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (14)
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     PRINT *,"There are two possible ways to approach this:"
+     PRINT *,"  a) manually specify the CACF components to be calculated."
+     PRINT *,"  b) Only calculate the overall conductivity (very fast)."
+     PRINT *,"Would you like to use the manual specification (y), or rather the overall conductivity (n)?"
+     PRINT *,"(If you need the distinct contributions / the Haven ratio,"
+     PRINT *," and have a 2 component sytem, consider using RMM-VCFs.)"
+     smalltask=.FALSE.
+     IF (user_input_logical()) THEN
+      CALL user_vcf_components_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,&
+      &filename_cacf_components,"cacf")
+      IF (parallelisation_requested) THEN
+       CALL append_string("parallel_operation T ### turn on parallel operation")
+       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+       CALL append_string(fstring)
+      ENDIF
+      CALL append_string('correlation "'//TRIM(OUTPUT_PREFIX)//TRIM(filename_cacf_components)//&
+      &'" ### compute custom velocity cross correlations')
+      !enough information for the analysis.
+      SKIP_ANALYSIS=.FALSE.
+     ELSE
+      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+      PRINT *,"Would you like to take this shortcut? (y/n)"
+      IF (user_input_logical()) THEN
+       CALL append_string("conductivity_simple ### calculate electrical conductivity with default values.")
+       CYCLE
+       
+      ENDIF
+      CALL user_conductivity_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,&
+      &filename_conductivity)
+      IF (parallelisation_requested) THEN
+       CALL append_string("parallel_operation T ### turn on parallel operation")
+       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+       CALL append_string(fstring)
+      ENDIF
+      CALL append_string('correlation "'//TRIM(OUTPUT_PREFIX)//TRIM(filename_conductivity)//&
+      &'" ### compute custom velocity cross correlations')
+      !enough information for the analysis.
+      SKIP_ANALYSIS=.FALSE.
+     ENDIF
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -11130,7 +12462,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 21 - Jump analysis / jump velocity distribution"
     PRINT *," 22 - Print atomic masses (in format suitable for a molecular input file)"
     PRINT *," 23 - Write trajectory with neighbouring molecules around one selected molecule"
-    SELECT CASE (user_input_integer(0,23))
+    PRINT *," 24 - Dump close contact dimers for one step"
+    SELECT CASE (user_input_integer(0,24))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -11157,6 +12490,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       PRINT *,"Your trajectory is really too short for that. Please use more timesteps."
       PRINT *,"The minimum of steps - even if only for debugging purposes - should be 11."
      ELSE
+      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+      IF (own_prefix) THEN
+       own_prefix=.FALSE.
+      ELSE
+       analysis_number=analysis_number+1
+      ENDIF
       PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
       PRINT *,"Would you like to take this shortcut? (y/n)"
       IF (user_input_logical()) THEN
@@ -11169,14 +12508,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
        CALL append_string(fstring)
       ENDIF
-      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
       CALL append_string('diffusion "'//TRIM(OUTPUT_PREFIX)//&
       &TRIM(filename_msd)//'" ### compute (drift-corrected) mean squared displacements')
-      IF (own_prefix) THEN
-       own_prefix=.FALSE.
-      ELSE
-       analysis_number=analysis_number+1
-      ENDIF
       !enough information for the analysis.
       SKIP_ANALYSIS=.FALSE.
      ENDIF
@@ -11223,6 +12556,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       analysis_number=analysis_number+1
      ENDIF
     CASE (10)!dump a snapshot of a given timestep
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11234,16 +12573,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Do you want the molecules to be exported as separate files? (y/n)"
      WRITE(fstring,'("dump_snapshot ",I0," ",L1," ### write snapshot of timestep ",I0," into xyz file(s)")')&
      &snap,user_input_logical(),snap
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
      smalltask=.TRUE.
+    CASE (11)!splits the trajectory
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      IF (own_prefix) THEN
       own_prefix=.FALSE.
      ELSE
       analysis_number=analysis_number+1
      ENDIF
-    CASE (11)!splits the trajectory
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11256,15 +12595,15 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Please type the final timestep you wish to export:"
      endstep=user_input_integer(startstep,nsteps)
      WRITE(fstring,'("dump_split ",I0," ",I0," ### split trajectory (per molecule type)")') startstep,endstep
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (12)!converts to centre of mass
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      IF (own_prefix) THEN
       own_prefix=.FALSE.
      ELSE
       analysis_number=analysis_number+1
      ENDIF
-    CASE (12)!converts
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11278,14 +12617,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      ELSE
       WRITE(fstring,'("convert F ### produce centre of mass trajectory, but no molecular input file")')
      ENDIF
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
-     IF (own_prefix) THEN
-      own_prefix=.FALSE.
-     ELSE
-      analysis_number=analysis_number+1
-     ENDIF
     CASE (13)!writes a single molecule trajectory.
      IF (number_of_molecules<1) THEN
       maxmol=10000!unknown molecule number... expect the worst.
@@ -11417,6 +12750,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
     CASE (18)!merge drude particles into cores
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11429,7 +12768,6 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      PRINT *,"Now, enter the last timestep of the range."
      endstep=user_input_integer(startstep,nsteps)
      IF ((endstep-startstep)>50) smalltask=.FALSE.
-     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
      WRITE(fstring,'("remove_drudes ",I0," ",I0)') startstep,endstep
      WRITE(fstring,'(A," ### write trajectory without drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
@@ -11470,6 +12808,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       PRINT *,"Your trajectory is really too short for that. Please use more timesteps."
       PRINT *,"The minimum of steps - even if only for debugging purposes - should be 11."
      ELSE
+      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+      IF (own_prefix) THEN
+       own_prefix=.FALSE.
+      ELSE
+       analysis_number=analysis_number+1
+      ENDIF
       PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
       PRINT *,"Would you like to take this shortcut? (y/n)"
       IF (user_input_logical()) THEN
@@ -11482,18 +12826,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
        CALL append_string(fstring)
       ENDIF
-      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
       CALL append_string('distribution "'//TRIM(OUTPUT_PREFIX)//&
       &TRIM(filename_distribution)//'" ### compute distribution function')
-      IF (own_prefix) THEN
-       own_prefix=.FALSE.
-      ELSE
-       analysis_number=analysis_number+1
-      ENDIF
       !enough information for the analysis.
       SKIP_ANALYSIS=.FALSE.
      ENDIF
     CASE (21)!jump analysis
+     IF (nsteps==1) THEN
+      PRINT *,"Not enough timesteps available."
+      CYCLE
+     ENDIF
      IF (.NOT.(parallelisation_requested)) THEN
       PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
       IF (user_input_logical()) parallelisation_requested=.TRUE.
@@ -11503,14 +12845,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
       CALL append_string(fstring)
      ENDIF
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
       CALL append_string("jump_velocity_simple ### jump analysis with default values.")
-      CYCLE
-     ENDIF
-     IF (nsteps==1) THEN
-      PRINT *,"Not enough timesteps available."
       CYCLE
      ENDIF
      smalltask=.FALSE.
@@ -11547,6 +12891,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      CALL append_string("print_atomic_masses ### print atomic masses")
      PRINT *,"The corresponding section has been added to the input file."
     CASE (23)!dump neighbour trajectory
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
      PRINT *,"Would you like to take this shortcut? (y/n)"
      IF (user_input_logical()) THEN
@@ -11577,6 +12927,41 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A,I0," ",I0," ",I0," ",I0," ",I0," ",I0,A)')&
      &"dump_neighbour_traj ",startstep,endstep,molecule_type_index,molecule_index,molecule_type_index_2,inputnumber,&
      &" ### dump neighbour trajectory of nearest neighbours."
+     CALL append_string(fstring)
+     PRINT *,"The corresponding section has been added to the input file."
+    CASE (24)! dump dimers / closest neighbours
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     PRINT *,"Writes all dimers (closest neighbours) in a certain timestep."
+     PRINT *,"It is necessary to provide the timestep to be analysed."
+     PRINT *,"Please enter this timestep as integer:"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"You now need to specify two molecule types as integers:"
+     PRINT *,"First, the reference molecule type (the one that will be the centre)."
+     IF (number_of_molecules<1) THEN
+      maxmol=10000!unknown molecule number... expect the worst.
+     ELSE
+      maxmol=number_of_molecules
+     ENDIF
+     molecule_type_index=user_input_integer(1,maxmol)
+     PRINT *,"Second, the molecule type of the neighbour molecule."
+     molecule_type_index_2=user_input_integer(1,maxmol)
+     PRINT *,"Would you like to dump all those dimer in one trajectory (y) or as separate files (n)?"
+     IF (user_input_logical()) THEN
+      !all in one trajectory file - append T
+      WRITE(fstring,'("dump_dimers T ",I0," ",I0," ",I0,A,I0," around ",I0," for step ",I0,".")')&
+      &startstep,molecule_type_index,molecule_type_index_2," ### dimers as trajectory file: type ",&
+      &molecule_type_index_2,molecule_type_index,startstep
+     ELSE
+      !separate files - append F
+      WRITE(fstring,'("dump_dimers F ",I0," ",I0," ",I0,A,I0," around ",I0," for step ",I0,".")')&
+      &startstep,molecule_type_index,molecule_type_index_2," ### dimers as separate files: type ",&
+      &molecule_type_index_2,molecule_type_index,startstep
+     ENDIF
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
@@ -11834,6 +13219,8 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="dihedral") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="reorientation") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="rmm-vcf") inputstring="correlation"!support for synonyms
+    IF (TRIM(inputstring)=="conductivity") inputstring="correlation"!support for synonyms
+    IF (TRIM(inputstring)=="velocity") inputstring="correlation"!support for synonyms
     IF (TRIM(inputstring)=="show_drude_settings") inputstring="show_drude"!support for synonyms
     IF (TRIM(inputstring)=="show_drudes") inputstring="show_drude"!support for synonyms
     IF (TRIM(inputstring)=="drude_temperature") inputstring="drude_temp"!support for synonyms
@@ -11857,6 +13244,8 @@ INTEGER :: ios,n
      CALL print_atomic_masses()
     CASE ("show_drude")
      CALL show_drude_settings()
+    CASE ("switch_to_com","barycentric","barycenter","barycentre") !Module MOLECULAR
+     CALL switch_to_barycenter()
     CASE ("verbose_output")
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
@@ -12048,7 +13437,7 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A,I0,A,I0,A)') " Dumping neighbour trajectory, i.e. closest molecules of type ",&
       &inputinteger3," around ",inputinteger," for timestep ",startstep," to ",endstep,"."
       WRITE(*,'(" The molecule with index ",I0," (and type ",I0,") is the reference.")') inputinteger2,inputinteger
-      WRITE(*,'(I0," neighbours (of type ",I0,") will be written for each step.")') inputinteger4,inputinteger3
+      WRITE(*,'(" ",I0," neighbours (of type ",I0,") will be written for each step.")') inputinteger4,inputinteger3
       CALL dump_neighbour_traj(.FALSE.,startstep,endstep,&
       &inputinteger,inputinteger2,inputinteger3,inputinteger4)
      ELSE
@@ -12312,6 +13701,15 @@ INTEGER :: ios,n
       WRITE(*,*) "Sum rules and Coulomb energy integral."
       CALL write_simple_sumrules()
       CALL perform_distribution_analysis()
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("conductivity_simple")
+     IF (BOX_VOLUME_GIVEN) THEN
+      WRITE(*,*) "Autocorrelation module invoked - simple mode:"
+      WRITE(*,*) "Calculating overall conductivity."
+      CALL write_simple_conductivity()
+      CALL perform_autocorrelation()
      ELSE
       CALL report_error(41)
      ENDIF
