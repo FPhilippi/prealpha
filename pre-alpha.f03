@@ -1,4 +1,4 @@
-! RELEASED ON 12_May_2020 AT 15:55
+! RELEASED ON 14_May_2020 AT 17:44
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -25,7 +25,7 @@
 
 !Length unit: Angström
 !mass unit: Dalton
-!Can only handle one-character element names
+!Can only handle one-character element names (Extended to two characters now)
 !consistent ordering assumed, in the format Elementname x y z
 !Path names have to be enclosed in quotes. Probably even double quotes.
 MODULE SETTINGS !This module contains important globals and subprograms.
@@ -218,6 +218,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !118 component number < 1
  !119 molecule_index out of bounds...
  !120 no charged particles - cannot calculate conductivity.
+ !121 number of dihedral conditions less than 1
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -294,7 +295,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
       CALL finalise_global()
       STOP
      ENDIF
-     WRITE(*,*) " #  WARNING 12: dihedral_member_indices is already initialised."
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 12: dihedral_member_indices is already initialised."
      WRITE(*,*) "--> Program will try to reinitialise."
     CASE (13)
      WRITE(*,*) " #  ERROR 13: array of wrong size was passed to give_dihedrals."
@@ -392,7 +394,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  ERROR 39: need at least two molecule types for *CROSS*-correlation."
      WRITE(*,*) "--> Main program will continue, VCF analysis is aborted."
     CASE (40)
-     WRITE(*,*) " #  WARNING 40: This module requires *velocities* as input instead of cartesian coordinates."
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 40: This module requires *velocities* as input instead of cartesian coordinates."
     CASE (41)
      WRITE(*,*) " #  ERROR 41: Box volume required, but not available."
      WRITE(*,*) "--> Try setting the box volume using the keyword 'cubic_box_edge'."
@@ -526,7 +529,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
       CALL finalise_global()
       STOP
      ENDIF
-     WRITE(*,*) " #  WARNING 78: fragment_list is already initialised."
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 78: fragment_list is already initialised."
      WRITE(*,*) "--> Program will try to reinitialise."
     CASE (79)
      WRITE(*,*) " #  SEVERE ERROR 79: couldn't allocate memory for fragment_list."
@@ -645,7 +649,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (113)
      WRITE(*,*) " #  WARNING 113: Simple mode not (yet) available for this keyword."
     CASE (114)
-     WRITE(*,*) " #  WARNING 114: Overwriting existing 'prealpha_simple.inp'."
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 114: Overwriting existing 'prealpha_simple.inp'."
     CASE (115)
      WRITE(*,*) " #  SEVERE ERROR 115: Couldn't allocate memory for vc_components."
      WRITE(*,*) " #  give more RAM!"
@@ -666,6 +671,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
     CASE (120)
      WRITE(*,*) " #  ERROR 120: No charged particles - cannot calculate electrical conductivity."
+     WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (121)
+     WRITE(*,*) " #  ERROR 121: Number of dihedral conditions < 1 (see EXIT STATUS). "
      WRITE(*,*) "--> Main program will continue, this analysis is aborted."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
@@ -6415,6 +6423,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     CASE ("dihedral")
      WRITE(*,*) "Performing autocorrelation analysis of dihedral subspace."
      CALL read_input_for_dihedral_mode()!uses unit 3!!
+     IF (ERROR_CODE==121) RETURN
      number_of_entries_in_array=give_number_of_timesteps()*give_number_of_molecules_per_step(molecule_type_index)
      IF (dump_verbose) THEN!verbose output - array required to bin into. Has to be allocated now:
       ALLOCATE(PES_subset_independent(number_of_dihedral_conditions,0:bin_count),STAT=allocstatus)
@@ -6875,6 +6884,10 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      BACKSPACE 3
      READ(3,IOSTAT=ios,FMT=*) operation_mode,number_of_dihedral_conditions
      IF (ios/=0) CALL report_error(14,exit_status=ios)
+     IF (number_of_dihedral_conditions<1) THEN
+      CALL report_error(121,number_of_dihedral_conditions)
+      RETURN
+     ENDIF
      !formatted_dihedral_names have to be allocated here, because number_of_dihedral_conditions is not available before.
      ALLOCATE(formatted_dihedral_names(number_of_dihedral_conditions),STAT=allocstatus)
      IF (allocstatus/=0) CALL report_error(11,exit_status=allocstatus)
@@ -8766,7 +8779,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
   SUBROUTINE perform_autocorrelation()
   IMPLICIT NONE
   CALL initialise_autocorrelation()
-  IF ((ERROR_CODE/=21).AND.(ERROR_CODE/=39).AND.(ERROR_CODE/=33).AND.(ERROR_CODE/=83).AND.(ERROR_CODE/=118)) THEN
+  IF ((ERROR_CODE/=21).AND.(ERROR_CODE/=39).AND.(ERROR_CODE/=33).AND.(ERROR_CODE/=83)&
+  &.AND.(ERROR_CODE/=118).AND.(ERROR_CODE/=121)) THEN
    !do the actual analysis:
    SELECT CASE (TRIM(operation_mode))!no further output necessary here, should be covered by initialise_autocorrelation
    CASE ("conductivity")
@@ -9195,7 +9209,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,*) "These quantities will be calculated and reported:"
    IF (verbose_print) THEN
     WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':    mean",&
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':  mean",&
     &TRIM(power_terminology)," displacement, not corrected"
     WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
     WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
@@ -9204,7 +9218,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
     WRITE(*,*) "   '#(N)':          number of averages taken to obtain this value"
    ELSE
     WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':   mean",TRIM(power_terminology)," displacement, not corrected"
+    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': mean",TRIM(power_terminology)," displacement, not corrected"
     WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
    ENDIF
    WRITE(*,'(" the time scaling factor is ",I0)') TIME_SCALING_FACTOR
@@ -10378,7 +10392,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
       READ(3,IOSTAT=ios,FMT=*) inputstring
       IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_DISTRIBUTION_INPUT)
       IF (ios/=0) THEN
-       IF (VERBOSE_OUTPUT) WRITE(*,*) "  Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
        EXIT
       ENDIF
       SELECT CASE (TRIM(inputstring))
@@ -10475,7 +10489,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
        ENDIF
       CASE ("quit")
-       IF (VERBOSE_OUTPUT) WRITE(*,*) "  Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
        EXIT
       CASE DEFAULT
        IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
@@ -11015,8 +11029,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
- PRINT *, "   Please report any bugs. Suggestions are also welcome. Thanks."
- PRINT *, "   Date of Release: 12_May_2020"
+ PRINT *, "   Please report any bugs."
+ PRINT *,"    Suggestions and questions are also welcome. Thanks."
+ PRINT *, "   Date of Release: 14_May_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -13548,6 +13563,7 @@ INTEGER :: ios,n
      CALL report_gyradius(inputinteger,startstep,endstep)
     CASE ("gyradius_simple") !Module DEBUG
      WRITE(*,*) "Calculating ensemble average of radius of gyration - simple mode."
+     WRITE(*,*) "(First 100 timesteps - all molecule types.)"
      startstep=1
      endstep=100
      CALL check_timesteps(startstep,endstep)
@@ -13698,7 +13714,7 @@ INTEGER :: ios,n
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
       WRITE(*,*) "Distribution module invoked - simple mode:"
-      WRITE(*,*) "Sum rules and Coulomb energy integral."
+      WRITE(*,*) "Only sum rules and Coulomb energy integral."
       CALL write_simple_sumrules()
       CALL perform_distribution_analysis()
      ELSE
