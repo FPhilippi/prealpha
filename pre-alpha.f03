@@ -1,4 +1,4 @@
-! RELEASED ON 14_May_2020 AT 17:44
+! RELEASED ON 10_Jun_2020 AT 15:28
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -219,6 +219,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !119 molecule_index out of bounds...
  !120 no charged particles - cannot calculate conductivity.
  !121 number of dihedral conditions less than 1
+ !122 default charges only for defined elements, not lowercase letters.
+ !123 Could not read default charges
+ !124 Could not read atomic charges
+ !125 atomic charge already specified, will be overwritten.
+ !126 mismatch between sum of atomic charges and charge of whole molecule.
+ !127 something is wrong with the atomic charges of the specified molecule type index
+ !128 custom_atom_charges and custom_default_charges are both FALSE
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -675,6 +682,25 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (121)
      WRITE(*,*) " #  ERROR 121: Number of dihedral conditions < 1 (see EXIT STATUS). "
      WRITE(*,*) "--> Main program will continue, this analysis is aborted."
+    CASE (122)
+     WRITE(*,*) " #  ERROR 122: Custom default charges only for defined elements, not lowercase letters."
+    CASE (123)
+     WRITE(*,*) " #  ERROR 123: Couldn't read 'default_charges' section from molecular input file."
+     WRITE(*,*) "--> Check format of molecular input file!"
+    CASE (124)
+     WRITE(*,*) " #  ERROR 124: Couldn't read 'atomic_charges' section from molecular input file."
+     WRITE(*,*) "--> Check format of molecular input file! Will use default charges where possible."
+    CASE (125)
+     WRITE(*,*) " #  WARNING 125: Atomic charge already specified - will be overwritten."
+    CASE (126)
+     WRITE(*,*) " #  SERIOUS WARNING 126: Sum of atomic charges NOT EQUAL to specified molecular charge!"
+     WRITE(*,*) "--> Check molecular input file. Don't use atomic charges if not required."
+    CASE (127)
+     WRITE(*,*) " #  WARNING 127: Something is wrong with the atomic charges of this molecule type index."
+     WRITE(*,*) "--> Main program will continue anyway - check molecular input file."
+    CASE (128)
+     WRITE(*,*) " #  WARNING 128: Neither default nor atomic charges have been defined by the user."
+     WRITE(*,*) "--> Main program will continue anyway - check molecular input file."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -954,7 +980,6 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CALL report_error(90,exit_status=N)
     student_t_value=1.960
    END SELECT
-
   END FUNCTION student_t_value
 
   REAL FUNCTION covalence_radius(element_name)
@@ -1252,7 +1277,33 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL,PARAMETER :: default_mass_sulfur=32.066
  REAL,PARAMETER :: default_mass_phosphorus=30.974
  REAL,PARAMETER :: default_mass_lithium=6.94
+
+ REAL,PARAMETER :: default_charge_hydrogen=0.0
+ REAL,PARAMETER :: default_charge_fluorine=0.0
+ REAL,PARAMETER :: default_charge_boron=0.0
+ REAL,PARAMETER :: default_charge_chlorine=0.0
+ REAL,PARAMETER :: default_charge_bromine=0.0
+ REAL,PARAMETER :: default_charge_iodine=0.0
+ REAL,PARAMETER :: default_charge_nitrogen=0.0
+ REAL,PARAMETER :: default_charge_oxygen=0.0
+ REAL,PARAMETER :: default_charge_carbon=0.0
+ REAL,PARAMETER :: default_charge_sulfur=0.0
+ REAL,PARAMETER :: default_charge_phosphorus=0.0
+ REAL,PARAMETER :: default_charge_lithium=0.0
  !variables
+ REAL :: charge_hydrogen=default_charge_hydrogen
+ REAL :: charge_fluorine=default_charge_fluorine
+ REAL :: charge_boron=default_charge_boron
+ REAL :: charge_chlorine=default_charge_chlorine
+ REAL :: charge_bromine=default_charge_bromine
+ REAL :: charge_iodine=default_charge_iodine
+ REAL :: charge_nitrogen=default_charge_nitrogen
+ REAL :: charge_oxygen=default_charge_oxygen
+ REAL :: charge_carbon=default_charge_carbon
+ REAL :: charge_sulfur=default_charge_sulfur
+ REAL :: charge_phosphorus=default_charge_phosphorus
+ REAL :: charge_lithium=default_charge_lithium
+
  REAL :: mass_hydrogen=default_mass_hydrogen
  REAL :: mass_fluorine=default_mass_fluorine
  REAL :: mass_boron=default_mass_boron
@@ -1299,7 +1350,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   CHARACTER(LEN=2),DIMENSION(:),ALLOCATABLE :: list_of_elements !--> Turned on support for  2-letter elements!
   TYPE(drude_pair),DIMENSION(:),ALLOCATABLE :: list_of_drude_pairs ! list of pairs of drude particles / drude cores / drudes
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_masses !corresponding masses for the atoms
+  REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_charges !corresponding charges for the atoms
   LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_mass_specified !any elements that are .TRUE. will not be initialised from the trajectory!
+  LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_charge_specified !any elements that are .TRUE. will not be initialised from the trajectory!
   TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot !like trajectory, but for one timestep only. Required for READ_SEQUENTIAL.
   TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory
   !trajectory is now in column major order!
@@ -1313,9 +1366,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL(KIND=STORAGE_PRECISION) :: maximum_distance !maximum possible distance in box.
  REAL(KIND=STORAGE_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
     REAL(KIND=SP) :: drude_mass=0.0e0
+ REAL(KIND=SP) :: drude_charge=0.0e0
  REAL(KIND=SP) :: COM_mass_list(IACHAR("a"):(IACHAR("a")+25)) !A list of user-specified masses for centre-of-mass trajectories.
  LOGICAL :: custom_default_masses !if 'T', then the user has specified his own default masses for lowercase letters or elements.
  LOGICAL :: custom_atom_masses !if 'T', then the user has manually specified atom masses.
+ LOGICAL :: custom_default_charges !like custom_default_masses, but for the charges - and not for lowercase letters.
+ LOGICAL :: custom_atom_charges !like custom_atom_masses, but for charges.
  LOGICAL :: custom_constraints !if 'T', then the user has specified custom constraints on some molecules.
  !use_firstatom_as_com=.TRUE. ONLY with whole trajectory, NOT with read_sequential.
  LOGICAL :: use_firstatom_as_com=.FALSE. ! If 'T', then the first atom in any molecule is used instead of centre of mass.
@@ -1348,8 +1404,22 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: give_intermolecular_contact_distance,give_smallest_atom_distance,give_smallest_atom_distance_squared
  PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
  PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
- PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter
+ PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
+ PUBLIC :: print_dipole_statistics
  CONTAINS
+
+  LOGICAL FUNCTION check_charges(molecule_type_index)
+  IMPLICIT NONE
+  INTEGER :: atom_index
+  INTEGER,INTENT(IN) :: molecule_type_index
+   check_charges=.FALSE.
+   DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+    IF (ABS(molecule_list(molecule_type_index)%list_of_atom_charges(atom_index))>0.001) THEN
+     check_charges=.TRUE.
+     RETURN
+    ENDIF
+   ENDDO
+  END FUNCTION check_charges
 
   SUBROUTINE set_default_masses()
   IMPLICIT NONE
@@ -1367,15 +1437,32 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    mass_lithium=default_mass_lithium
   END SUBROUTINE set_default_masses
 
+  SUBROUTINE set_default_charges()
+  IMPLICIT NONE
+   charge_hydrogen=default_charge_hydrogen
+   charge_fluorine=default_charge_fluorine
+   charge_boron=default_charge_boron
+   charge_chlorine=default_charge_chlorine
+   charge_bromine=default_charge_bromine
+   charge_iodine=default_charge_iodine
+   charge_nitrogen=default_charge_nitrogen
+   charge_oxygen=default_charge_oxygen
+   charge_carbon=default_charge_carbon
+   charge_sulfur=default_charge_sulfur
+   charge_phosphorus=default_charge_phosphorus
+   charge_lithium=default_charge_lithium
+  END SUBROUTINE set_default_charges
+
   SUBROUTINE subtract_drude_masses()
   IMPLICIT NONE
-   IF (VERBOSE_OUTPUT) PRINT *," Subtracting drude masses from N,O,C,S,P,Li"
+   IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F"
    mass_nitrogen=mass_nitrogen-drude_mass
    mass_oxygen=mass_oxygen-drude_mass
    mass_carbon=mass_carbon-drude_mass
    mass_sulfur=mass_sulfur-drude_mass
    mass_phosphorus=mass_phosphorus-drude_mass
    mass_lithium=mass_lithium-drude_mass
+   mass_fluorine=mass_fluorine-drude_mass
   END SUBROUTINE subtract_drude_masses
 
   SUBROUTINE print_atomic_masses()
@@ -1399,6 +1486,28 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     ENDDO
    ENDDO
   END SUBROUTINE print_atomic_masses
+
+  SUBROUTINE print_atomic_charges()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,atom_index
+  REAL :: native_charge,atom_charge
+  CHARACTER(LEN=2) :: element_name
+   WRITE(*,'(" The following lines can be used/altered to request custom atomic charges:")')
+   WRITE(*,'("   atomic_charges ",I0)') SUM(molecule_list(:)%number_of_atoms)
+   DO molecule_type_index=1,number_of_molecule_types,1
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     atom_charge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+     native_charge=atomic_charge(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+     element_name=molecule_list(molecule_type_index)%list_of_elements(atom_index)
+     WRITE(*,FMT='("   ",I0," ",I0," ",F0.4," (")',ADVANCE="NO") molecule_type_index,atom_index,atom_charge
+     IF (ABS(atom_charge-native_charge)>0.001) THEN
+      WRITE(*,'(A,", default charge was ",F0.4,")")') TRIM(element_name),native_charge
+     ELSE
+      WRITE(*,'("Element ",A,")")') TRIM(element_name)
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE print_atomic_charges
 
   !The following subroutine sets the cubic box limits
   SUBROUTINE set_cubic_box(lower,upper)
@@ -2266,7 +2375,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       DO xyzcounter=1,3,1
       !See? I got rid of it! (The jump)
        DO
-        IF (centre_of_mass(xyzcounter)<=box_dimensions(1,xyzcounter)) THEN
+        IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
          !centre of mass is outside of box (smaller)
          centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
          molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)=&
@@ -2274,7 +2383,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
          &+box_size(xyzcounter)
          CYCLE
         ELSE
-         IF (centre_of_mass(xyzcounter)>=box_dimensions(2,xyzcounter)) THEN
+         IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
           !centre of mass is outside of box (bigger)
           centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
           molecule_list(molecule_type_index)%trajectory(:,molecule_index,stepcounter)%coordinates(xyzcounter)=&
@@ -2312,13 +2421,13 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      centre_of_mass=give_center_of_mass(file_position,molecule_type_index,molecule_index)
      DO xyzcounter=1,3,1
      !Apologies for the jump. We are all weak sometimes.
-     10  IF (centre_of_mass(xyzcounter)<=box_dimensions(1,xyzcounter)) THEN
+     10  IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
        centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
        molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
        &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
        GOTO 10
       ELSE
-       IF (centre_of_mass(xyzcounter)>=box_dimensions(2,xyzcounter)) THEN
+       IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
         centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
         molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
         &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
@@ -2463,6 +2572,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,'("    ",A," ",L1)') "custom_constraints        ",custom_constraints
    WRITE(*,'("    ",A," ",L1)') "custom_default_masses     ",custom_default_masses
    WRITE(*,'("    ",A," ",L1)') "custom_atom_masses        ",custom_atom_masses
+   WRITE(*,'("    ",A," ",L1)') "custom_default_charges    ",custom_default_charges
+   WRITE(*,'("    ",A," ",L1)') "custom_atom_charges       ",custom_atom_charges
    WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
    WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
    WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
@@ -3088,10 +3199,6 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: molecule_type_index
   INTEGER :: atom_index
-   !replace
-   !atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
-   !with
-   !molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
    WRITE(*,'("  ! number element atomic_mass native_mass")')
    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
     WRITE(*,'("  !   ",I0," ",A2," ",F0.3," ",F0.3)') atom_index,&
@@ -3128,6 +3235,85 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    !finally, the center of mass has to be normalised by the total mass.
    give_center_of_mass(:)=give_center_of_mass(:)/DBLE(molecule_list(molecule_type_index)%mass)
   END FUNCTION give_center_of_mass
+
+  !The following function gives what would be the dipole moment of a neutral molecule
+  FUNCTION give_qd_vector(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  REAL(KIND=WORKING_PRECISION) :: give_qd_vector(3),weighted_pos(3)!higher precision, because intermediate result.
+  INTEGER :: atom_index
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+   IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+   give_qd_vector(:)=0.0d0
+   DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+    !first, the current atom's position is stored in weighted_pos.
+    !added support for sequential read.
+    IF (READ_SEQUENTIAL) THEN
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:))
+    ELSE
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:))
+    ENDIF
+    !then, this position is weighted with the atom's charge
+    weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+    !this weighted position is now added to the center of mass.
+    give_qd_vector(:)=give_qd_vector(:)+weighted_pos(:)
+   ENDDO
+   !for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
+  END FUNCTION give_qd_vector
+
+  FUNCTION charge_arm(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+  REAL(KIND=WORKING_PRECISION) :: charge_arm(3)
+   IF (molecule_list(molecule_type_index)%charge==0) THEN
+    charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
+   ELSE
+    charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/DBLE(molecule_list(molecule_type_index)%charge)
+    charge_arm(:)=charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index)
+   ENDIF
+  END FUNCTION charge_arm
+
+  SUBROUTINE print_dipole_statistics()
+  IMPLICIT NONE
+  REAL :: maximum,minimum,average,stdev,chargearm
+  INTEGER :: molecule_index,molecule_type_index
+  CHARACTER(LEN=32) :: dipole_name
+   IF (.NOT.((custom_atom_charges).OR.(custom_default_charges))) CALL report_error(128)
+   WRITE(*,'(" Dipole Moment / Charge Arm statistics from first step in trajectory:")')
+   DO molecule_type_index=1,number_of_molecule_types,1
+    !initialise statistics for this molecule type
+    maximum=0.0
+    minimum=maximum_distance
+    average=0.0
+    stdev=0.0
+    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+     chargearm=SQRT(SUM(charge_arm(1,molecule_type_index,molecule_index)**2))
+     IF (chargearm<minimum) minimum=chargearm
+     IF (chargearm>maximum) maximum=chargearm
+     average=average+chargearm
+    ENDDO
+    average=average/FLOAT(molecule_list(molecule_type_index)%total_molecule_count)
+    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+     chargearm=SQRT(SUM(charge_arm(1,molecule_type_index,molecule_index)**2))
+     stdev=stdev+(chargearm-average)**2
+    ENDDO
+    stdev=SQRT(stdev/FLOAT(molecule_list(molecule_type_index)%total_molecule_count-1))
+    IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+     dipole_name="charge arm (COC-COM)"
+    ELSE
+     dipole_name="dipole moment (sum of q*d)"
+    ENDIF
+    WRITE(*,'(5A,I0,A)') "   ",TRIM(dipole_name)," of Molecule ",&
+    &TRIM(give_sum_formula(molecule_type_index))," (#",molecule_type_index,"):"
+    IF (molecule_list(molecule_type_index)%total_molecule_count==1) THEN
+     WRITE(*,'("     average =",ES10.3)') average
+    ELSE
+     WRITE(*,'("     average =",ES10.3)') average
+     WRITE(*,'("     st.dev. =",ES10.3)') stdev
+     WRITE(*,'("     minimum =",ES10.3)') minimum
+     WRITE(*,'("     maximum =",ES10.3)') maximum
+    ENDIF
+   ENDDO
+  END SUBROUTINE print_dipole_statistics
 
   FUNCTION give_box_center_of_mass(timestep)
   IMPLICIT NONE
@@ -3363,7 +3549,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   LOGICAL :: file_exists,connected
   INTEGER :: ios,n,allocstatus,a,b,c,totalcharge,headerlines_molecular,m
   CHARACTER(LEN=16) :: inputstring
-  REAL(KIND=SP) :: mass_input
+  REAL(KIND=SP) :: mass_input,charge_input
    !Turn COMboost off. Use ONLY with whole trajectory, NOT with read_sequential.
    use_firstatom_as_com=.FALSE.
    use_barycentre=.FALSE.
@@ -3386,6 +3572,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (drude_mass>0.001d0) CALL subtract_drude_masses()
     !Read atomic masses
     CALL read_molecular_input_file_atomic_masses()
+    !Read default charges!
+    CALL read_molecular_input_file_default_charges()
+    !Read atomic charges
+    CALL read_molecular_input_file_atomic_charges()
     !Read constraints!
     CALL read_molecular_input_file_constraints()
     !Read drudes!
@@ -3423,7 +3613,12 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       ALLOCATE(molecule_list(n)%list_of_elements(b),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ALLOCATE(molecule_list(n)%list_of_atom_masses(b),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+      ALLOCATE(molecule_list(n)%list_of_atom_charges(b),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ALLOCATE(molecule_list(n)%manual_atom_mass_specified(b),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+      ALLOCATE(molecule_list(n)%manual_atom_charge_specified(b),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       IF (READ_SEQUENTIAL) THEN
        ALLOCATE(molecule_list(n)%snapshot(b,c),STAT=allocstatus)
@@ -3447,6 +3642,72 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       PRINT *,"(centre-of-mass position = position of this atom)"
      ENDIF
     END SUBROUTINE read_molecular_input_file_header
+
+    SUBROUTINE read_molecular_input_file_default_charges()
+    IMPLICIT NONE
+    CHARACTER(LEN=2) :: shortstring
+     custom_default_charges=.FALSE.
+     WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'default_charges'"
+     !Skip over headerlines in molecular input file
+     REWIND 3
+     DO n=1,headerlines_molecular,1
+      READ(3,*)
+     ENDDO
+     !search for charges section.
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF (ios<0) THEN
+       !end of file encountered
+       WRITE(*,'("done (none found, end of file encountered).")')
+       EXIT
+      ENDIF
+      !support for synonyms
+      IF (TRIM(inputstring)=="default_charges") inputstring="charges"
+      IF (ios==0) THEN
+       IF (TRIM(inputstring)=="charges") THEN
+        WRITE(*,'("found in line ",I0,".")') n+headerlines_molecular
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,a
+        IF (ios/=0) THEN
+         !something went wrong
+         custom_default_charges=.FALSE.
+        ELSE
+         !keyword ok - read the section.
+         IF (a>0) THEN
+          custom_default_charges=.TRUE.
+          WRITE(*,FMT='(" Trying to read ",I0," custom default charges...")',ADVANCE="NO") a
+          DO m=1,a,1
+           READ(3,IOSTAT=ios,FMT=*) shortstring,charge_input
+           IF (ios/=0) THEN
+            !wrong format... abort.
+            custom_default_charges=.FALSE.
+            EXIT
+           ELSE
+            IF (ANY(ALPHABET_small==IACHAR(shortstring(1:1)))) THEN
+             !lowercase letter found!
+             IF (ERROR_CODE/=122) CALL report_error(122)
+            ELSE
+             CALL change_default_charge(shortstring,charge_input)
+            ENDIF
+           ENDIF
+          ENDDO
+          !test if custom_default_charges still true. If not, print error message.
+          IF (custom_default_charges) THEN
+           WRITE(*,'(" done.")') 
+          ELSE
+           WRITE(*,'(" failed.")') 
+           CALL report_error(123)
+          ENDIF
+         ENDIF
+        ENDIF
+        EXIT
+       ELSEIF (TRIM(inputstring)=="quit") THEN
+        WRITE(*,'("done (none found before ",A,").")') "'quit'"
+        EXIT
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE read_molecular_input_file_default_charges
 
     SUBROUTINE read_molecular_input_file_default_masses()
     IMPLICIT NONE
@@ -3530,6 +3791,78 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      ENDDO
     END SUBROUTINE read_molecular_input_file_default_masses
 
+    SUBROUTINE change_default_charge(element_name_input,new_charge)
+    IMPLICIT NONE
+    REAL,INTENT(IN) :: new_charge
+    REAL :: old_charge
+    LOGICAL,SAVE :: print_blank=.TRUE.
+    CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+    CHARACTER(LEN=32) :: element_name_full
+     IF (print_blank) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,*)
+      print_blank=.FALSE.
+     ENDIF
+     SELECT CASE (TRIM(element_name_input))
+     CASE ("H")
+      old_charge=charge_hydrogen
+      charge_hydrogen=new_charge
+      element_name_full="Hydrogen"
+     CASE ("F")
+      old_charge=charge_fluorine
+      charge_fluorine=new_charge
+      element_name_full="Fluorine"
+     CASE ("B")
+      old_charge=charge_boron
+      charge_boron=new_charge
+      element_name_full="Boron"
+     CASE ("Cl")
+      old_charge=charge_chlorine
+      charge_chlorine=new_charge
+      element_name_full="Chlorine"
+     CASE ("Br")
+      old_charge=charge_bromine
+      charge_bromine=new_charge
+      element_name_full="Bromine"
+     CASE ("I")
+      old_charge=charge_iodine
+      charge_iodine=new_charge
+      element_name_full="Iodine"
+     CASE ("N")
+      old_charge=charge_nitrogen
+      charge_nitrogen=new_charge
+      element_name_full="Nitrogen"
+     CASE ("O")
+      old_charge=charge_oxygen
+      charge_oxygen=new_charge
+      element_name_full="Oxygen"
+     CASE ("C")
+      old_charge=charge_carbon
+      charge_carbon=new_charge
+      element_name_full="Carbon"
+     CASE ("S")
+      old_charge=charge_sulfur
+      charge_sulfur=new_charge
+      element_name_full="Sulfur"
+     CASE ("P")
+      old_charge=charge_phosphorus
+      charge_phosphorus=new_charge
+      element_name_full="Phosphorus"
+     CASE ("Li")
+      old_charge=charge_lithium
+      charge_lithium=new_charge
+      element_name_full="Lithium"
+     CASE ("D","X")
+      old_charge=drude_charge
+      drude_charge=new_charge
+      element_name_full="drude particle"
+     CASE DEFAULT
+      CALL report_error(60,exit_status=IACHAR(element_name_input(1:1)))
+      RETURN
+     END SELECT
+     IF (VERBOSE_OUTPUT) WRITE(*,'(" Changing charge of ",A," from ",F0.3," to ",F0.4,"")')&
+     &TRIM(element_name_full),old_charge,new_charge
+    END SUBROUTINE change_default_charge
+
     SUBROUTINE change_default_mass(element_name_input,new_mass)
     IMPLICIT NONE
     REAL,INTENT(IN) :: new_mass
@@ -3606,7 +3939,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     SUBROUTINE read_molecular_input_file_atomic_masses()
     IMPLICIT NONE
     INTEGER :: molecule_type_index,atom_index
+    LOGICAL :: printwarning
      !initialise logicals
+     printwarning=.FALSE.
      DO molecule_type_index=1,number_of_molecule_types,1
       molecule_list(molecule_type_index)%manual_atom_mass_specified(:)=.FALSE.
      ENDDO
@@ -3652,7 +3987,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
             IF ((molecule_type_index>0).AND.(molecule_type_index<=number_of_molecule_types)) THEN
              !valid molecule type - check atom_index
              IF ((atom_index>0).AND.(atom_index<=molecule_list(molecule_type_index)%number_of_atoms)) THEN
-              IF (molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)) CALL report_error(112)
+              IF (molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)) THEN
+               IF (.NOT.(printwarning)) WRITE(*,*)
+               printwarning=.TRUE.
+               CALL report_error(112)
+              ENDIF
               molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=mass_input
               molecule_list(molecule_type_index)%manual_atom_mass_specified(atom_index)=.TRUE.
              ELSE
@@ -3666,6 +4005,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
            ENDIF
           ENDDO
           !test if custom_atom_masses still true. If not, print error message.
+          IF (printwarning) WRITE(*,ADVANCE="NO",FMT='(" ")')
           IF (custom_atom_masses) THEN
            WRITE(*,'("done.")') 
           ELSE
@@ -3685,6 +4025,96 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       ENDIF
      ENDDO
     END SUBROUTINE read_molecular_input_file_atomic_masses
+
+    SUBROUTINE read_molecular_input_file_atomic_charges()
+    IMPLICIT NONE
+    INTEGER :: molecule_type_index,atom_index
+    LOGICAL :: printwarning
+     !initialise logicals
+     printwarning=.FALSE.
+     DO molecule_type_index=1,number_of_molecule_types,1
+      molecule_list(molecule_type_index)%manual_atom_charge_specified(:)=.FALSE.
+     ENDDO
+     custom_atom_charges=.FALSE.
+     WRITE(*,ADVANCE="NO",FMT='(" Searching for ",A," statement...")') "'atomic_charges'"
+     !Skip over headerlines in molecular input file
+     REWIND 3
+     DO n=1,headerlines_molecular,1
+      READ(3,*)
+     ENDDO
+     !search for charges section.
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF (ios<0) THEN
+       !end of file encountered
+       WRITE(*,'("done (none found, end of file encountered).")')
+       EXIT
+      ENDIF
+      IF (ios==0) THEN
+       !support for synonyms
+       IF (TRIM(inputstring)=="atom_charges") inputstring="atomic_charges"
+       IF (TRIM(inputstring)=="atomic_charges") THEN
+        WRITE(*,'("found in line ",I0,".")') n+headerlines_molecular
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,a
+        IF (ios/=0) THEN
+         !something went wrong
+         CALL report_error(124)
+         custom_atom_charges=.FALSE.
+        ELSE
+         !keyword ok - read the section.
+         IF (a>0) THEN
+          custom_atom_charges=.TRUE.
+          WRITE(*,FMT='(" Trying to read ",I0," custom atomic charges...")',ADVANCE="NO") a
+          DO m=1,a,1
+           READ(3,IOSTAT=ios,FMT=*) molecule_type_index,atom_index,charge_input
+           IF (ios/=0) THEN
+            !wrong format... abort.
+            custom_atom_charges=.FALSE.
+            EXIT
+           ELSE
+            !check molecule_type_index and atom_index
+            IF ((molecule_type_index>0).AND.(molecule_type_index<=number_of_molecule_types)) THEN
+             !valid molecule type - check atom_index
+             IF ((atom_index>0).AND.(atom_index<=molecule_list(molecule_type_index)%number_of_atoms)) THEN
+              IF (molecule_list(molecule_type_index)%manual_atom_charge_specified(atom_index)) THEN
+               IF (.NOT.(printwarning)) WRITE(*,*)
+               printwarning=.TRUE.
+               CALL report_error(125)
+              ENDIF
+              molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)=charge_input
+              molecule_list(molecule_type_index)%manual_atom_charge_specified(atom_index)=.TRUE.
+             ELSE
+              WRITE(*,*)
+              CALL report_error(111,exit_status=atom_index)
+             ENDIF
+            ELSE
+             WRITE(*,*)
+             CALL report_error(110,exit_status=molecule_type_index)
+            ENDIF
+           ENDIF
+          ENDDO
+          !test if custom_atom_charges still true. If not, print error message.
+          IF (printwarning) WRITE(*,ADVANCE="NO",FMT='(" ")')
+          IF (custom_atom_charges) THEN
+           WRITE(*,'("done.")') 
+          ELSE
+           WRITE(*,'("failed.")') 
+           CALL report_error(124)
+           DO molecule_type_index=1,number_of_molecule_types,1
+            molecule_list(molecule_type_index)%manual_atom_charge_specified(:)=.FALSE.
+           ENDDO
+          ENDIF
+         ENDIF
+        ENDIF
+        EXIT
+       ELSEIF (TRIM(inputstring)=="quit") THEN
+        WRITE(*,'("done (none found before ",A,").")') "'quit'"
+        EXIT
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE read_molecular_input_file_atomic_charges
 
     SUBROUTINE read_molecular_input_file_constraints()
     IMPLICIT NONE
@@ -3860,7 +4290,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     DEALLOCATE(molecule_list(n)%list_of_atom_masses,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+    DEALLOCATE(molecule_list(n)%list_of_atom_charges,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     DEALLOCATE(molecule_list(n)%manual_atom_mass_specified,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+    DEALLOCATE(molecule_list(n)%manual_atom_charge_specified,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     IF (READ_SEQUENTIAL) THEN
      DEALLOCATE(molecule_list(n)%snapshot,STAT=deallocstatus)
@@ -3895,8 +4329,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   !reports properties: Box size, density, molecule types and masses, formulae, charge...
   SUBROUTINE report_trajectory_properties()
   IMPLICIT NONE
-  INTEGER :: molecule_type_index
-  REAL(KIND=GENERAL_PRECISION) :: volume,box_weight
+  INTEGER :: molecule_type_index,atom_index
+  REAL(KIND=GENERAL_PRECISION) :: volume,box_weight,sum_of_atom_charges
   CHARACTER(LEN=8) :: chargestring
   LOGICAL :: comtraj !test if the trajectory format satisfies the centre-of-mass output...
    comtraj=.TRUE.
@@ -3932,6 +4366,17 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      &" (#",molecule_type_index, ") is ",TRIM(chargestring),&
      &" with ",molecule_list(molecule_type_index)%number_of_atoms," atoms and mass = ",&
      &molecule_list(molecule_type_index)%mass," Da."
+    ENDIF
+    IF ((custom_atom_charges).OR.(custom_default_charges)) THEN
+     !there are charges present!
+     sum_of_atom_charges=0.0
+     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+      sum_of_atom_charges=sum_of_atom_charges+molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+     ENDDO
+     IF (DEVELOPERS_VERSION) WRITE(*,'("  ! sum of atomic charges: ",E9.3)') sum_of_atom_charges
+     IF ((sum_of_atom_charges-FLOAT(molecule_list(molecule_type_index)%charge))>0.001) THEN
+      CALL report_error(126)
+     ENDIF
     ENDIF
     box_weight=box_weight+molecule_list(molecule_type_index)%mass*molecule_list(molecule_type_index)%total_molecule_count
    ENDDO
@@ -4010,8 +4455,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     SUBROUTINE load_trajectory_header_information()
     IMPLICIT NONE
     CHARACTER(LEN=32) :: dummystring,edump,xdump,ydump,zdump
-    REAL(KIND=SP) :: element_mass
-    INTEGER :: current_atom_index,n,skipped_masses
+    REAL(KIND=SP) :: element_mass,element_charge
+    INTEGER :: current_atom_index,n,skipped_masses,skipped_charges
      SELECT CASE (TRAJECTORY_TYPE)
      CASE ("lmp")
       BOX_VOLUME_GIVEN=.TRUE.
@@ -4068,8 +4513,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      !define the number of lines to skip when advancing through the trajectory file
      lines_to_skip=headerlines_to_skip+total_number_of_atoms
      number_of_drude_particles=0
-     !skipped_masses counts how many masses were already specified manually.
+     !skipped_masses counts how many masses were already specified manually. Same for skipped_charges
      skipped_masses=0
+     skipped_charges=0
      !Get the elements - assumes consistent ordering
      DO molecule_type_index=1,number_of_molecule_types,1
       IF ((ERROR_CODE)==70)  ERROR_CODE=ERROR_CODE_DEFAULT
@@ -4084,6 +4530,13 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
         element_mass=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
        ELSE
         molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=element_mass
+       ENDIF
+       element_charge=atomic_charge(element_name)
+       IF (molecule_list(molecule_type_index)%manual_atom_charge_specified(atom_index)) THEN
+        skipped_charges=skipped_charges+1
+        element_charge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+       ELSE
+        molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)=element_charge
        ENDIF
        IF ((element_mass<0.001d0).AND.(ERROR_CODE/=62)) CALL report_error(62,exit_status=atom_index)
        molecule_list(molecule_type_index)%mass=molecule_list(molecule_type_index)%mass+element_mass
@@ -4108,7 +4561,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      ENDIF
      REWIND 3
      IF (DEVELOPERS_VERSION) WRITE(*,'("  ! skipped ",I0," previously specified atomic masses.")') skipped_masses
+     IF (DEVELOPERS_VERSION) WRITE(*,'("  ! skipped ",I0," previously specified atomic charges.")') skipped_charges
      IF ((skipped_masses>0).AND.(.NOT.(custom_atom_masses))) CALL report_error(0)
+     IF ((skipped_charges>0).AND.(.NOT.(custom_atom_charges))) CALL report_error(0)
      CALL report_trajectory_properties() !report all the useful general properties
     END SUBROUTINE load_trajectory_header_information
 
@@ -4200,7 +4655,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       WRITE(*,'("done.")')
      ENDIF
      !set TIME_SCALING_FACTOR
-     IF ((use_scaling).AND.(step>1)) THEN
+     IF ((use_scaling).AND.(step>0)) THEN
       WRITE(*,'(" Setting time scaling factor to ",I0," based on ITEM: TIMESTEP")') step
       TIME_SCALING_FACTOR=step
      ENDIF
@@ -4266,7 +4721,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
   REAL(KIND=SP) FUNCTION atomic_weight(element_name) !this function returns the atomic weight for a given element.
   IMPLICIT NONE
-  !If you change this part, then also change Module_SETTINGS and change_atomic_mass!
+  !If you change this part, then also change Module_SETTINGS and change_default_mass!
   CHARACTER(LEN=*),INTENT(IN) :: element_name
    SELECT CASE (TRIM(element_name))
    CASE ("H")
@@ -4306,6 +4761,43 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     ENDIF
    END SELECT
   END FUNCTION atomic_weight
+
+  REAL(KIND=SP) FUNCTION atomic_charge(element_name) !this function returns the atomic charge for a given element.
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: element_name
+   SELECT CASE (TRIM(element_name))
+   CASE ("H")
+    atomic_charge=charge_hydrogen
+   CASE ("F")
+    atomic_charge=charge_fluorine
+   CASE ("B")
+    atomic_charge=charge_boron
+   CASE ("Cl")
+    atomic_charge=charge_chlorine
+   CASE ("Br")
+    atomic_charge=charge_bromine
+   CASE ("I")
+    atomic_charge=charge_iodine
+   CASE ("N")
+    atomic_charge=charge_nitrogen
+   CASE ("O")
+    atomic_charge=charge_oxygen
+   CASE ("C")
+    atomic_charge=charge_carbon
+   CASE ("S")
+    atomic_charge=charge_sulfur
+   CASE ("P")
+    atomic_charge=charge_phosphorus
+   CASE ("Li")
+    atomic_charge=charge_lithium
+   CASE ("X")
+    atomic_charge=drude_charge
+   CASE ("D")
+    atomic_charge=drude_charge
+   CASE DEFAULT
+    CALL report_error(0)
+   END SELECT
+  END FUNCTION atomic_charge
 
 END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
@@ -5282,13 +5774,14 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ENDDO
   END SUBROUTINE dump_example
 
-  SUBROUTINE dump_split(startstep_in,endstep_in)
+  SUBROUTINE dump_split(startstep_in,endstep_in,output_format)
   IMPLICIT NONE
   INTEGER :: startstep,endstep
   INTEGER :: molecule_type_index,stepcounter,moleculecounter,atomcount
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
   LOGICAL :: connected
   CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
    !First, do the fools-proof checks
    startstep=startstep_in
    endstep=endstep_in
@@ -5308,14 +5801,15 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
     WRITE(*,ADVANCE="NO",FMT='(" Writing separate trajectory for molecule number ",I0," ...")')&
     & molecule_type_index
-    WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_",molecule_type_index,".xyz"
+    WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+    &"traj_",molecule_type_index,"."//output_format
     INQUIRE(UNIT=4,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=4)
     OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
     atomcount=give_number_of_atoms_per_molecule(molecule_type_index)*give_number_of_molecules_per_step(molecule_type_index)
     DO stepcounter=startstep,endstep,1
-     WRITE(4,'(I0)') atomcount
-     WRITE(4,'("Timestep number ",I0)') stepcounter
+     !Write head, depending on which type the trajectory has...
+     CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,atomcount,output_format)
      !Reset unit 3
      REWIND 3
      !Add the header
@@ -5360,7 +5854,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
     DO stepcounter=1,give_number_of_timesteps(),1
      !Write head, depending on which type the trajectory has...
-     CALL write_header(3,stepcounter,ncentres,output_format)
+     CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
      DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
       element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
       DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
@@ -5564,27 +6058,29 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   END SUBROUTINE report_gyradius
 
   !This SUBROUTINE writes a SUBROUTINE with removed drude particles. This requires assigned drude particles!
-  SUBROUTINE remove_drudes(startstep_in,endstep_in)
+  SUBROUTINE remove_drudes(startstep_in,endstep_in,output_format)
   IMPLICIT NONE
   INTEGER :: stepcounter,molecule_type_index,molecule_index
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
   LOGICAL :: connected
   CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
    !open the output file
    INQUIRE(UNIT=4,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=4)
    IF (startstep_in==endstep_in) THEN
     WRITE(fstring,'(2A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,".xyz"
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,"."//output_format
    ELSE
     WRITE(fstring,'(2A,I0,A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,"-",endstep_in,".xyz"
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nodrudes_step_",startstep_in,"-",endstep_in,"."//output_format
    ENDIF
    OPEN(UNIT=4,FILE=TRIM(fstring))
    !iterate over the specified timesteps
    DO stepcounter=startstep_in,endstep_in,1
-    WRITE(4,'(I0)') (give_number_of_atoms_per_step()-give_number_of_drude_particles())
-    WRITE(4,'("Timestep number ",I0)') stepcounter
+    !Write head, depending on which type the trajectory has...
+    CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,&
+    &(give_number_of_atoms_per_step()-give_number_of_drude_particles()),output_format)
     DO molecule_type_index=1,give_number_of_molecule_types(),1
      DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
       !the following line appends one molecule to the output trajectory.
@@ -6423,7 +6919,10 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     CASE ("dihedral")
      WRITE(*,*) "Performing autocorrelation analysis of dihedral subspace."
      CALL read_input_for_dihedral_mode()!uses unit 3!!
-     IF (ERROR_CODE==121) RETURN
+     IF (ERROR_CODE==121) THEN
+      RETURN
+      CLOSE(UNIT=3)
+     ENDIF
      number_of_entries_in_array=give_number_of_timesteps()*give_number_of_molecules_per_step(molecule_type_index)
      IF (dump_verbose) THEN!verbose output - array required to bin into. Has to be allocated now:
       ALLOCATE(PES_subset_independent(number_of_dihedral_conditions,0:bin_count),STAT=allocstatus)
@@ -6446,6 +6945,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     CASE ("rmm-vcf")!correlation module!
      IF (give_number_of_molecule_types()==1) THEN
       CALL report_error(39)
+      CLOSE(UNIT=3)
       RETURN
      ELSE
       WRITE(*,*) "Performing rmm-vcf analysis. See dx.doi.org/10.1103/PhysRevE.50.1162"
@@ -6467,7 +6967,10 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      ENDIF
      CALL report_error(40)
      CALL read_vc_components()
-     IF (ERROR_CODE==118) RETURN
+     IF (ERROR_CODE==118) THEN
+      RETURN
+      CLOSE(UNIT=3)
+     ENDIF
      CALL read_velocity_correlation_body()
     CASE ("ecaf")
      WRITE(*,*) "Calculating custom components of the microscopic charge current autocorrelation function."
@@ -6478,7 +6981,10 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      ENDIF
      CALL report_error(40)
      CALL read_vc_components()
-     IF (ERROR_CODE==118) RETURN
+     IF (ERROR_CODE==118) THEN
+      RETURN
+      CLOSE(UNIT=3)
+     ENDIF
      CALL read_velocity_correlation_body()
     CASE DEFAULT
      CALL report_error(14)
@@ -10072,7 +10578,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
  LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
  REAL,PARAMETER :: maxdist_default=10.0
  !variables
- CHARACTER (LEN=8) :: operation_mode="NONE"!operation mode of the distribution module.
+ CHARACTER (LEN=10) :: operation_mode="NONE"!operation mode of the distribution module.
  INTEGER :: number_of_references !number of different references. '0 0 1' uses the z-axis, etc.
  INTEGER :: bin_count_b=bin_count_default!number of bins in the final 2D combined distribution functions (in "a" direction!)
  INTEGER :: bin_count_a=bin_count_default!number of bins in the final 2D combined distribution functions (in "b" direction!)
@@ -10347,6 +10853,18 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      step_a=(maxdist)/FLOAT(bin_count_a)
      ! b is the polar angle in radians.
      step_b=(pi)/FLOAT(bin_count_b)
+    CASE ("charge_arm")
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "calculating charge arm polar distribution functions."
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "reading user-specified references."
+     CALL read_references()!uses unit 3!!
+     IF ((ERROR_CODE)==33) RETURN !UNIT 3 is closed by report_error
+     !allocating memory - first, check for sensible input.
+     CALL allocate_memory()
+     !step sizes in angströms or radians, depending on bin counts and boundary values:
+     ! a is the real space distance between the molecules in the considered pair
+     step_a=(maxdist)/FLOAT(bin_count_a)
+     ! b is the polar angle in radians.
+     step_b=(pi)/FLOAT(bin_count_b)
     CASE DEFAULT
      CALL report_error(99)
     END SELECT
@@ -10358,8 +10876,9 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
 
     SUBROUTINE read_references()!This subroutine is responsible for reading the body of the distribution input file, connected as unit 3.
     IMPLICIT NONE
-    INTEGER :: n,inputbin
+    INTEGER :: n,inputbin,molecule_index,m
     CHARACTER(LEN=32) :: inputstring
+    REAL :: chargearm
      IF ((TRIM(operation_mode)=="cdf").OR.(TRIM(operation_mode)=="pdf")) THEN
       !read user-specified references
       BACKSPACE 3
@@ -10381,6 +10900,25 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
        IF (references(5,n)>give_number_of_molecule_types()) THEN
         !the specified molecule type doesn't exist. Stop execution.
         CALL report_error(33,exit_status=references(5,n))
+        CLOSE(UNIT=3)
+        RETURN
+       ENDIF
+      ENDDO
+     ELSEIF (TRIM(operation_mode)=="charge_arm") THEN
+      !read user-specified references
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,number_of_references
+      !Allocate memory to store the references and the molecule_type_index
+      ALLOCATE(references(4,number_of_references),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+      !Try to read all the references from the input file.
+      DO n=1,number_of_references,1
+       READ(3,IOSTAT=ios,FMT=*) references(:,n)
+       IF (ios/=0) CALL report_error(99,exit_status=ios)!ERROR 99: incorrect format in distribution.inp
+       IF ((references(4,n)>give_number_of_molecule_types()).OR.(references(4,n)<1)) THEN
+        !the specified molecule type doesn't exist. Stop execution.
+        !<1 not allowed here. Too much work later on.
+        CALL report_error(33,exit_status=references(4,n))
         CLOSE(UNIT=3)
         RETURN
        ENDIF
@@ -10455,16 +10993,36 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)') "   setting 'maxdist' to ",maxdist
        ENDIF
       CASE ("maxdist_optimize")
-       maxdist=give_box_limit()/2.0
-       IF (maxdist<0.0d0) THEN
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
-        &"  setting 'maxdist' to default (=",maxdist_default,")"
-        maxdist=maxdist_default
+       IF (TRIM(operation_mode)=="charge_arm") THEN
+        maxdist=0.0
+        DO m=1,number_of_references,1
+         DO molecule_index=1,give_number_of_molecules_per_step(references(4,m)),1
+          chargearm=SQRT(SUM(charge_arm(1,references(4,m),molecule_index)**2))
+          IF (chargearm>maxdist) maxdist=chargearm
+         ENDDO
+        ENDDO
+        maxdist=maxdist*10.0
+        maxdist=FLOAT(CEILING(maxdist))
+        maxdist=maxdist/10.0
+        IF (maxdist<0.0d0) THEN
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
+         &"  setting 'maxdist' to default (=",maxdist_default,")"
+         maxdist=maxdist_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (based on maximum charge arm)"
+        ENDIF
        ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (half the box length)"
+        maxdist=give_box_limit()/2.0
+        IF (maxdist<0.0d0) THEN
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
+         &"  setting 'maxdist' to default (=",maxdist_default,")"
+         maxdist=maxdist_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (half the box length)"
+        ENDIF
        ENDIF
       CASE ("subtract_uniform")
-       IF (TRIM(operation_mode)=="pdf") THEN
+       IF ((TRIM(operation_mode)=="pdf").OR.(TRIM(operation_mode)=="charge_arm") ) THEN
         BACKSPACE 3
         READ(3,IOSTAT=ios,FMT=*) inputstring,subtract_uniform
         IF (ios/=0) THEN
@@ -10476,17 +11034,21 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
          IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'subtract_uniform' to ",subtract_uniform
         ENDIF
        ELSE
-        WRITE(*,*) "  subtract_uniform is only available for the polar distribution function."
+        WRITE(*,*) "  subtract_uniform is only available for polar distribution functions."
        ENDIF
       CASE ("weigh_charge")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,weigh_charge
-       IF (ios/=0) THEN
-        CALL report_error(100,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'weigh_charge' to default (=",weigh_charge_default,")"
-        weigh_charge=weigh_charge_default
+       IF (TRIM(operation_mode)=="charge_arm") THEN
+        WRITE(*,*) "charge weighing not available for charge_arm analysis."
        ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,weigh_charge
+        IF (ios/=0) THEN
+         CALL report_error(100,exit_status=ios)
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'weigh_charge' to default (=",weigh_charge_default,")"
+         weigh_charge=weigh_charge_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
+        ENDIF
        ENDIF
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
@@ -10546,6 +11108,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
   LOGICAL :: all_surrounding_molecules!IF TRUE, THEN all surrounding molecules are considered, of any type.
   LOGICAL :: randomise!IF TRUE, THEN the reference vector is randomised each step
   LOGICAL :: aligned !IF TRUE, THEN reference vector is the z direction already
+  LOGICAL :: use_charge_arm
   REAL :: maxdist_squared
   REAL(KIND=WORKING_PRECISION) :: reference_vector(3)
   REAL :: shift !vertical distance shift for cydf
@@ -10571,12 +11134,18 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
    ENDIF
    !the molecule_type_index can be initialised from the references array:
    molecule_type_index_ref=references(4,reference_number)
-   IF (references(5,reference_number)<1) THEN
-    !invalid molecule type index, i.e. look at all available!
-    all_surrounding_molecules=.TRUE.
-   ELSE
-    molecule_type_index_obs=references(5,reference_number)
+   IF (TRIM(operation_mode)=="charge_arm") THEN
     all_surrounding_molecules=.FALSE.
+    use_charge_arm=.TRUE.
+   ELSE
+    use_charge_arm=.FALSE.
+    IF (references(5,reference_number)<1) THEN
+     !invalid molecule type index, i.e. look at all available!
+     all_surrounding_molecules=.TRUE.
+    ELSE
+     molecule_type_index_obs=references(5,reference_number)
+     all_surrounding_molecules=.FALSE.
+    ENDIF
    ENDIF
    CALL iterate_timesteps_parallelised(randomise)
    CALL transfer_histogram()
@@ -10604,22 +11173,31 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      observed_type=molecule_type_index_obs
      !$OMP DO SCHEDULE(STATIC,1)
      DO timestep=1,give_number_of_timesteps(),sampling_interval
-      IF (all_surrounding_molecules) THEN
-       DO observed_type=1,give_number_of_molecule_types(),1
+      IF (use_charge_arm) THEN
+       CALL fill_histogram_charge_arm&
+       &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug)
+       !$OMP ATOMIC
+       within_bin=within_bin+within_bin_local
+       !$OMP ATOMIC
+       out_of_bounds=out_of_bounds+out_of_bounds_local
+      ELSE
+       IF (all_surrounding_molecules) THEN
+        DO observed_type=1,give_number_of_molecule_types(),1
+         CALL fill_histogram&
+         &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
+         !$OMP ATOMIC
+         within_bin=within_bin+within_bin_local
+         !$OMP ATOMIC
+         out_of_bounds=out_of_bounds+out_of_bounds_local
+        ENDDO
+       ELSE
         CALL fill_histogram&
         &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
         !$OMP ATOMIC
         within_bin=within_bin+within_bin_local
         !$OMP ATOMIC
         out_of_bounds=out_of_bounds+out_of_bounds_local
-       ENDDO
-      ELSE
-       CALL fill_histogram&
-       &(timestep,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug,observed_type)
-       !$OMP ATOMIC
-       within_bin=within_bin+within_bin_local
-       !$OMP ATOMIC
-       out_of_bounds=out_of_bounds+out_of_bounds_local
+       ENDIF
       ENDIF
      ENDDO
      !$OMP END DO
@@ -10712,6 +11290,52 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      ENDDO
     END SUBROUTINE fill_histogram
 
+    SUBROUTINE fill_histogram_charge_arm&
+    &(timestep_in,within_bin_local,out_of_bounds_local,distribution_histogram_local,random_debug)
+    IMPLICIT NONE
+    INTEGER :: binpos_a,binpos_b,molecule_index
+    INTEGER,INTENT(IN) :: timestep_in
+    REAL :: current_distance_squared,a,b
+    REAL(KIND=WORKING_PRECISION) :: link_vector(3),local_reference(3)
+    INTEGER(KIND=DP),INTENT(INOUT) :: distribution_histogram_local(:,:)
+    INTEGER(KIND=DP),INTENT(OUT) :: within_bin_local,out_of_bounds_local
+    LOGICAL,INTENT(IN) :: random_debug
+     within_bin_local=0
+     out_of_bounds_local=0
+     !iterate over all reference molecules
+     DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index_ref),1
+      !iterate over all observed molecules
+      !Calculate bin limits.
+      link_vector(:)=charge_arm(timestep_in,molecule_type_index_ref,molecule_index)
+      !If necessary, randomise uvector (debug mostly)
+      IF (random_debug) THEN
+       local_reference(1)=RAND()-0.5
+       local_reference(2)=RAND()-0.5
+       local_reference(3)=RAND()-0.5
+       CALL normalize3D(local_reference)
+      ELSE
+       local_reference(:)=reference_vector(:)
+      ENDIF
+      !polar distribution function: a will be distance, b will be angle in radians
+      a=SQRT(SUM(link_vector(:)**2))
+      IF (a<0.001) THEN
+       out_of_bounds_local=out_of_bounds_local+1
+      ELSE
+       !normalise
+       link_vector(:)=link_vector(:)/a
+       b=ACOS(DOT_PRODUCT(link_vector(:),local_reference(:)))
+       binpos_a=INT(a/step_a)+1
+       binpos_b=INT(b/step_b)+1
+       IF (((binpos_a>0).AND.(binpos_a<=bin_count_a)).AND.((binpos_b>0).AND.(binpos_b<=bin_count_b))) THEN
+        within_bin_local=within_bin_local+1
+        distribution_histogram_local(binpos_a,binpos_b)=distribution_histogram_local(binpos_a,binpos_b)+1
+       ELSE
+        out_of_bounds_local=out_of_bounds_local+1
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE fill_histogram_charge_arm
+
     SUBROUTINE transfer_histogram()
     IMPLICIT NONE
     REAL :: total_volume,chunk_area,chunk_volume
@@ -10734,7 +11358,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      SELECT CASE (TRIM(operation_mode))
      CASE ("cdf")
       total_volume=twopi*(shift**3) !pi*height*radius^2, height is 2*radius
-     CASE ("pdf")
+     CASE ("pdf","charge_arm")
       total_volume=(4.0/3.0)*pi*(maxdist**3)
      CASE DEFAULT
       CALL report_error(0)
@@ -10746,7 +11370,9 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
       ideal_density=ideal_density/&
       &FLOAT((give_number_of_timesteps()/sampling_interval)*&
       &give_number_of_molecules_per_step(references(4,reference_number)))
-      WRITE(*,'("   ideal density: ",ES9.3," particles/Angström^3")')ideal_density
+      WRITE(*,'("   ideal density:",ES10.3," particles/Angström^3")')ideal_density
+      IF (TRIM(operation_mode)=="charge_arm") &
+      &WRITE(*,'("   (",F5.3," particles in the sphere)")')ideal_density*total_volume
       IF (DEVELOPERS_VERSION) WRITE(*,'("  ! total volume:  ",ES9.3," cubic Angströms")') total_volume
      ENDIF
      DO binpos_a=1,bin_count_a,1
@@ -10756,7 +11382,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
        ! a is the distance in the 'xy' plane, i.e. perpendicular to the reference vector.
        a=(FLOAT(binpos_a)*step_a) !outer limit of a distance
        chunk_area=pi*((a**2)-((a-step_a)**2))!radial and azimuthal part of volume
-      CASE ("pdf")
+      CASE ("pdf","charge_arm")
        ! a is the real space distance between the molecules.
        a=(FLOAT(binpos_a)*step_a) !outer limit of radius
        chunk_area=((a**3)-((a-step_a)**3))!radial part of volume
@@ -10772,9 +11398,11 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         ! b is the vertical distance (in "z", with z being collinear with the reference vector).
         !The difference will always be delta(b), which is step_b
         chunk_volume=chunk_area*step_b
-       CASE ("pdf")
+       CASE ("pdf","charge_arm")
         ! b is the polar angle in radians.
         b=FLOAT(binpos_b)*step_b !upper limit
+        !do NOT correct for the radial part.
+        chunk_area=1.0
         chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
        CASE DEFAULT
         CALL report_error(0)
@@ -10813,7 +11441,20 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     &//"reference_",reference_number,"_"
     WRITE(headerline,'(A,SP,I0," ",I0," ",I0,SS,", ")') "reference vector ",references(1:3,reference_number)
    ENDIF
-   IF (references(5,reference_number)<1) THEN
+   IF (TRIM(operation_mode)=="charge_arm") THEN
+    !only charge arm
+    IF (give_charge_of_molecule(references(4,reference_number))/=0) THEN
+     WRITE(filename_distribution_output,'(A,"charge_arm_type_",I0)')&
+     &TRIM(filename_distribution_output),references(4,reference_number)
+     WRITE(headerline,'(A," charge arm for molecule type ",I0,", ")')&
+     &TRIM(headerline),references(4,reference_number)
+    ELSE
+     WRITE(filename_distribution_output,'(A,"dipole_moment_type_",I0)')&
+     &TRIM(filename_distribution_output),references(4,reference_number)
+     WRITE(headerline,'(A," dipole moment for molecule type ",I0,", ")')&
+     &TRIM(headerline),references(4,reference_number)
+    ENDIF
+   ELSEIF (references(5,reference_number)<1) THEN
     !all surroundings...
     WRITE(filename_distribution_output,'(A,"all_around_",I0)')&
     &TRIM(filename_distribution_output),references(4,reference_number)
@@ -10900,6 +11541,34 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     IF (VERBOSE_OUTPUT) WRITE(*,*) "  writing distribution data (pdf) into file: ",TRIM(filename_distribution_output)
     OPEN(UNIT=3,FILE=TRIM(filename_distribution_output),IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
+   CASE ("charge_arm")
+    weigh_charge=.FALSE.
+    shift_b=0.0
+    !Write trace, i.e. the radial distribution function
+    WRITE(filename_trace,'(A,"_rdf")') TRIM(filename_distribution_output)
+    IF (subtract_uniform) WRITE(filename_distribution_output,'(A,"_-trace")') TRIM(filename_distribution_output)
+    WRITE(filename_distribution_output,'(A,"_pdf")') TRIM(filename_distribution_output)
+    !filenames are complete now.
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "  writing trace (rdf) into file: ",TRIM(filename_trace)
+    OPEN(UNIT=3,FILE=TRIM(filename_trace),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(3,'(A," radial distribution function (trace of pdf)")') TRIM(headerline)
+    WRITE(3,'("distance g(r)")')
+    DO binpos_a=1,bin_count_a,1
+     trace=SUM(distribution_function(binpos_a,:))/FLOAT(bin_count_b)
+     a=(FLOAT(binpos_a)*step_a) !upper limit - integral runs over whole section
+     a=a-0.5*step_a !using the middle to report everything else
+     WRITE(3,*) a,trace
+     IF (subtract_uniform) THEN
+      distribution_function(binpos_a,:)=distribution_function(binpos_a,:)-trace
+     ENDIF
+    ENDDO
+    CLOSE(UNIT=3)
+    WRITE(unitline,'("a(distance) b(polar_angle) g(a,b)")')
+    WRITE(headerline,'(A," polar distribution function")') TRIM(headerline)
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "  writing distribution data (pdf) into file: ",TRIM(filename_distribution_output)
+    OPEN(UNIT=3,FILE=TRIM(filename_distribution_output),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
    CASE DEFAULT
     CALL report_error(0)
    END SELECT
@@ -10911,7 +11580,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     DO binpos_b=1,bin_count_b,1
      a=(FLOAT(binpos_a)*step_a)-0.5*step_a
      b=(FLOAT(binpos_b)*step_b)-0.5*step_b-shift_b
-     IF (TRIM(operation_mode)=="pdf") b=b*degrees
+     IF ((TRIM(operation_mode)=="pdf").OR.(TRIM(operation_mode)=="charge_arm")) b=b*degrees
      WRITE(3,*) a,b,distribution_function(binpos_a,binpos_b)
     ENDDO
    ENDDO
@@ -10960,14 +11629,26 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      !do the actual analysis:
      !user-defined references.
      DO n=1,number_of_references,1
-      IF (references(5,n)<1) THEN
-       name_obs="all"
+      IF (TRIM(operation_mode)=="charge_arm") THEN
+       WRITE(*,'(" Calculating distribution for reference vector ",I0," out of ",I0,".")') n,number_of_references
+       IF (give_charge_of_molecule(references(4,n))==0) THEN
+        WRITE(*,'("   (Vector ",SP,I0," ",I0," ",I0,SS," vs. dipole moment of ",A,")")')&
+        &references(1:3,n),TRIM(give_sum_formula(references(4,n)))
+       ELSE
+        WRITE(*,'("   (Vector ",SP,I0," ",I0," ",I0,SS," vs. charge arm of ",A,")")')&
+        &references(1:3,n),TRIM(give_sum_formula(references(4,n)))
+       ENDIF
+       IF (.NOT.(check_charges(references(4,n)))) CALL report_error(127)
       ELSE
-       name_obs=TRIM(give_sum_formula(references(5,n)))
+       IF (references(5,n)<1) THEN
+        name_obs="all"
+       ELSE
+        name_obs=TRIM(give_sum_formula(references(5,n)))
+       ENDIF
+       WRITE(*,'(" Calculating distribution for reference vector ",I0," out of ",I0,".")') n,number_of_references
+       WRITE(*,'("   (Vector ",SP,I0," ",I0," ",I0,SS,", ",A," for ",A," around ",A,")")')&
+       &references(1:3,n),TRIM(operation_mode),TRIM(name_obs),TRIM(give_sum_formula(references(4,n)))
       ENDIF
-      WRITE(*,'(" Calculating distribution for reference vector ",I0," out of ",I0,".")') n,number_of_references
-      WRITE(*,'("   (Vector ",SP,I0," ",I0," ",I0,SS,", ",A," for ",A," around ",A,")")')&
-      &references(1:3,n),TRIM(operation_mode),TRIM(name_obs),TRIM(give_sum_formula(references(4,n)))
       CALL make_distribution_functions(n)
       CALL write_distribution_functions(n)
      ENDDO
@@ -11000,6 +11681,7 @@ CHARACTER(LEN=1024) :: filename_distribution="distribution.inp" !distribution mo
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
  CALL set_default_masses()
+ CALL set_default_charges()
  TIME_OUTPUT=TIME_OUTPUT_DEFAULT
  VERBOSE_OUTPUT=VERBOSE_OUTPUT_DEFAULT
  ERROR_OUTPUT=ERROR_OUTPUT_DEFAULT
@@ -11030,8 +11712,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  ENDIF
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
- PRINT *,"    Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 14_May_2020"
+ PRINT *, "   Suggestions and questions are also welcome. Thanks."
+ PRINT *, "   Date of Release: 10_Jun_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -11581,6 +12263,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Writes settings and useful information to the standard output"
    PRINT *," - 'print_atomic_masses':"
    PRINT *,"    Writes atomic masses to the standard output, using the molecular input file format."
+   PRINT *," - 'print_atomic_charges':"
+   PRINT *,"    Writes atomic charges to the standard output, using the molecular input file format."
+   PRINT *," - 'print_dipole_statistics':"
+   PRINT *,"    outputs average/minimum/maximum/standarddev of dipole moment for the first timestep."
+   PRINT *,"    for charged molecules, the vector from center of mass to center of charge is used."
    PRINT *," - 'show_drude':"
    PRINT *,"    Writes detailed current information about drude particles."
    PRINT *," - 'switch_to_com'"
@@ -11628,7 +12315,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Furthermore, the support of drude particles can be turned on by adding:"
    PRINT *,"      masses 1"
    PRINT *,"      X 0.4"
-   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li - but not H and F."
+   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li,F - but not Hydrogen."
    PRINT *,"    This keyword changes the defaults, i.e. ALL atoms of type a,X,P,.... see also:"
    PRINT *," - 'atomic_masses':"
    PRINT *,"    this keyword triggers the specification of custom atomic masses."
@@ -11639,8 +12326,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    The order is important:"
    PRINT *,"      1) The program starts with its own defaults, such as 12.011 for carbon."
    PRINT *,"      2) If necessary, these values are changed by 'default_masses'"
-   PRINT *,"      3) Any positive drude mass 'X', if present, is subtracted from N,O,C,S,P,Li."
+   PRINT *,"      3) Any positive drude mass 'X' or 'D', if present, is subtracted from N,O,C,S,P,Li,F."
    PRINT *,"      4) After that, masses of particular atoms are overwritten by 'atomic_masses'."
+   PRINT *," - 'default_charges' and 'atomic_charges'"
+   PRINT *,"    These two keywords can be used to specify atomic charges."
+   PRINT *,"    Their syntax follows that of the keywords 'default_masses' and 'atomic_masses', respectively."
+   PRINT *,"    (With the exception that lowercase letters are not accepted)"
+   PRINT *,"    The order is as follows:"
+   PRINT *,"      1) The program starts with its own default charge - 0.0 for every atom."
+   PRINT *,"      2) If necessary, these values are changed by 'default_charges'"
+   PRINT *,"      3) Charges of particular atoms are overwritten by 'atomic_charges'."
    PRINT *," - 'constraints':"
    PRINT *,"    this keyword triggers the specification of custom constraints."
    PRINT *,"    it expects an integer, which is the number of subsequent lines to read."
@@ -12164,7 +12859,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 12 - Write trajectory with drude particles merged into cores."
     PRINT *," 13 - Print atomic masses (in format suitable for a molecular input file)"
     PRINT *," 14 - Electrical conductivity via CACF / components thereof."
-    SELECT CASE (user_input_integer(0,14))
+    PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
+    SELECT CASE (user_input_integer(0,15))
     CASE (0)!done here.
      EXIT
     CASE (1)!compute VACFs...
@@ -12410,6 +13106,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       !enough information for the analysis.
       SKIP_ANALYSIS=.FALSE.
      ENDIF
+    CASE (15)!show the atomic masses at this point
+     CALL append_string("print_atomic_charges ### print atomic charges")
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -12478,7 +13177,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 22 - Print atomic masses (in format suitable for a molecular input file)"
     PRINT *," 23 - Write trajectory with neighbouring molecules around one selected molecule"
     PRINT *," 24 - Dump close contact dimers for one step"
-    SELECT CASE (user_input_integer(0,24))
+    PRINT *," 25 - Print atomic charges (in format suitable for a molecular input file)"
+    PRINT *," 26 - Calculate dipole moment statistics from first timestep."
+    SELECT CASE (user_input_integer(0,26))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -12979,6 +13680,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      ENDIF
      CALL append_string(fstring)
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (25)!show the atomic charges at this point
+     CALL append_string("print_atomic_charges ### print atomic charges")
+     PRINT *,"The corresponding section has been added to the input file."
+    CASE (26)!show the atomic charges at this point
+     CALL append_string("print_dipole_statistics ### print atomic charges")
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -13247,6 +13954,8 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="print_atom_masses") inputstring="print_atomic_masses"!support for synonyms
     IF (TRIM(inputstring)=="print_atomic_weights") inputstring="print_atomic_masses"!support for synonyms
     IF (TRIM(inputstring)=="print_atom_weights") inputstring="print_atomic_masses"!support for synonyms
+    IF (TRIM(inputstring)=="print_atom_charges") inputstring="print_atomic_charges"!support for synonyms
+    IF (TRIM(inputstring)=="print_dipole_properties") inputstring="print_dipole_statistics"!support for synonyms
     !so far, only error handling has occurred. Now, check what the corresponding task was, re-read with the appropriate formatting, and start analysis.
     IF (VERBOSE_OUTPUT) WRITE(*,'(" Line ",I0,": ",A)')  n+HEADER_LINES,"'"//TRIM(inputstring)//"'"
     SELECT CASE (TRIM(inputstring))
@@ -13257,6 +13966,10 @@ INTEGER :: ios,n
      CALL show_settings()
     CASE ("print_atomic_masses")
      CALL print_atomic_masses()
+    CASE ("print_atomic_charges")
+     CALL print_atomic_charges()
+    CASE ("print_dipole_statistics")
+     CALL print_dipole_statistics()
     CASE ("show_drude")
      CALL show_drude_settings()
     CASE ("switch_to_com","barycentric","barycenter","barycentre") !Module MOLECULAR
@@ -13314,7 +14027,7 @@ INTEGER :: ios,n
      WRITE(*,'(A,I0,A)') " Trajectory will be split into ",&
      &give_number_of_molecule_types()," molecule types."
      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-     CALL dump_split(startstep,endstep)
+     CALL dump_split(startstep,endstep,"xyz")
     CASE ("dump_split_simple") !Module DEBUG
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,'(A,I0,A)') " Trajectory will be split into ",&
@@ -13322,7 +14035,7 @@ INTEGER :: ios,n
      startstep=1
      endstep=give_number_of_timesteps()
      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-     CALL dump_split(startstep,endstep)
+     CALL dump_split(startstep,endstep,"xyz")
     CASE ("remove_drudes") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
@@ -13334,7 +14047,8 @@ INTEGER :: ios,n
       CALL check_timesteps(startstep,endstep)
       WRITE(*,*) "Writing trajectory with drude particles merged into cores."
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-      CALL remove_drudes(startstep,endstep)
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
      ELSE
       CALL report_error(91)
      ENDIF
@@ -13345,7 +14059,8 @@ INTEGER :: ios,n
       endstep=give_number_of_timesteps()
       CALL check_timesteps(startstep,endstep)
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-      CALL remove_drudes(startstep,endstep)
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
      ELSE
       CALL report_error(91)
      ENDIF
