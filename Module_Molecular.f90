@@ -1309,17 +1309,17 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(*,'("    ",A," ",I0)') "headerlines_to_skip       ",headerlines_to_skip
 			WRITE(*,'("    ",A," ",I0)') "total_lines_to_skip       ",lines_to_skip
 			WRITE(*,'("    ",A," ",I0)') "file_position             ",file_position
-			WRITE(*,'("    ",A," ",L1)') "dihedrals_initialised     ",dihedrals_initialised
-			WRITE(*,'("    ",A," ",L1)') "custom_constraints        ",custom_constraints
-			WRITE(*,'("    ",A," ",L1)') "custom_default_masses     ",custom_default_masses
-			WRITE(*,'("    ",A," ",L1)') "custom_atom_masses        ",custom_atom_masses
-			WRITE(*,'("    ",A," ",L1)') "custom_default_charges    ",custom_default_charges
-			WRITE(*,'("    ",A," ",L1)') "custom_atom_charges       ",custom_atom_charges
-			WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
-			WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
-			WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
-			WRITE(*,'("    ",A," ",L1)') "use_firstatom_as_com      ",use_firstatom_as_com
-			WRITE(*,'("    ",A," ",L1)') "use_barycentre            ",use_barycentre
+			WRITE(*,'("    ",A," ",A)') "dihedrals_initialised     ",TRIM(logical_to_yesno(dihedrals_initialised))
+			WRITE(*,'("    ",A," ",A)') "custom_constraints        ",TRIM(logical_to_yesno(custom_constraints))
+			WRITE(*,'("    ",A," ",A)') "custom_default_masses     ",TRIM(logical_to_yesno(custom_default_masses))
+			WRITE(*,'("    ",A," ",A)') "custom_atom_masses        ",TRIM(logical_to_yesno(custom_atom_masses))
+			WRITE(*,'("    ",A," ",A)') "custom_default_charges    ",TRIM(logical_to_yesno(custom_default_charges))
+			WRITE(*,'("    ",A," ",A)') "custom_atom_charges       ",TRIM(logical_to_yesno(custom_atom_charges))
+			WRITE(*,'("    ",A," ",A)') "drudes_assigned           ",TRIM(logical_to_yesno(drudes_assigned))
+			WRITE(*,'("    ",A," ",A)') "drude_details             ",TRIM(logical_to_yesno(drude_details))
+			WRITE(*,'("    ",A," ",A)') "drudes_allocated          ",TRIM(logical_to_yesno(drudes_allocated))
+			WRITE(*,'("    ",A," ",A)') "use_firstatom_as_com      ",TRIM(logical_to_yesno(use_firstatom_as_com))
+			WRITE(*,'("    ",A," ",A)') "use_barycentre            ",TRIM(logical_to_yesno(use_barycentre))
 			WRITE(*,'("    ",A," ",I0)') "total_number_of_atoms     ",total_number_of_atoms
 			WRITE(*,'("    ",A," ",I0)') "number_of_molecule_types  ",number_of_molecule_types
 			WRITE(*,'("    ",A," ",I0)') "number_of_drude_particles ",number_of_drude_particles

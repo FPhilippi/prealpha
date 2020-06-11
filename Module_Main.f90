@@ -754,13 +754,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
 			PRINT *
 			PRINT *,"distribution input file:"
-			PRINT *,"The first line contains the expression 'cdf' or 'pdf', followed by the number of references N."
+			PRINT *,"The first line contains the expression 'cdf', 'pdf' or 'charge_arm', followed by the number of references N."
 			PRINT *,"'cdf' requests the cylindrical distribution function, 'pdf' requests the polar distribution function."
+			PRINT *,"'charge_arm' requests a polar distribution function of the charge arm (ions) or dipole moment (neutral molecules)."
 			PRINT *,"The references are read from the N lines following the first line. The format of each line is:"
 			PRINT *,"x - y - z - number of reference molecule type - number of observed molecule type."
 			PRINT *,"For molecule type 1 around 2 relative to z-direction, the line would thus contain '0 0 1 2 1'."
 			PRINT *,"a 'zero' reference vector, i.e. '0 0 0', triggers the randomisation of the reference vector."
 			PRINT *,"If the molecule type of the observed molecule is -1, then *all* molecule types are used."
+			PRINT *,"Note that for 'charge_arm', only one molecule type is required - no observed molecule type is required,"
+			PRINT *,"only the reference type. The charge arm pdf is NOT corrected for azimuthal or radial parts - only polar."
 			PRINT *,"After the projections have been specified, switches can be specified in an arbitrary order."
 			PRINT *,"Available are:"
 			PRINT *," - 'bin_count':"
@@ -773,6 +776,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Expects a real value, which is taken as the cutoff distance of molecule pairs to be considered."
 			PRINT *," -  'maxdist_optimize':"
 			PRINT *,"    sets 'maxdist' to half the box size where available. doesn't need additional input values."
+			PRINT *,"    for charge arm and dipole moment analyses, 'maxdist' will be set to the maximum value in the first timestep."
+			PRINT *,"    (considering all molecule types specified as references, rounded to 1 digit)"
 			PRINT *," - 'subtract_uniform'"
 			PRINT *,"    If yes (T), then the uniform density / radial distribution function is subtracted."
 			PRINT *,"    Only available for the polar distribution function."
@@ -2849,17 +2854,17 @@ INTEGER :: ios,n
 		!the following subroutine prints the settings and how to influence them.
 		SUBROUTINE show_settings()
 		IMPLICIT NONE
-	15	FORMAT ("    ",A," ",L1)
+	15	FORMAT ("    ",A," ",A)
 	16	FORMAT ("    ",A," ",I0)
 			WRITE(*,*) "Printing current global settings."
-			WRITE(*,15) "VERBOSE_OUTPUT      ",VERBOSE_OUTPUT
-			WRITE(*,15) "TIME_OUTPUT         ",TIME_OUTPUT
-			WRITE(*,15) "DEVELOPERS_VERSION  ",DEVELOPERS_VERSION
-			WRITE(*,15) "ERROR_OUTPUT        ",ERROR_OUTPUT
-			WRITE(*,15) "READ_SEQUENTIAL     ",READ_SEQUENTIAL
-			WRITE(*,15) "BOX_VOLUME_GIVEN    ",BOX_VOLUME_GIVEN
-			WRITE(*,15) "WRAP_TRAJECTORY     ",WRAP_TRAJECTORY
-			WRITE(*,15) "DISCONNECTED        ",DISCONNECTED
+			WRITE(*,15) "VERBOSE_OUTPUT      ",TRIM(logical_to_yesno(VERBOSE_OUTPUT))
+			WRITE(*,15) "TIME_OUTPUT         ",TRIM(logical_to_yesno(TIME_OUTPUT))
+			WRITE(*,15) "DEVELOPERS_VERSION  ",TRIM(logical_to_yesno(DEVELOPERS_VERSION))
+			WRITE(*,15) "ERROR_OUTPUT        ",TRIM(logical_to_yesno(ERROR_OUTPUT))
+			WRITE(*,15) "READ_SEQUENTIAL     ",TRIM(logical_to_yesno(READ_SEQUENTIAL))
+			WRITE(*,15) "BOX_VOLUME_GIVEN    ",TRIM(logical_to_yesno(BOX_VOLUME_GIVEN))
+			WRITE(*,15) "WRAP_TRAJECTORY     ",TRIM(logical_to_yesno(WRAP_TRAJECTORY))
+			WRITE(*,15) "DISCONNECTED        ",TRIM(logical_to_yesno(DISCONNECTED))
 			WRITE(*,16) "GLOBAL_ITERATIONS   ",GLOBAL_ITERATIONS
 			WRITE(*,16) "TIME_SCALING_FACTOR ",TIME_SCALING_FACTOR
 			WRITE(*,16) "HEADER_LINES_GINPUT ",HEADER_LINES
@@ -2868,7 +2873,7 @@ INTEGER :: ios,n
 			WRITE(*,*) '   OUTPUT_PREFIX        "',TRIM(OUTPUT_PREFIX),'"'
 			WRITE(*,*) '   TRAJECTORY_TYPE      "',TRIM(TRAJECTORY_TYPE),'"'
 			WRITE(*,*) '   INFO_IN_TRAJECTORY   "',TRIM(INFORMATION_IN_TRAJECTORY),'"'
-			WRITE(*,15) "PARALLEL_OPERATION  ",PARALLEL_OPERATION
+			WRITE(*,15) "PARALLEL_OPERATION  ",TRIM(logical_to_yesno(PARALLEL_OPERATION))
 		 !$ IF(.FALSE.) THEN
 			WRITE(*,*) "-fopenmp flag not set! PARALLEL_OPERATION has no effect."
 		 !$ ENDIF
@@ -2877,12 +2882,13 @@ INTEGER :: ios,n
 		 !$ WRITE(*,16) "NUMBER_OF_PROCS       ",OMP_get_num_procs()
 		 !$ WRITE(*,16) "MAX_NUMBER_OF_THREADS ",OMP_get_max_threads()
 			CALL show_molecular_settings()
-			WRITE(*,*) "(input) Filenames:"
+			WRITE(*,*) "current default (input) Filenames:"
 			WRITE(*,*) '   TRAJECTORY      "',TRIM(FILENAME_TRAJECTORY),'"'
 			WRITE(*,*) '   GENERAL         "',TRIM(FILENAME_GENERAL_INPUT),'"'
 			WRITE(*,*) '   MOLECULAR       "',TRIM(FILENAME_MOLECULAR_INPUT),'"'
 			WRITE(*,*) '   AUTOCORRELATION "',TRIM(FILENAME_AUTOCORRELATION_INPUT),'"'
 			WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
+			WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
 			WRITE(*,*) "Paths:"
 			WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
 			WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

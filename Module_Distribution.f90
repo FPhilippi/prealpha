@@ -832,12 +832,15 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								! b is the vertical distance (in "z", with z being collinear with the reference vector).
 								!The difference will always be delta(b), which is step_b
 								chunk_volume=chunk_area*step_b
-							CASE ("pdf","charge_arm")
+							CASE ("pdf")
+								! b is the polar angle in radians.
+								b=FLOAT(binpos_b)*step_b !upper limit
+								chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
+							CASE ("charge_arm")
 								! b is the polar angle in radians.
 								b=FLOAT(binpos_b)*step_b !upper limit
 								!do NOT correct for the radial part.
-								chunk_area=1.0
-								chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
+								chunk_volume=(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
 							CASE DEFAULT
 								CALL report_error(0)
 							END SELECT
@@ -845,6 +848,8 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							distribution_function(binpos_a,binpos_b)=distribution_function(binpos_a,binpos_b)/chunk_volume
 						ENDDO
 					ENDDO
+					!for charge arm, normalisation is different.
+					IF (TRIM(operation_mode)=="charge_arm") distribution_function(:,:)=distribution_function(:,:)/SUM(distribution_function(:,:))
 				END SUBROUTINE transfer_histogram
 
 		END SUBROUTINE make_distribution_functions

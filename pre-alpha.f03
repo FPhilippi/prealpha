@@ -1,4 +1,4 @@
-! RELEASED ON 10_Jun_2020 AT 15:28
+! RELEASED ON 11_Jun_2020 AT 20:42
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -226,6 +226,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !126 mismatch between sum of atomic charges and charge of whole molecule.
  !127 something is wrong with the atomic charges of the specified molecule type index
  !128 custom_atom_charges and custom_default_charges are both FALSE
+ !129 jump time in dihedral autocorrelation has been specified twice / more than once
+ !130 requested number of jump analyses exceeded permissible maximum.
+ !131 jump length is a tiny bit too short
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -701,6 +704,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (128)
      WRITE(*,*) " #  WARNING 128: Neither default nor atomic charges have been defined by the user."
      WRITE(*,*) "--> Main program will continue anyway - check molecular input file."
+    CASE (129)
+     WRITE(*,*) " #  WARNING 129: redundant jump length specified by 'jump_analysis'."
+    CASE (130)
+     WRITE(*,*) " #  ERROR 130: Requested more jump analyses than current maximum (see EXIT STATUS)."
+    CASE (131)
+     WRITE(*,*) " #  WARNING 131: jump length should be large enough for accurate results - at least 100 time steps."
+     WRITE(*,*) "--> This is currently not the case - consider choosing a trajectory with shorter stride"
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1037,7 +1047,17 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    !Flush I/O to ease identification of bottlenecks
    CALL refresh_IO()
   END SUBROUTINE timing_parallel_sections
-  
+
+  CHARACTER(LEN=3) FUNCTION logical_to_yesno(input)
+  IMPLICIT NONE
+  LOGICAL,INTENT(IN) :: input
+   IF (input) THEN
+    logical_to_yesno="yes"
+   ELSE
+    logical_to_yesno="no"
+   ENDIF
+  END FUNCTION logical_to_yesno
+
   !prints the progress, is initialised by passing the number of total iterations.
   SUBROUTINE print_progress(total_iterations_in)
   IMPLICIT NONE
@@ -2568,17 +2588,17 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    WRITE(*,'("    ",A," ",I0)') "headerlines_to_skip       ",headerlines_to_skip
    WRITE(*,'("    ",A," ",I0)') "total_lines_to_skip       ",lines_to_skip
    WRITE(*,'("    ",A," ",I0)') "file_position             ",file_position
-   WRITE(*,'("    ",A," ",L1)') "dihedrals_initialised     ",dihedrals_initialised
-   WRITE(*,'("    ",A," ",L1)') "custom_constraints        ",custom_constraints
-   WRITE(*,'("    ",A," ",L1)') "custom_default_masses     ",custom_default_masses
-   WRITE(*,'("    ",A," ",L1)') "custom_atom_masses        ",custom_atom_masses
-   WRITE(*,'("    ",A," ",L1)') "custom_default_charges    ",custom_default_charges
-   WRITE(*,'("    ",A," ",L1)') "custom_atom_charges       ",custom_atom_charges
-   WRITE(*,'("    ",A," ",L1)') "drudes_assigned           ",drudes_assigned
-   WRITE(*,'("    ",A," ",L1)') "drude_details             ",drude_details
-   WRITE(*,'("    ",A," ",L1)') "drudes_allocated          ",drudes_allocated
-   WRITE(*,'("    ",A," ",L1)') "use_firstatom_as_com      ",use_firstatom_as_com
-   WRITE(*,'("    ",A," ",L1)') "use_barycentre            ",use_barycentre
+   WRITE(*,'("    ",A," ",A)') "dihedrals_initialised     ",TRIM(logical_to_yesno(dihedrals_initialised))
+   WRITE(*,'("    ",A," ",A)') "custom_constraints        ",TRIM(logical_to_yesno(custom_constraints))
+   WRITE(*,'("    ",A," ",A)') "custom_default_masses     ",TRIM(logical_to_yesno(custom_default_masses))
+   WRITE(*,'("    ",A," ",A)') "custom_atom_masses        ",TRIM(logical_to_yesno(custom_atom_masses))
+   WRITE(*,'("    ",A," ",A)') "custom_default_charges    ",TRIM(logical_to_yesno(custom_default_charges))
+   WRITE(*,'("    ",A," ",A)') "custom_atom_charges       ",TRIM(logical_to_yesno(custom_atom_charges))
+   WRITE(*,'("    ",A," ",A)') "drudes_assigned           ",TRIM(logical_to_yesno(drudes_assigned))
+   WRITE(*,'("    ",A," ",A)') "drude_details             ",TRIM(logical_to_yesno(drude_details))
+   WRITE(*,'("    ",A," ",A)') "drudes_allocated          ",TRIM(logical_to_yesno(drudes_allocated))
+   WRITE(*,'("    ",A," ",A)') "use_firstatom_as_com      ",TRIM(logical_to_yesno(use_firstatom_as_com))
+   WRITE(*,'("    ",A," ",A)') "use_barycentre            ",TRIM(logical_to_yesno(use_barycentre))
    WRITE(*,'("    ",A," ",I0)') "total_number_of_atoms     ",total_number_of_atoms
    WRITE(*,'("    ",A," ",I0)') "number_of_molecule_types  ",number_of_molecule_types
    WRITE(*,'("    ",A," ",I0)') "number_of_drude_particles ",number_of_drude_particles
@@ -6361,11 +6381,18 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  LOGICAL,PARAMETER :: dump_verbose_default=.FALSE.
  LOGICAL,PARAMETER :: skip_autocorr_default=.FALSE.
  LOGICAL,PARAMETER :: export_dihedral_default=.FALSE.
+ LOGICAL,PARAMETER :: jump_analysis_dihedral_default=.FALSE.
  INTEGER,PARAMETER :: sampling_interval_default=1
  INTEGER,PARAMETER :: legendre_order_default=2
+ INTEGER,PARAMETER :: maximum_number_of_jump_analyses=20
  INTEGER(KIND=GENERAL_PRECISION),PARAMETER :: tmax_default=1000
  INTEGER(KIND=GENERAL_PRECISION),PARAMETER :: bin_count_default=100
  !Variables.
+ TYPE,PRIVATE :: statistics_component
+  REAL :: average
+  REAL :: stdev
+  INTEGER :: counts
+ END TYPE statistics_component
  TYPE,PRIVATE :: vc_component
         INTEGER :: reference_type=-1 ! reference molecule_type_index for velocity correlation
   INTEGER :: observed_type=-1 ! observed molecule_type_index
@@ -6378,9 +6405,12 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
  LOGICAL :: dump_verbose=dump_verbose_default!controls if additional information is dumped into separate files for not.
  LOGICAL :: export_dihedral=export_dihedral_default!Controls whether dihedrals are to be exported.
  LOGICAL :: skip_autocorr=skip_autocorr_default!skips the actual autocorrelation. The preparation is still done, which is useful when only PES subsets or dihedral shares are required.
+ LOGICAL :: jump_analysis_dihedral=jump_analysis_dihedral_default !Jump analysis has been requested.
  INTEGER :: molecule_type_index_b!molecule_type_indices for the second molecule, 'b'
  REAL(KIND=GENERAL_PRECISION),ALLOCATABLE :: boundaries(:,:)!first dimension: index of dihedral. second dimension: upper and lower boundary.
  INTEGER,ALLOCATABLE :: export_list(:) !the list of molecules to export.
+ INTEGER,ALLOCATABLE :: jump_length_list(:) !list of jump lengths to consider
+ INTEGER :: jump_length_total_number !how many entries jump_length_list has
  INTEGER :: export_total_number !how many molecules are to be exported?
  INTEGER(KIND=GENERAL_PRECISION),ALLOCATABLE :: PES_subset_independent(:,:)!first dimension: number of condition. second dimension: binned PES subset
  INTEGER(KIND=GENERAL_PRECISION),ALLOCATABLE :: PES_subset_dependent(:,:)!first dimension: condition 1, second dimension: condition 2. Only for two dimensional subsets, i.e. for number_of_dihedral_conditions=2.
@@ -7171,6 +7201,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
      skip_autocorr=skip_autocorr_default
      sampling_interval=sampling_interval_default
      legendre_order=legendre_order_default
+     jump_analysis_dihedral=jump_analysis_dihedral_default
+     jump_length_total_number=0
     END SUBROUTINE set_defaults
 
     SUBROUTINE read_input_for_reorientation()
@@ -7383,6 +7415,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     END SUBROUTINE read_input_for_rmmvcf
 
     SUBROUTINE read_input_for_dihedral_mode()!This subroutine is responsible for reading the body of the autocorrelation input file.
+    USE DEBUG
     IMPLICIT NONE
     INTEGER :: n,deallocstatus,inputinteger
     CHARACTER(LEN=32) :: inputstring
@@ -7535,6 +7568,34 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
         bin_count=1000
         CALL report_error(104,exit_status=1000)
        ENDIF
+      CASE ("jump_analysis","jump_velocity")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') " jump analysis requires the desired jump time (in number of timesteps)"
+       ELSEIF (jump_length_total_number>maximum_number_of_jump_analyses) THEN
+        !too many jump analyses requested
+        CALL report_error(130,exit_status=maximum_number_of_jump_analyses)
+       ELSE
+        CALL check_timestep(inputinteger)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') &
+        &" Will perform jump analysis for jump time of ",inputinteger," timesteps."
+        IF (inputinteger<100) CALL report_error(131)
+        IF (jump_analysis_dihedral) THEN !jump analysis is already active.
+         jump_length_total_number=jump_length_total_number+1
+         !add to list
+         jump_length_list(jump_length_total_number)=inputinteger
+        ELSE !first element of jump_length_list!
+         jump_length_total_number=1
+         jump_analysis_dihedral=.TRUE.
+         !first occurrence of "jump_analysis". Allocate memory for list.
+         ALLOCATE(jump_length_list(maximum_number_of_jump_analyses),STAT=allocstatus)
+         IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+         !add molecule_index to list
+         jump_length_list(jump_length_total_number)=inputinteger
+        ENDIF
+       ENDIF
       CASE DEFAULT
        IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
       END SELECT
@@ -7544,6 +7605,15 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       DO n=1,export_total_number-1,1
        IF (ANY(export_list((n+1):(export_total_number))==export_list(n))) THEN
         CALL report_error(76)
+        EXIT
+       ENDIF
+      ENDDO
+     ENDIF
+     !If necessary, check for issues with jump_length_list
+     IF (jump_analysis_dihedral) THEN
+      DO n=1,jump_length_total_number-1,1
+       IF (ANY(jump_length_list((n+1):(jump_length_total_number))==jump_length_list(n))) THEN
+        CALL report_error(129)
         EXIT
        ENDIF
       ENDDO
@@ -7574,6 +7644,12 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     IF (export_dihedral) THEN
      DEALLOCATE(export_list,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+     export_dihedral=.FALSE.
+    ENDIF
+    IF (jump_analysis_dihedral) THEN
+     DEALLOCATE(jump_length_list,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+     jump_analysis_dihedral=.FALSE.
     ENDIF
    ENDIF
    IF (ALLOCATED(vc_components)) THEN
@@ -8514,6 +8590,240 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
 
   END SUBROUTINE dihedral_autocorrelation
 
+  SUBROUTINE calculate_jump_histograms_from_binary_array()
+  IMPLICIT NONE
+  INTEGER :: jump_number
+  TYPE(statistics_component),DIMENSION(:),ALLOCATABLE :: jump_vs_share,jump_vs_changes
+  REAL :: step_size
+  !step size only required for jump_vs_share, which goes from 0 to 100%
+  step_size=(1.0)/FLOAT(bin_count)
+  DO jump_number=1,jump_length_total_number,1
+   WRITE(*,'(" Jump analysis ",I0," out of ",I0,".")')&
+   &jump_number,jump_length_total_number
+   WRITE(*,'(" (jumps of ",I0," time steps, which equates to ",I0,"*",I0,"=",I0," time units)")')&
+   &jump_length_list(jump_number),jump_length_list(jump_number),&
+   &TIME_SCALING_FACTOR,jump_length_list(jump_number)*TIME_SCALING_FACTOR
+   CALL initialise_jump_histograms(jump_length_list(jump_number))
+   CALL calculate_jump_statistics_parallel(jump_length_list(jump_number))
+   CALL report_jump_statistics(jump_length_list(jump_number))
+   CALL finalise_jump_histograms()
+  ENDDO
+  CONTAINS
+
+   SUBROUTINE calculate_jump_statistics_parallel(jump_length)
+   IMPLICIT NONE
+   !$ INTERFACE
+   !$  FUNCTION OMP_get_num_threads()
+   !$  INTEGER :: OMP_get_num_threads
+   !$  END FUNCTION OMP_get_num_threads
+   !$ END INTERFACE
+   REAL :: jump_velocity,jump_vector(3),jump_time,jump_length_real,share
+   INTEGER,INTENT(IN) :: jump_length
+   INTEGER :: number_of_changes,molecule_index,time_shift,out_of_bounds,allocstatus,deallocstatus,bin_position,timestep
+   TYPE(statistics_component),DIMENSION(:),ALLOCATABLE :: jump_vs_share_local,jump_vs_changes_local
+    out_of_bounds=0
+    jump_time=FLOAT(TIME_SCALING_FACTOR*jump_length)
+    jump_length_real=FLOAT(jump_length)
+    !$OMP PARALLEL IF(PARALLEL_OPERATION)&
+    !$OMP PRIVATE(jump_vs_share_local,jump_vs_changes_local,jump_velocity,number_of_changes,jump_vector,molecule_index)&
+    !$OMP PRIVATE(share,time_shift,allocstatus,deallocstatus,bin_position)
+    !$OMP SINGLE
+    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+    !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (jump analysis)"
+    !$  CALL timing_parallel_sections(.TRUE.)
+    !$ ENDIF
+    !$OMP END SINGLE
+    !initialise local variables
+    ALLOCATE(jump_vs_share_local(bin_count),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    !for a jump length of n steps, there can be no more than n-1 changes!
+    ALLOCATE(jump_vs_changes_local(0:jump_length-1),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    jump_vs_share_local(:)%average=0.0
+    jump_vs_share_local(:)%stdev=0.0
+    jump_vs_share_local(:)%counts=0
+    jump_vs_changes_local(:)%average=0.0
+    jump_vs_changes_local(:)%stdev=0.0
+    jump_vs_changes_local(:)%counts=0
+    !need to iterate over all molecule indices and possible starting timesteps.
+    !$OMP DO SCHEDULE(STATIC,1)
+    DO timestep=1,give_number_of_timesteps()-jump_length,1
+     DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+      !calculate distance/length of jump, and from that the jump velocity
+      jump_vector(:)=&
+      &give_center_of_mass(timestep+jump_length,molecule_type_index,molecule_index)-&
+      &give_center_of_mass(timestep,molecule_type_index,molecule_index)
+      jump_velocity=SQRT(SUM(jump_vector(:)**2))/jump_time
+      !now, calculate the number of changes from one state to the other for the duration of this jump.
+      number_of_changes=0
+      DO time_shift=0,jump_length-1,1
+       IF (autocorr_array(timestep+time_shift,molecule_index)&
+       &.NEQV.autocorr_array(timestep+time_shift+1,molecule_index)) number_of_changes=number_of_changes+1
+      ENDDO
+      !calculate the share of fulfilled criteria
+      share=FLOAT(COUNT(autocorr_array(timestep:timestep+jump_length-1,molecule_index)))/jump_length_real
+      !update share and number histograms
+      bin_position=(INT(share/step_size)+1)
+      IF ((bin_position>0).AND.(bin_position<=bin_count+1)) THEN
+       IF (bin_position==bin_count+1) bin_position=bin_count
+       jump_vs_share_local(bin_position)%average=jump_vs_share_local(bin_position)%average+jump_velocity
+       jump_vs_share_local(bin_position)%counts=jump_vs_share_local(bin_position)%counts+1
+      ELSE
+       !$OMP ATOMIC
+       out_of_bounds=out_of_bounds+1
+      ENDIF
+      jump_vs_changes_local(number_of_changes)%average=jump_vs_changes_local(number_of_changes)%average+jump_velocity
+      jump_vs_changes_local(number_of_changes)%counts=jump_vs_changes_local(number_of_changes)%counts+1
+     ENDDO
+    ENDDO
+    !$OMP END DO
+    !CRITICAL directive to properly update the histograms
+    !$OMP CRITICAL
+    jump_vs_changes(:)%average=jump_vs_changes(:)%average+jump_vs_changes_local(:)%average
+    jump_vs_changes(:)%counts=jump_vs_changes(:)%counts+jump_vs_changes_local(:)%counts
+    jump_vs_share(:)%average=jump_vs_share(:)%average+jump_vs_share_local(:)%average
+    jump_vs_share(:)%counts=jump_vs_share(:)%counts+jump_vs_share_local(:)%counts
+    !$OMP END CRITICAL
+    !The explicit synchronisation and it's position here is important - we are still in the parralel section!
+    !$OMP BARRIER
+    !now, calculate the final average and the standard deviations
+    !$OMP SINGLE
+    jump_vs_changes(:)%average=jump_vs_changes(:)%average/FLOAT(jump_vs_changes(:)%counts)
+    jump_vs_share(:)%average=jump_vs_share(:)%average/FLOAT(jump_vs_share(:)%counts)
+    !$OMP END SINGLE
+    !Another barrier - everyone needs to wait until the averages are properly updated.
+    !$OMP BARRIER
+    !$OMP DO SCHEDULE(STATIC,1)
+    DO timestep=1,give_number_of_timesteps()-jump_length,1
+     DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+      !calculate distance/length of jump, and from that the jump velocity
+      jump_vector(:)=&
+      &give_center_of_mass(timestep+jump_length,molecule_type_index,molecule_index)-&
+      &give_center_of_mass(timestep,molecule_type_index,molecule_index)
+      jump_velocity=SQRT(SUM(jump_vector(:)**2))/jump_time
+      !now, calculate the number of changes from one state to the other for the duration of this jump.
+      number_of_changes=0
+      DO time_shift=0,jump_length-1,1
+       IF (autocorr_array(timestep+time_shift,molecule_index)&
+       &.NEQV.autocorr_array(timestep+time_shift+1,molecule_index)) number_of_changes=number_of_changes+1
+      ENDDO
+      !calculate the share of fulfilled criteria
+      share=FLOAT(COUNT(autocorr_array(timestep:timestep+jump_length-1,molecule_index)))/jump_length_real
+      !update share and number histograms
+      bin_position=(INT(share/step_size)+1)
+      IF ((bin_position>0).AND.(bin_position<=bin_count)) THEN
+       jump_vs_share_local(bin_position)%stdev=jump_vs_share_local(bin_position)%stdev+&
+       &(jump_velocity-jump_vs_share(bin_position)%average)**2
+      ENDIF
+      jump_vs_changes_local(number_of_changes)%stdev=jump_vs_changes_local(number_of_changes)%stdev+&
+      &(jump_velocity-jump_vs_changes(number_of_changes)%average)**2
+     ENDDO
+    ENDDO
+    !$OMP END DO
+    !CRITICAL directive to properly update the standard deviation histograms
+    !$OMP CRITICAL
+    jump_vs_changes(:)%stdev=jump_vs_changes(:)%stdev+jump_vs_changes_local(:)%stdev
+    jump_vs_share(:)%stdev=jump_vs_share(:)%stdev+jump_vs_share_local(:)%stdev
+    !$OMP END CRITICAL
+    !deallocate local variables
+    DEALLOCATE(jump_vs_share_local,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    DEALLOCATE(jump_vs_changes_local,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    !$OMP END PARALLEL
+    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+    !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+    !$  CALL timing_parallel_sections(.FALSE.)
+    !$ ENDIF
+    IF ((VERBOSE_OUTPUT).AND.(out_of_bounds>0)) WRITE (*,'(" ",I0," entries exceeded the array boundary.")') out_of_bounds
+    !update the standard deviation - so far, we only have the sum of (x-xaverage)**2
+    jump_vs_changes(:)%stdev=SQRT(jump_vs_changes(:)%stdev/FLOAT(jump_vs_changes(:)%counts-1))
+   END SUBROUTINE calculate_jump_statistics_parallel
+
+   SUBROUTINE report_jump_statistics(jump_length)
+   IMPLICIT NONE
+   INTEGER,INTENT(IN) :: jump_length
+   INTEGER :: bin_counter,number_counter,first,last,ios
+   LOGICAL :: connected
+   REAL :: share
+   CHARACTER(LEN=16) :: jump_length_string
+    WRITE(jump_length_string,'(I0,"fs")') jump_length*TIME_SCALING_FACTOR
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "writing jump velocity vs. number of changes into file '",&
+    &TRIM(ADJUSTL(OUTPUT_PREFIX))//"jump_"//TRIM(jump_length_string)//"_number_of_changes","'"
+    INQUIRE(UNIT=3,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=3)
+    OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"jump_"//TRIM(jump_length_string)//"_number_of_changes",&
+    &IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(3,*) "This file contains the jump velocity data for a jump length of "&
+    &//TRIM(jump_length_string)//" time steps vs. number of changes of dihedral condition."
+    WRITE(3,'(4A15)') "#changes","average","stdev","#counts"
+    !find first element to print
+    first=0
+    last=jump_length-1
+    DO bin_counter=0,jump_length-1,1
+     IF (jump_vs_changes(bin_counter)%counts>0) THEN
+      first=bin_counter
+      EXIT
+     ENDIF
+    ENDDO
+    !find last element to print
+    DO bin_counter=jump_length-1,0,-1
+     IF (jump_vs_changes(bin_counter)%counts>0) THEN
+      last=bin_counter
+      EXIT
+     ENDIF
+    ENDDO
+    DO bin_counter=first,last,1
+     WRITE(3,'(I15,2E15.6,I15)') bin_counter,jump_vs_changes(bin_counter)
+    ENDDO
+    ENDFILE 3
+    CLOSE(UNIT=3)
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "writing jump velocity vs. share of fulfilled condition into file '",&
+    &TRIM(ADJUSTL(OUTPUT_PREFIX))//"jump_"//TRIM(jump_length_string)//"_share","'"
+    INQUIRE(UNIT=3,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=3)
+    OPEN(UNIT=3,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"jump_"//TRIM(jump_length_string)//"_share",IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(3,*) "This file contains the jump velocity data for a jump length of "&
+    &//TRIM(jump_length_string)//" time steps vs. share of fulfilled dihedral condition."
+    WRITE(3,'(4A15)') "share","average","stdev","#counts"
+    DO bin_counter=1,bin_count,1
+     share=(FLOAT(bin_counter)*step_size)-(step_size*0.5) !middle of the range
+     WRITE(3,'(F15.6,2E15.6,I15)') share,jump_vs_share(bin_counter)
+    ENDDO
+    ENDFILE 3
+    CLOSE(UNIT=3)
+   END SUBROUTINE report_jump_statistics
+
+   SUBROUTINE initialise_jump_histograms(jump_length)
+   IMPLICIT NONE
+   INTEGER,INTENT(IN) :: jump_length
+   INTEGER :: allocstatus
+    ALLOCATE(jump_vs_share(bin_count),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    !for a jump length of n steps, there can be no more than n-1 changes!
+    ALLOCATE(jump_vs_changes(0:jump_length-1),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    jump_vs_share(:)%average=0.0
+    jump_vs_share(:)%stdev=0.0
+    jump_vs_share(:)%counts=0
+    jump_vs_changes(:)%average=0.0
+    jump_vs_changes(:)%stdev=0.0
+    jump_vs_changes(:)%counts=0
+   END SUBROUTINE initialise_jump_histograms
+
+   SUBROUTINE finalise_jump_histograms()
+   IMPLICIT NONE
+   INTEGER :: deallocstatus
+    DEALLOCATE(jump_vs_share,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    DEALLOCATE(jump_vs_changes,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   END SUBROUTINE finalise_jump_histograms
+
+  END SUBROUTINE calculate_jump_histograms_from_binary_array
+
   SUBROUTINE calculate_autocorrelation_function_from_binary_array()!This subroutine converts the binary autocorr_array to the correlation function.
   IMPLICIT NONE
   !$ INTERFACE
@@ -9299,6 +9609,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL dihedral_autocorrelation()!fill the array
     IF (.NOT.(skip_autocorr)) CALL calculate_autocorrelation_function_from_binary_array() !calculate the autocorrelation function from the array
+    IF (jump_analysis_dihedral) CALL calculate_jump_histograms_from_binary_array()
    CASE ("reorientation")
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL reorientational_autocorrelation()
@@ -11398,12 +11709,15 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         ! b is the vertical distance (in "z", with z being collinear with the reference vector).
         !The difference will always be delta(b), which is step_b
         chunk_volume=chunk_area*step_b
-       CASE ("pdf","charge_arm")
+       CASE ("pdf")
+        ! b is the polar angle in radians.
+        b=FLOAT(binpos_b)*step_b !upper limit
+        chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
+       CASE ("charge_arm")
         ! b is the polar angle in radians.
         b=FLOAT(binpos_b)*step_b !upper limit
         !do NOT correct for the radial part.
-        chunk_area=1.0
-        chunk_volume=chunk_area*(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
+        chunk_volume=(COS(b-step_b)-COS(b)) !lower minus upper for polar part because of minus sign
        CASE DEFAULT
         CALL report_error(0)
        END SELECT
@@ -11411,6 +11725,8 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
        distribution_function(binpos_a,binpos_b)=distribution_function(binpos_a,binpos_b)/chunk_volume
       ENDDO
      ENDDO
+     !for charge arm, normalisation is different.
+     IF (TRIM(operation_mode)=="charge_arm") distribution_function(:,:)=distribution_function(:,:)/SUM(distribution_function(:,:))
     END SUBROUTINE transfer_histogram
 
   END SUBROUTINE make_distribution_functions
@@ -11713,7 +12029,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 10_Jun_2020"
+ PRINT *, "   Date of Release: 11_Jun_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -12416,13 +12732,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *
    PRINT *,"distribution input file:"
-   PRINT *,"The first line contains the expression 'cdf' or 'pdf', followed by the number of references N."
+   PRINT *,"The first line contains the expression 'cdf', 'pdf' or 'charge_arm', followed by the number of references N."
    PRINT *,"'cdf' requests the cylindrical distribution function, 'pdf' requests the polar distribution function."
+   PRINT *,"'charge_arm' requests a polar distribution function of the charge arm (ions) or dipole moment (neutral molecules)."
    PRINT *,"The references are read from the N lines following the first line. The format of each line is:"
    PRINT *,"x - y - z - number of reference molecule type - number of observed molecule type."
    PRINT *,"For molecule type 1 around 2 relative to z-direction, the line would thus contain '0 0 1 2 1'."
    PRINT *,"a 'zero' reference vector, i.e. '0 0 0', triggers the randomisation of the reference vector."
    PRINT *,"If the molecule type of the observed molecule is -1, then *all* molecule types are used."
+   PRINT *,"Note that for 'charge_arm', only one molecule type is required - no observed molecule type is required,"
+   PRINT *,"only the reference type. The charge arm pdf is NOT corrected for azimuthal or radial parts - only polar."
    PRINT *,"After the projections have been specified, switches can be specified in an arbitrary order."
    PRINT *,"Available are:"
    PRINT *," - 'bin_count':"
@@ -12435,6 +12754,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Expects a real value, which is taken as the cutoff distance of molecule pairs to be considered."
    PRINT *," -  'maxdist_optimize':"
    PRINT *,"    sets 'maxdist' to half the box size where available. doesn't need additional input values."
+   PRINT *,"    for charge arm and dipole moment analyses, 'maxdist' will be set to the maximum value in the first timestep."
+   PRINT *,"    (considering all molecule types specified as references, rounded to 1 digit)"
    PRINT *," - 'subtract_uniform'"
    PRINT *,"    If yes (T), then the uniform density / radial distribution function is subtracted."
    PRINT *,"    Only available for the polar distribution function."
@@ -14511,17 +14832,17 @@ INTEGER :: ios,n
   !the following subroutine prints the settings and how to influence them.
   SUBROUTINE show_settings()
   IMPLICIT NONE
- 15 FORMAT ("    ",A," ",L1)
+ 15 FORMAT ("    ",A," ",A)
  16 FORMAT ("    ",A," ",I0)
    WRITE(*,*) "Printing current global settings."
-   WRITE(*,15) "VERBOSE_OUTPUT      ",VERBOSE_OUTPUT
-   WRITE(*,15) "TIME_OUTPUT         ",TIME_OUTPUT
-   WRITE(*,15) "DEVELOPERS_VERSION  ",DEVELOPERS_VERSION
-   WRITE(*,15) "ERROR_OUTPUT        ",ERROR_OUTPUT
-   WRITE(*,15) "READ_SEQUENTIAL     ",READ_SEQUENTIAL
-   WRITE(*,15) "BOX_VOLUME_GIVEN    ",BOX_VOLUME_GIVEN
-   WRITE(*,15) "WRAP_TRAJECTORY     ",WRAP_TRAJECTORY
-   WRITE(*,15) "DISCONNECTED        ",DISCONNECTED
+   WRITE(*,15) "VERBOSE_OUTPUT      ",TRIM(logical_to_yesno(VERBOSE_OUTPUT))
+   WRITE(*,15) "TIME_OUTPUT         ",TRIM(logical_to_yesno(TIME_OUTPUT))
+   WRITE(*,15) "DEVELOPERS_VERSION  ",TRIM(logical_to_yesno(DEVELOPERS_VERSION))
+   WRITE(*,15) "ERROR_OUTPUT        ",TRIM(logical_to_yesno(ERROR_OUTPUT))
+   WRITE(*,15) "READ_SEQUENTIAL     ",TRIM(logical_to_yesno(READ_SEQUENTIAL))
+   WRITE(*,15) "BOX_VOLUME_GIVEN    ",TRIM(logical_to_yesno(BOX_VOLUME_GIVEN))
+   WRITE(*,15) "WRAP_TRAJECTORY     ",TRIM(logical_to_yesno(WRAP_TRAJECTORY))
+   WRITE(*,15) "DISCONNECTED        ",TRIM(logical_to_yesno(DISCONNECTED))
    WRITE(*,16) "GLOBAL_ITERATIONS   ",GLOBAL_ITERATIONS
    WRITE(*,16) "TIME_SCALING_FACTOR ",TIME_SCALING_FACTOR
    WRITE(*,16) "HEADER_LINES_GINPUT ",HEADER_LINES
@@ -14530,7 +14851,7 @@ INTEGER :: ios,n
    WRITE(*,*) '   OUTPUT_PREFIX        "',TRIM(OUTPUT_PREFIX),'"'
    WRITE(*,*) '   TRAJECTORY_TYPE      "',TRIM(TRAJECTORY_TYPE),'"'
    WRITE(*,*) '   INFO_IN_TRAJECTORY   "',TRIM(INFORMATION_IN_TRAJECTORY),'"'
-   WRITE(*,15) "PARALLEL_OPERATION  ",PARALLEL_OPERATION
+   WRITE(*,15) "PARALLEL_OPERATION  ",TRIM(logical_to_yesno(PARALLEL_OPERATION))
    !$ IF(.FALSE.) THEN
    WRITE(*,*) "-fopenmp flag not set! PARALLEL_OPERATION has no effect."
    !$ ENDIF
@@ -14539,12 +14860,13 @@ INTEGER :: ios,n
    !$ WRITE(*,16) "NUMBER_OF_PROCS       ",OMP_get_num_procs()
    !$ WRITE(*,16) "MAX_NUMBER_OF_THREADS ",OMP_get_max_threads()
    CALL show_molecular_settings()
-   WRITE(*,*) "(input) Filenames:"
+   WRITE(*,*) "current default (input) Filenames:"
    WRITE(*,*) '   TRAJECTORY      "',TRIM(FILENAME_TRAJECTORY),'"'
    WRITE(*,*) '   GENERAL         "',TRIM(FILENAME_GENERAL_INPUT),'"'
    WRITE(*,*) '   MOLECULAR       "',TRIM(FILENAME_MOLECULAR_INPUT),'"'
    WRITE(*,*) '   AUTOCORRELATION "',TRIM(FILENAME_AUTOCORRELATION_INPUT),'"'
    WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
+   WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
    WRITE(*,*) "Paths:"
    WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
    WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

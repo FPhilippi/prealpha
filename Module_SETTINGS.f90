@@ -225,6 +225,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!126 mismatch between sum of atomic charges and charge of whole molecule.
 	!127 something is wrong with the atomic charges of the specified molecule type index
 	!128 custom_atom_charges and custom_default_charges are both FALSE
+	!129 jump time in dihedral autocorrelation has been specified twice / more than once
+	!130 requested number of jump analyses exceeded permissible maximum.
+	!131 jump length is a tiny bit too short
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -700,6 +703,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (128)
 					WRITE(*,*) " #  WARNING 128: Neither default nor atomic charges have been defined by the user."
 					WRITE(*,*) "--> Main program will continue anyway - check molecular input file."
+				CASE (129)
+					WRITE(*,*) " #  WARNING 129: redundant jump length specified by 'jump_analysis'."
+				CASE (130)
+					WRITE(*,*) " #  ERROR 130: Requested more jump analyses than current maximum (see EXIT STATUS)."
+				CASE (131)
+					WRITE(*,*) " #  WARNING 131: jump length should be large enough for accurate results - at least 100 time steps."
+					WRITE(*,*) "--> This is currently not the case - consider choosing a trajectory with shorter stride"
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
@@ -1036,7 +1046,17 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			!Flush I/O to ease identification of bottlenecks
 			CALL refresh_IO()
 		END SUBROUTINE timing_parallel_sections
-		
+
+		CHARACTER(LEN=3) FUNCTION logical_to_yesno(input)
+		IMPLICIT NONE
+		LOGICAL,INTENT(IN) :: input
+			IF (input) THEN
+				logical_to_yesno="yes"
+			ELSE
+				logical_to_yesno="no"
+			ENDIF
+		END FUNCTION logical_to_yesno
+
 		!prints the progress, is initialised by passing the number of total iterations.
 		SUBROUTINE print_progress(total_iterations_in)
 		IMPLICIT NONE
