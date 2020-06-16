@@ -304,7 +304,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				END SELECT
 				CLOSE(UNIT=3)
 			ELSE
-				CALL report_error(31)!No input - no output. easy as that.
+				CALL report_error(132)!No input - no output. easy as that.
 			ENDIF
 			CONTAINS
 

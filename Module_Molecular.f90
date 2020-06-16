@@ -146,7 +146,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
 	PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
-	PUBLIC :: print_dipole_statistics
+	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -206,6 +206,91 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			mass_fluorine=mass_fluorine-drude_mass
 		END SUBROUTINE subtract_drude_masses
 
+		SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
+		LOGICAL :: connected
+		CHARACTER(LEN=1024) :: fstring
+		INTEGER,INTENT(IN) :: nsteps
+		INTEGER :: output(3),atom_index,natoms,counter,drude_flag,molecule_type_index
+			INQUIRE(UNIT=3,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=3)
+			WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT),TRIM(ADJUSTL(OUTPUT_PREFIX)),"molecular_nodrude.inp"
+			OPEN(UNIT=3,FILE=TRIM(fstring))
+			WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
+			WRITE(3,'(I0," ### number of timesteps")') nsteps
+			WRITE(3,'(I0," ### number of different types of molecules. Followed by list of molecules.")') give_number_of_molecule_types()
+			natoms=0
+			DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+				output(1)=give_charge_of_molecule(molecule_type_index)
+				output(2)=0
+				DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+					!drude_flag is the atom index of the drude particle attached to this core.
+					!Will be -1 if no drude particle is found, and 0 if this is a drude itself.
+					drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+					IF (drude_flag/=0) output(2)=output(2)+1
+					!get total number of output atoms
+					IF (drude_flag/=0) natoms=natoms+1
+				ENDDO
+				output(3)=give_number_of_molecules_per_step(molecule_type_index)
+				WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")')output(:)
+				!write the crucial part
+				WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,".")')output(3),output(1)
+			ENDDO
+			!write the custom charges section.
+			IF (((custom_atom_charges).OR.(custom_default_charges))) THEN
+				WRITE(3,'("atomic_charges ",I0," ### The following lines contain the atomic charges.")') natoms
+				DO molecule_type_index=1,give_number_of_molecule_types(),1
+					counter=1
+					DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+						drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+						SELECT CASE (drude_flag)
+						CASE (-1) !non-polarisable atom - print just as it is.
+							WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", non-polarisable)")')&
+							&molecule_type_index,counter,&
+							&molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
+							&TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+							counter=counter+1
+						CASE (0) !this is a drude particle - skip this one by cycling.
+							CYCLE
+						CASE DEFAULT
+							!everything else should be drude cores - merge with the drude particle.
+							WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",F0.4,"+",F0.4,")")')&
+							&molecule_type_index,counter,&
+							&molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)+&
+							&molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag),&
+							&TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index)),&
+							&molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
+							&molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+							counter=counter+1
+						END SELECT
+					ENDDO
+				ENDDO
+			ENDIF
+			!write the custom masses section.
+			WRITE(3,'("atomic_masses ",I0," ### The following lines contain the atomic masses.")') natoms
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				counter=1
+				DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+					drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+					SELECT CASE (drude_flag)
+					CASE (-1) !non-polarisable atom - print just as it is.
+						WRITE(3,'("   ",I0," ",I0," ",F0.3)') molecule_type_index,counter,&
+						&molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+						counter=counter+1
+					CASE (0) !this is a drude particle - skip this one by cycling.
+						CYCLE
+					CASE DEFAULT
+						!everything else should be drude cores - merge with the drude particle.
+						WRITE(3,'("   ",I0," ",I0," ",F0.3)') molecule_type_index,counter,&
+						&molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)+&
+						&molecule_list(molecule_type_index)%list_of_atom_masses(drude_flag)
+						counter=counter+1
+					END SELECT
+				ENDDO
+			ENDDO
+			CLOSE(UNIT=3)
+			WRITE(*,*) "done"
+		END SUBROUTINE write_molecule_input_file_without_drudes
+
 		SUBROUTINE print_atomic_masses()
 		IMPLICIT NONE
 		INTEGER :: molecule_type_index,atom_index
@@ -241,7 +326,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					native_charge=atomic_charge(molecule_list(molecule_type_index)%list_of_elements(atom_index))
 					element_name=molecule_list(molecule_type_index)%list_of_elements(atom_index)
 					WRITE(*,FMT='("   ",I0," ",I0," ",F0.4," (")',ADVANCE="NO") molecule_type_index,atom_index,atom_charge
-					IF (ABS(atom_charge-native_charge)>0.001) THEN
+					IF ((ABS(atom_charge-native_charge)>0.001).AND.(ABS(native_charge)>0.001)) THEN
 						WRITE(*,'(A,", default charge was ",F0.4,")")') TRIM(element_name),native_charge
 					ELSE
 						WRITE(*,'("Element ",A,")")') TRIM(element_name)
@@ -3060,6 +3145,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
 				DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
 				IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+				fragments_initialised=.FALSE.
 			ENDIF
 			IF (READ_SEQUENTIAL) THEN
 				IF (VERBOSE_OUTPUT) WRITE(*,*) "closing file '",TRIM(FILENAME_MOLECULAR_INPUT),"'"!no input path is added for the molecular file!

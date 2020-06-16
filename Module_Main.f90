@@ -2391,7 +2391,7 @@ INTEGER :: ios,n
 						WRITE(*,*) "Writing trajectory with drude particles merged into cores."
 						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 						IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
-						CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
+						CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
 					ELSE
 						CALL report_error(91)
 					ENDIF
@@ -2403,7 +2403,7 @@ INTEGER :: ios,n
 						CALL check_timesteps(startstep,endstep)
 						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 						IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
-						CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
+						CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
 					ELSE
 						CALL report_error(91)
 					ENDIF
@@ -2835,7 +2835,7 @@ INTEGER :: ios,n
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################"
-					CALL dump_neighbour_traj(.FALSE.,1,10,2,1,1,2)
+					CALL write_molecule_input_file_without_drudes(14)
 					!update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
 					WRITE(*,*) "################################"
 				CASE DEFAULT

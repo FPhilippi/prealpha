@@ -1201,7 +1201,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								bin_count=1000
 								CALL report_error(104,exit_status=1000)
 							ENDIF
-						CASE ("jump_analysis","jump_velocity")
+						CASE ("jump_analysis","jump_velocity","jump")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
 							IF (ios/=0) THEN
@@ -2371,6 +2371,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF ((VERBOSE_OUTPUT).AND.(out_of_bounds>0)) WRITE (*,'(" ",I0," entries exceeded the array boundary.")') out_of_bounds
 				!update the standard deviation - so far, we only have the sum of (x-xaverage)**2
 				jump_vs_changes(:)%stdev=SQRT(jump_vs_changes(:)%stdev/FLOAT(jump_vs_changes(:)%counts-1))
+				jump_vs_share(:)%stdev=SQRT(jump_vs_share(:)%stdev/FLOAT(jump_vs_share(:)%counts-1))
 			END SUBROUTINE calculate_jump_statistics_parallel
 
 			SUBROUTINE report_jump_statistics(jump_length)

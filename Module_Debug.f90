@@ -1067,7 +1067,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (writemolecularinputfile) THEN
 				INQUIRE(UNIT=3,OPENED=connected)
 				IF (connected) CALL report_error(27,exit_status=3)
-				WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+				WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
 				OPEN(UNIT=3,FILE=TRIM(fstring))
 				WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
 				WRITE(3,'(I0," ### number of timesteps")') give_number_of_timesteps()
@@ -1255,10 +1255,11 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		END SUBROUTINE report_gyradius
 
 		!This SUBROUTINE writes a SUBROUTINE with removed drude particles. This requires assigned drude particles!
-		SUBROUTINE remove_drudes(startstep_in,endstep_in,output_format)
+		SUBROUTINE remove_drudes(startstep_in,endstep_in,output_format,writemolecularinputfile)
 		IMPLICIT NONE
 		INTEGER :: stepcounter,molecule_type_index,molecule_index
 		INTEGER,INTENT(IN) :: startstep_in,endstep_in
+		LOGICAL,INTENT(IN) :: writemolecularinputfile
 		LOGICAL :: connected
 		CHARACTER(LEN=1024) :: fstring
 		CHARACTER(LEN=3),INTENT(IN) :: output_format
@@ -1287,6 +1288,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDDO
 			ENDFILE 4
 			CLOSE(UNIT=4)
+			IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
 		END SUBROUTINE
 
 		!This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983

@@ -228,6 +228,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!129 jump time in dihedral autocorrelation has been specified twice / more than once
 	!130 requested number of jump analyses exceeded permissible maximum.
 	!131 jump length is a tiny bit too short
+	!132 distribution.inp is not available.
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -710,6 +711,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (131)
 					WRITE(*,*) " #  WARNING 131: jump length should be large enough for accurate results - at least 100 time steps."
 					WRITE(*,*) "--> This is currently not the case - consider choosing a trajectory with shorter stride"
+				CASE (132)
+					WRITE(*,*) " #  ERROR 132: couldn't find '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+					WRITE(*,*) "--> redelivering control to main unit"
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

@@ -1,4 +1,4 @@
-! RELEASED ON 11_Jun_2020 AT 20:42
+! RELEASED ON 16_Jun_2020 AT 09:05
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -229,6 +229,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !129 jump time in dihedral autocorrelation has been specified twice / more than once
  !130 requested number of jump analyses exceeded permissible maximum.
  !131 jump length is a tiny bit too short
+ !132 distribution.inp is not available.
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -711,6 +712,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (131)
      WRITE(*,*) " #  WARNING 131: jump length should be large enough for accurate results - at least 100 time steps."
      WRITE(*,*) "--> This is currently not the case - consider choosing a trajectory with shorter stride"
+    CASE (132)
+     WRITE(*,*) " #  ERROR 132: couldn't find '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
+     WRITE(*,*) "--> redelivering control to main unit"
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1425,7 +1429,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
  PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
- PUBLIC :: print_dipole_statistics
+ PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -1485,6 +1489,91 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    mass_fluorine=mass_fluorine-drude_mass
   END SUBROUTINE subtract_drude_masses
 
+  SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
+  LOGICAL :: connected
+  CHARACTER(LEN=1024) :: fstring
+  INTEGER,INTENT(IN) :: nsteps
+  INTEGER :: output(3),atom_index,natoms,counter,drude_flag,molecule_type_index
+   INQUIRE(UNIT=3,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=3)
+   WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT),TRIM(ADJUSTL(OUTPUT_PREFIX)),"molecular_nodrude.inp"
+   OPEN(UNIT=3,FILE=TRIM(fstring))
+   WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
+   WRITE(3,'(I0," ### number of timesteps")') nsteps
+   WRITE(3,'(I0," ### number of different types of molecules. Followed by list of molecules.")') give_number_of_molecule_types()
+   natoms=0
+   DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+    output(1)=give_charge_of_molecule(molecule_type_index)
+    output(2)=0
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     !drude_flag is the atom index of the drude particle attached to this core.
+     !Will be -1 if no drude particle is found, and 0 if this is a drude itself.
+     drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+     IF (drude_flag/=0) output(2)=output(2)+1
+     !get total number of output atoms
+     IF (drude_flag/=0) natoms=natoms+1
+    ENDDO
+    output(3)=give_number_of_molecules_per_step(molecule_type_index)
+    WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")')output(:)
+    !write the crucial part
+    WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,".")')output(3),output(1)
+   ENDDO
+   !write the custom charges section.
+   IF (((custom_atom_charges).OR.(custom_default_charges))) THEN
+    WRITE(3,'("atomic_charges ",I0," ### The following lines contain the atomic charges.")') natoms
+    DO molecule_type_index=1,give_number_of_molecule_types(),1
+     counter=1
+     DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+      drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+      SELECT CASE (drude_flag)
+      CASE (-1) !non-polarisable atom - print just as it is.
+       WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", non-polarisable)")')&
+       &molecule_type_index,counter,&
+       &molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
+       &TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))
+       counter=counter+1
+      CASE (0) !this is a drude particle - skip this one by cycling.
+       CYCLE
+      CASE DEFAULT
+       !everything else should be drude cores - merge with the drude particle.
+       WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",F0.4,"+",F0.4,")")')&
+       &molecule_type_index,counter,&
+       &molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)+&
+       &molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag),&
+       &TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index)),&
+       &molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
+       &molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+       counter=counter+1
+      END SELECT
+     ENDDO
+    ENDDO
+   ENDIF
+   !write the custom masses section.
+   WRITE(3,'("atomic_masses ",I0," ### The following lines contain the atomic masses.")') natoms
+   DO molecule_type_index=1,give_number_of_molecule_types(),1
+    counter=1
+    DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+     drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+     SELECT CASE (drude_flag)
+     CASE (-1) !non-polarisable atom - print just as it is.
+      WRITE(3,'("   ",I0," ",I0," ",F0.3)') molecule_type_index,counter,&
+      &molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+      counter=counter+1
+     CASE (0) !this is a drude particle - skip this one by cycling.
+      CYCLE
+     CASE DEFAULT
+      !everything else should be drude cores - merge with the drude particle.
+      WRITE(3,'("   ",I0," ",I0," ",F0.3)') molecule_type_index,counter,&
+      &molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)+&
+      &molecule_list(molecule_type_index)%list_of_atom_masses(drude_flag)
+      counter=counter+1
+     END SELECT
+    ENDDO
+   ENDDO
+   CLOSE(UNIT=3)
+   WRITE(*,*) "done"
+  END SUBROUTINE write_molecule_input_file_without_drudes
+
   SUBROUTINE print_atomic_masses()
   IMPLICIT NONE
   INTEGER :: molecule_type_index,atom_index
@@ -1520,7 +1609,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
      native_charge=atomic_charge(molecule_list(molecule_type_index)%list_of_elements(atom_index))
      element_name=molecule_list(molecule_type_index)%list_of_elements(atom_index)
      WRITE(*,FMT='("   ",I0," ",I0," ",F0.4," (")',ADVANCE="NO") molecule_type_index,atom_index,atom_charge
-     IF (ABS(atom_charge-native_charge)>0.001) THEN
+     IF ((ABS(atom_charge-native_charge)>0.001).AND.(ABS(native_charge)>0.001)) THEN
       WRITE(*,'(A,", default charge was ",F0.4,")")') TRIM(element_name),native_charge
      ELSE
       WRITE(*,'("Element ",A,")")') TRIM(element_name)
@@ -4339,6 +4428,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+    fragments_initialised=.FALSE.
    ENDIF
    IF (READ_SEQUENTIAL) THEN
     IF (VERBOSE_OUTPUT) WRITE(*,*) "closing file '",TRIM(FILENAME_MOLECULAR_INPUT),"'"!no input path is added for the molecular file!
@@ -5890,7 +5980,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    IF (writemolecularinputfile) THEN
     INQUIRE(UNIT=3,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=3)
-    WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+    WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
     OPEN(UNIT=3,FILE=TRIM(fstring))
     WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
     WRITE(3,'(I0," ### number of timesteps")') give_number_of_timesteps()
@@ -6078,10 +6168,11 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
   END SUBROUTINE report_gyradius
 
   !This SUBROUTINE writes a SUBROUTINE with removed drude particles. This requires assigned drude particles!
-  SUBROUTINE remove_drudes(startstep_in,endstep_in,output_format)
+  SUBROUTINE remove_drudes(startstep_in,endstep_in,output_format,writemolecularinputfile)
   IMPLICIT NONE
   INTEGER :: stepcounter,molecule_type_index,molecule_index
   INTEGER,INTENT(IN) :: startstep_in,endstep_in
+  LOGICAL,INTENT(IN) :: writemolecularinputfile
   LOGICAL :: connected
   CHARACTER(LEN=1024) :: fstring
   CHARACTER(LEN=3),INTENT(IN) :: output_format
@@ -6110,6 +6201,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    ENDDO
    ENDFILE 4
    CLOSE(UNIT=4)
+   IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
   END SUBROUTINE
 
   !This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
@@ -7568,7 +7660,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
         bin_count=1000
         CALL report_error(104,exit_status=1000)
        ENDIF
-      CASE ("jump_analysis","jump_velocity")
+      CASE ("jump_analysis","jump_velocity","jump")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
        IF (ios/=0) THEN
@@ -8738,6 +8830,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     IF ((VERBOSE_OUTPUT).AND.(out_of_bounds>0)) WRITE (*,'(" ",I0," entries exceeded the array boundary.")') out_of_bounds
     !update the standard deviation - so far, we only have the sum of (x-xaverage)**2
     jump_vs_changes(:)%stdev=SQRT(jump_vs_changes(:)%stdev/FLOAT(jump_vs_changes(:)%counts-1))
+    jump_vs_share(:)%stdev=SQRT(jump_vs_share(:)%stdev/FLOAT(jump_vs_share(:)%counts-1))
    END SUBROUTINE calculate_jump_statistics_parallel
 
    SUBROUTINE report_jump_statistics(jump_length)
@@ -11181,7 +11274,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     END SELECT
     CLOSE(UNIT=3)
    ELSE
-    CALL report_error(31)!No input - no output. easy as that.
+    CALL report_error(132)!No input - no output. easy as that.
    ENDIF
    CONTAINS
 
@@ -12029,7 +12122,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 11_Jun_2020"
+ PRINT *, "   Date of Release: 16_Jun_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -14369,7 +14462,7 @@ INTEGER :: ios,n
       WRITE(*,*) "Writing trajectory with drude particles merged into cores."
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
-      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
+      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
      ELSE
       CALL report_error(91)
      ENDIF
@@ -14381,7 +14474,7 @@ INTEGER :: ios,n
       CALL check_timesteps(startstep,endstep)
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
-      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE)
+      CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
      ELSE
       CALL report_error(91)
      ENDIF
@@ -14813,7 +14906,7 @@ INTEGER :: ios,n
     CASE ("DEBUG")
      !Here is some space for testing stuff
      WRITE(*,*) "################################"
-     CALL dump_neighbour_traj(.FALSE.,1,10,2,1,1,2)
+     CALL write_molecule_input_file_without_drudes(14)
      !update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
      WRITE(*,*) "################################"
     CASE DEFAULT
