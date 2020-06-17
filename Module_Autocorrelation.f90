@@ -663,7 +663,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				SUBROUTINE read_vc_components()
 				IMPLICIT NONE
 				INTEGER :: ncomponents,n,allocstatus,a,b,c,d
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 					REWIND 3
 					READ(3,IOSTAT=ios,FMT=*) inputstring,ncomponents
 					IF (ios/=0) CALL report_error(14) !no compromises!
@@ -709,7 +709,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				SUBROUTINE read_velocity_correlation_body()
 				IMPLICIT NONE
 				INTEGER :: n
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 					!File should be positioned correctly already.
 					!Here, the indices are ready and the body of the input file can be read.
 					DO n=1,MAXITERATIONS,1
@@ -753,7 +753,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				SUBROUTINE read_input_for_velocity_correlations()
 				IMPLICIT NONE
 				INTEGER :: n,a,b
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 					REWIND 3
 					READ(3,IOSTAT=ios,FMT=*) a,b
 					IF (ios/=0) THEN
@@ -844,7 +844,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				INTEGER :: number_of_tip_atoms,number_of_base_atoms,counter,allocstatus,deallocstatus,n
 				INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
 				INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 					tip_read=.FALSE.
 					base_read=.FALSE.
 					legendre_order=legendre_order_default
@@ -975,7 +975,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				SUBROUTINE read_input_for_rmmvcf()
 				IMPLICIT NONE
 				INTEGER :: n,a,b
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 					REWIND 3
 					READ(3,IOSTAT=ios,FMT=*) a,b
 					IF (ios/=0) THEN
@@ -1051,7 +1051,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				USE DEBUG
 				IMPLICIT NONE
 				INTEGER :: n,deallocstatus,inputinteger
-				CHARACTER(LEN=32) :: inputstring
+				CHARACTER(LEN=1024) :: inputstring
 				INTEGER,DIMENSION(:,:),ALLOCATABLE :: dihedral_member_indices !list of atom indices used for reporting dihedral angles to be passed on to the module MOLECULAR
 					BACKSPACE 3
 					READ(3,IOSTAT=ios,FMT=*) operation_mode,number_of_dihedral_conditions
@@ -2017,7 +2017,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		IMPLICIT NONE
 		INTEGER :: timestep_counter,local_incidence,molecule_counter,n,m,ios,unit_number
 		REAL(KIND=WORKING_PRECISION) :: standard_deviation,local_average_h
-		CHARACTER(LEN=32) :: filename_export
+		CHARACTER(LEN=1024) :: filename_export
 		LOGICAL :: connected
 			!open files for dihedral export, if necessary
 			IF (export_dihedral) THEN

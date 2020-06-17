@@ -78,6 +78,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			PRINT *,"This feature calculates two-dimensional distribution functions in cylindrical or polar coordinates."
 			PRINT *,"The main purpose is to investigate anisotropy, such as channel formation."
+			PRINT *,"In addition, it is possible to print the polar distribution function of the charge arm / dipole vector."
 			PRINT *,"Thus, the distribution functions are calculated with respect to a specified reference vector."
 			PRINT *,"In cylindrical coordinates, the independent variables are"
 			PRINT *,"  a) the distance perpendicular to the reference vector and"
@@ -85,13 +86,22 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			PRINT *,"In polar coordinates, the independent variables are"
 			PRINT *,"  a) the distance between the two molecules in the considered pair and"
 			PRINT *,"  b) the angle between reference vector and the vector connecting the molecules."
-			PRINT *,"Would you like to request the distribution function in polar (y) or cylindrical (n) coordinates?"
+			PRINT *,"Would you like to request a distribution function in polar (y) or cylindrical (n) coordinates?"
 			IF (user_input_logical()) THEN
-				operation_mode="pdf"
+				PRINT *,"Would you like to calculate the polar distribution function only for the charge arm? (y/n)"
+				IF (user_input_logical()) THEN
+					operation_mode="charge_arm"
+				ELSE
+					operation_mode="pdf"
+				ENDIF
 			ELSE
 				operation_mode="cdf"
 			ENDIF
-			PRINT *,"You now need to specify the combinations of reference vector and the two molecule types for the distribution."
+			IF (TRIM(operation_mode)=="charge_arm") THEN
+				PRINT *,"You now need to specify the combinations of reference vector and the molecule type for the distribution."
+			ELSE
+				PRINT *,"You now need to specify the combinations of reference vector and the two molecule types for the distribution."
+			ENDIF
 			PRINT *,"How many of these combinations would you like to specify?"
 			number_of_references=user_input_integer(1,100000)
 			!Allocate memory for intermediate storage...
@@ -105,13 +115,15 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				PRINT *,"Please give the molecule type index / number of the reference molecule:"
 				PRINT *,"(This molecule will be the origin for the distribution analysis)"
 				references(4,n)=user_input_integer(1,maxmol)
-				PRINT *,"It is possible to consider *all* molecule types around this reference molecules."
-				PRINT *,"Would you like to use all (y) molecules or only those of a specific type (n)?"
-				IF (user_input_logical()) THEN
-					references(5,n)=-1
-				ELSE
-					PRINT *,"Which molecule type would you like to observe / use for the distribution function?"
-					references(5,n)=user_input_integer(1,maxmol)
+				IF (.NOT.(TRIM(operation_mode)=="charge_arm")) THEN
+					PRINT *,"It is possible to consider *all* molecule types around this reference molecules."
+					PRINT *,"Would you like to use all (y) molecules or only those of a specific type (n)?"
+					IF (user_input_logical()) THEN
+						references(5,n)=-1
+					ELSE
+						PRINT *,"Which molecule type would you like to observe / use for the distribution function?"
+						references(5,n)=user_input_integer(1,maxmol)
+					ENDIF
 				ENDIF
 				PRINT *,"You now have to choose the reference vector for this molecule type."
 				PRINT *,"For example, '0 0 1' is the z direction."
@@ -147,8 +159,13 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				PRINT *,"Every how many steps would you like to use to construct the histogram?"
 				WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
 				sampling_interval=user_input_integer(1,1000)
-				PRINT *,"You need to choose a maximum distance - molecule pairs beyond that threshold will be disregarded."
-				PRINT *,"It is recommended to use half the box size where available. Would you like to use that shortcut? (y/n)"
+				IF (TRIM(operation_mode)=="charge_arm") THEN
+					PRINT *,"You need to choose a maximum distance - vectors whose length exceed that threshold will be disregarded."
+					PRINT *,"It is possible to use the maximum vector length from the first time step. Would you like to use that shortcut? (y/n)"
+				ELSE
+					PRINT *,"You need to choose a maximum distance - molecule pairs beyond that threshold will be disregarded."
+					PRINT *,"It is recommended to use half the box size where available. Would you like to use that shortcut? (y/n)"
+				ENDIF
 				optimize_distance=user_input_logical()
 				IF (.NOT.(optimize_distance)) THEN
 					PRINT *,"Please enter the maximum distance."
@@ -163,9 +180,13 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				optimize_distance=.TRUE.
 				CALL set_defaults()
 			ENDIF
-			PRINT *,"Should the entries for the histogram be weighed by their charge?"
-			PRINT *,"(Useful only in combination with 'all surrounding molecules')"
-			weigh_charge=user_input_logical()
+			IF (.NOT.(TRIM(operation_mode)=="charge_arm")) THEN
+				PRINT *,"Should the entries for the histogram be weighed by their charge?"
+				PRINT *,"(Useful only in combination with 'all surrounding molecules')"
+				weigh_charge=user_input_logical()
+			ELSE
+				weigh_charge=.FALSE.
+			ENDIF
 			WRITE(*,FMT='(A)',ADVANCE="NO") " writing distribution input file..."
 			INQUIRE(UNIT=8,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=8)
@@ -176,17 +197,24 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				WRITE(8,'(" cdf ",I0," ### cylindrical distribution function.")') number_of_references
 			CASE ("pdf")
 				WRITE(8,'(" pdf ",I0," ### polar distribution function.")') number_of_references
+			CASE ("charge_arm")
+				WRITE(8,'(" charge_arm ",I0," ### charge arm distribution.")') number_of_references
 			CASE DEFAULT
 				CALL report_error(0)
 			END SELECT
 			DO n=1,number_of_references,1
-				WRITE(8,ADVANCE="NO",FMT='(" ",SP,I0," ",I0," ",I0,SS," ",I0," ",I0," ### ")') references(:,n)
-				IF (references(5,n)<1) THEN
-					WRITE(8,ADVANCE="NO",FMT='(" *all* molecules around ")')
+				IF (TRIM(operation_mode)=="charge_arm") THEN
+					WRITE(8,ADVANCE="NO",FMT='(" ",SP,I0," ",I0," ",I0,SS," ",I0," ### ")') references(1:4,n)
+					WRITE(8,ADVANCE="NO",FMT='(" molecule type ",I0)') references(4,n)
 				ELSE
-					WRITE(8,ADVANCE="NO",FMT='(" molecules of type ",I0," around ")') references(5,n)
+					WRITE(8,ADVANCE="NO",FMT='(" ",SP,I0," ",I0," ",I0,SS," ",I0," ",I0," ### ")') references(:,n)
+					IF (references(5,n)<1) THEN
+						WRITE(8,ADVANCE="NO",FMT='(" *all* molecules around ")')
+					ELSE
+						WRITE(8,ADVANCE="NO",FMT='(" molecules of type ",I0," around ")') references(5,n)
+					ENDIF
+					WRITE(8,ADVANCE="NO",FMT='(" those of type ",I0)') references(4,n)
 				ENDIF
-				WRITE(8,ADVANCE="NO",FMT='(" those of type ",I0)') references(4,n)
 				IF (ALL(references(1:3,n)==0)) THEN
 					WRITE(8,'(", randomised reference vector.")')
 				ELSE
@@ -194,19 +222,21 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 			ENDDO
 			IF (optimize_distance) THEN
-				WRITE(8,'(" maxdist_optimize ### set maximum distance to half the box size")')
+				WRITE(8,'(" maxdist_optimize ### optimise maximum distance.")')
 			ELSE
-				WRITE(8,'(" maxdist ",F0.3," ### set maximum distance to half the box size")')maxdist
+				WRITE(8,'(" maxdist ",F0.3," ### set maximum distance")')maxdist
 			ENDIF
 			IF (subtract_uniform) THEN
 				WRITE(8,'(" subtract_uniform T ### subtract anisotropic density - only for pdf")')
 			ELSE
 				WRITE(8,'(" subtract_uniform F ### do not subtract anisotropic density.")')
 			ENDIF
-			IF (weigh_charge) THEN
-				WRITE(8,'(" weigh_charge T ### weigh with charge - only sensible when *all* molecules are used!")')
-			ELSE
-				WRITE(8,'(" weigh_charge F ### no charge weighing")')
+			IF (.NOT.(TRIM(operation_mode)=="charge_arm")) THEN
+				IF (weigh_charge) THEN
+					WRITE(8,'(" weigh_charge T ### weigh with charge - only sensible when *all* molecules are used!")')
+				ELSE
+					WRITE(8,'(" weigh_charge F ### no charge weighing")')
+				ENDIF
 			ENDIF
 			WRITE(8,'(" sampling_interval ",I0," ### sample every ",I0," timesteps.")') sampling_interval,sampling_interval
 			IF (separate_bins) THEN

@@ -816,6 +816,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'bin_count':"
 			PRINT *,"    Sets the bin count to the specified integer."
 			PRINT *,"    e.g. 'bin_count 36' equals to binning in steps of 10°."
+			PRINT *," - 'jump_analysis'"
+			PRINT *,"    Performs an analysis of average jump velocities as a function of:"
+			PRINT *,"      a) The number of changes between fulfilment/non-fulfilment of the dihedral condition."
+			PRINT *,"      b) The share of fulfilled dihedral conditions over the specified jump time."
+			PRINT *,"    Requires one integer, i.e. the desired jump time (in number of timesteps)."
+			PRINT *,"    It is possible to request multiple jump analyses in one dihedral input file."
 			PRINT *," - 'quit'"
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
 			PRINT *
@@ -2235,7 +2241,7 @@ IMPLICIT NONE
 	 !$ 	INTEGER,INTENT(IN) :: number_of_threads
 	 !$ 	END SUBROUTINE OMP_set_num_threads
 	 !$ END INTERFACE
-CHARACTER(LEN=32) :: inputstring,dummy
+CHARACTER(LEN=1024) :: inputstring,dummy
 INTEGER :: ios,n
 	!open file, read head
 	CALL read_head()
