@@ -1,4 +1,4 @@
-! RELEASED ON 17_Jun_2020 AT 08:22
+! RELEASED ON 07_Jul_2020 AT 15:42
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -265,8 +265,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  Results might be biased!"
      WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
     CASE (4)
-     WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight: unknown element"
-     WRITE(*,*) " #  If necessary, add element to function atomic_weight in module MOLECULAR"
+     WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge: unknown element"
+     WRITE(*,*) " #  If necessary, add element to function atomic_weight and atomic_charge in module MOLECULAR"
      CALL finalise_global()
      STOP
     CASE (5)
@@ -462,6 +462,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  (for velocities / VACF analysis, use '...element vx vy vz' instead)"
     CASE (55)
      WRITE(*,*) " #  WARNING 55: Unknown trajectory format! Please carefully check results and input."
+     WRITE(*,*) " #  (Velocity or Cartesian coordinates)"
     CASE (56)
      WRITE(*,*) " #  SERIOUS WARNING 56: This analysis/feature is not meaningful with the information in the trajectory (",&
      &INFORMATION_IN_TRAJECTORY,")."
@@ -3747,7 +3748,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       ENDIF
      ENDDO
      IF ((use_firstatom_as_com).AND.(VERBOSE_OUTPUT)) THEN
-      PRINT *,"All molecules have only 1 atom - turn on com boost."
+      PRINT *,"All molecules have only 1 'atom' - turn on com boost."
       PRINT *,"(centre-of-mass position = position of this atom)"
      ENDIF
     END SUBROUTINE read_molecular_input_file_header
@@ -4618,6 +4619,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       READ(3,IOSTAT=ios,FMT=*)
       IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
      CASE DEFAULT
+      IF (DEVELOPERS_VERSION) WRITE(*,'("  ! load_trajectory_header_information is faulty")') skipped_charges
       CALL report_error(0)!unknown trajectory format, which should never be passed to this subroutine.
      END SELECT
      !define the number of lines to skip when advancing through the trajectory file
@@ -4641,7 +4643,11 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        ELSE
         molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=element_mass
        ENDIF
-       element_charge=atomic_charge(element_name)
+       IF (molecule_list(molecule_type_index)%number_of_atoms==1) THEN
+        element_charge=FLOAT(molecule_list(molecule_type_index)%charge)
+       ELSE
+        element_charge=atomic_charge(element_name)
+       ENDIF
        IF (molecule_list(molecule_type_index)%manual_atom_charge_specified(atom_index)) THEN
         skipped_charges=skipped_charges+1
         element_charge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
@@ -8151,6 +8157,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       &SNGL(autocorrelation_function((timeline+1),1)/firstvalue_a),& !The "normalised" function for molecule a
       &SNGL(autocorrelation_function((timeline+1),2)),SNGL(integral_b),& !autocorrelation function for molecule b "lambdas_b(t)" and its "integral"
       &SNGL(autocorrelation_function((timeline+1),2)/firstvalue_b) !The "normalised" function for molecule b
+      IF (timeline==(tmax-1)) EXIT
       !integrating the trapezoids:
       area_a=autocorrelation_function((timeline+2),1)+autocorrelation_function((timeline+1),1)
       area_a=area_a*(DFLOAT(TIME_SCALING_FACTOR)/2.0d0)
@@ -10998,7 +11005,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PRIVATE :: operation_mode,number_of_references,sampling_interval,references,weigh_charge,subtract_uniform,maxdist
  PRIVATE :: distribution_function
- PUBLIC :: user_distribution_input,perform_distribution_analysis,write_simple_sumrules
+ PUBLIC :: user_distribution_input,perform_distribution_analysis,write_simple_sumrules,write_simple_charge_arm
 
  CONTAINS
 
@@ -11029,6 +11036,33 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
    CLOSE(UNIT=8)
    IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
   END SUBROUTINE write_simple_sumrules
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distribution'
+  SUBROUTINE write_simple_charge_arm()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: n,ios
+   FILENAME_DISTRIBUTION_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'("charge_arm ",I0)') give_number_of_molecule_types()
+   DO n=1,give_number_of_molecule_types(),1
+    WRITE(8,'("+0 +0 +1 ",I0)') n
+   ENDDO
+   WRITE(8,'("maxdist_optimize")')
+   WRITE(8,'("subtract_uniform F")')
+   WRITE(8,'("sampling_interval 1")')
+   WRITE(8,'("bin_count_a 100")')
+   WRITE(8,'("bin_count_b 100")')
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_charge_arm
 
   !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_input_for_distribution'
@@ -11863,8 +11897,9 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
   INTEGER :: binpos_a,binpos_b,ios,reference_charge
   CHARACTER(LEN=1024) :: filename_trace,filename_distribution_output,filename_number_integral,filename_energy_integral
   CHARACTER(LEN=1024) :: headerline,unitline
-  LOGICAL :: connected
+  LOGICAL :: connected,write_energy_integral
    reference_charge=give_charge_of_molecule(references(4,reference_number))
+   write_energy_integral=((reference_charge/=0).AND.(weigh_charge))
    INQUIRE(UNIT=3,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=3)
    INQUIRE(UNIT=4,OPENED=connected)
@@ -11932,7 +11967,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     IF (VERBOSE_OUTPUT) THEN
      WRITE(*,*) "  writing trace (rdf) into file: ",TRIM(filename_trace)
      WRITE(*,*) "  writing number integral into file: ",TRIM(filename_number_integral)
-     IF (reference_charge/=0) WRITE(*,*) "  writing (Coulomb) energy integral into file: ",&
+     IF (write_energy_integral) WRITE(*,*) "  writing (Coulomb) energy integral into file: ",&
      &TRIM(filename_energy_integral)
     ENDIF
     OPEN(UNIT=3,FILE=TRIM(filename_trace),IOSTAT=ios)
@@ -11945,7 +11980,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     WRITE(10,'(A," number integral INT(4*pi*r^2*rho*g(r))dR")') TRIM(headerline)
     WRITE(10,'("distance n(r)")')
     number_integral=0.0
-    IF (reference_charge/=0) THEN
+    IF (write_energy_integral) THEN
      OPEN(UNIT=4,FILE=TRIM(filename_energy_integral),IOSTAT=ios)
      IF (ios/=0) CALL report_error(26,exit_status=ios)
      WRITE(4,'(A," (Coulomb) energy integral INT(z*e^2*r*rho*g(r)/(2*epsilon0))dR")') TRIM(headerline)
@@ -11961,7 +11996,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      !trapezoidal integration
      number_integral=number_integral+number_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
      WRITE(10,*) a,number_integral
-     IF (reference_charge/=0) THEN
+     IF (write_energy_integral) THEN
       energy_integral=energy_integral+energy_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
       WRITE(4,*) a,energy_integral
      ENDIF
@@ -11973,7 +12008,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
      ENDIF
     ENDDO
     CLOSE(UNIT=3)
-    IF (reference_charge/=0) CLOSE(UNIT=4)
+    IF (write_energy_integral) CLOSE(UNIT=4)
     CLOSE(UNIT=10)
     WRITE(unitline,'("a(distance) b(polar_angle) g(a,b)")')
     WRITE(headerline,'(A," polar distribution function")') TRIM(headerline)
@@ -12152,7 +12187,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 17_Jun_2020"
+ PRINT *, "   Date of Release: 07_Jul_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -14655,7 +14690,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
-    CASE ("cubic_box_edge")
+    CASE ("cubic_box_edge","cubic_box")
      IF (BOX_VOLUME_GIVEN) CALL report_error(92)
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
@@ -14885,6 +14920,12 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+    CASE ("charge_arm_simple")
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     WRITE(*,*) "Distribution module invoked - simple mode:"
+     WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
+     CALL write_simple_charge_arm()
+     CALL perform_distribution_analysis()
     CASE ("conductivity_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       WRITE(*,*) "Autocorrelation module invoked - simple mode:"

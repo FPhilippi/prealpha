@@ -2464,7 +2464,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDIF
 					ENDDO
 					IF ((use_firstatom_as_com).AND.(VERBOSE_OUTPUT)) THEN
-						PRINT *,"All molecules have only 1 atom - turn on com boost."
+						PRINT *,"All molecules have only 1 'atom' - turn on com boost."
 						PRINT *,"(centre-of-mass position = position of this atom)"
 					ENDIF
 				END SUBROUTINE read_molecular_input_file_header
@@ -3335,6 +3335,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						READ(3,IOSTAT=ios,FMT=*)
 						IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
 					CASE DEFAULT
+						IF (DEVELOPERS_VERSION) WRITE(*,'("  ! load_trajectory_header_information is faulty")') skipped_charges
 						CALL report_error(0)!unknown trajectory format, which should never be passed to this subroutine.
 					END SELECT
 					!define the number of lines to skip when advancing through the trajectory file
@@ -3358,7 +3359,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)=element_mass
 							ENDIF
-							element_charge=atomic_charge(element_name)
+							IF (molecule_list(molecule_type_index)%number_of_atoms==1) THEN
+								element_charge=FLOAT(molecule_list(molecule_type_index)%charge)
+							ELSE
+								element_charge=atomic_charge(element_name)
+							ENDIF
 							IF (molecule_list(molecule_type_index)%manual_atom_charge_specified(atom_index)) THEN
 								skipped_charges=skipped_charges+1
 								element_charge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)

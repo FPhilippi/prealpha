@@ -264,8 +264,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  Results might be biased!"
 					WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
 				CASE (4)
-					WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight: unknown element"
-					WRITE(*,*) " #  If necessary, add element to function atomic_weight in module MOLECULAR"
+					WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge: unknown element"
+					WRITE(*,*) " #  If necessary, add element to function atomic_weight and atomic_charge in module MOLECULAR"
 					CALL finalise_global()
 					STOP
 				CASE (5)
@@ -461,6 +461,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  (for velocities / VACF analysis, use '...element vx vy vz' instead)"
 				CASE (55)
 					WRITE(*,*) " #  WARNING 55: Unknown trajectory format! Please carefully check results and input."
+					WRITE(*,*) " #  (Velocity or Cartesian coordinates)"
 				CASE (56)
 					WRITE(*,*) " #  SERIOUS WARNING 56: This analysis/feature is not meaningful with the information in the trajectory (",&
 					&INFORMATION_IN_TRAJECTORY,")."

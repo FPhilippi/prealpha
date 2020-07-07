@@ -2554,7 +2554,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
-				CASE ("cubic_box_edge")
+				CASE ("cubic_box_edge","cubic_box")
 					IF (BOX_VOLUME_GIVEN) CALL report_error(92)
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
@@ -2784,6 +2784,12 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
+				CASE ("charge_arm_simple")
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					WRITE(*,*) "Distribution module invoked - simple mode:"
+					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
+					CALL write_simple_charge_arm()
+					CALL perform_distribution_analysis()
 				CASE ("conductivity_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						WRITE(*,*) "Autocorrelation module invoked - simple mode:"

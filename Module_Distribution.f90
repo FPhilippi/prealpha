@@ -28,7 +28,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	!PRIVATE/PUBLIC declarations
 	PRIVATE :: operation_mode,number_of_references,sampling_interval,references,weigh_charge,subtract_uniform,maxdist
 	PRIVATE :: distribution_function
-	PUBLIC :: user_distribution_input,perform_distribution_analysis,write_simple_sumrules
+	PUBLIC :: user_distribution_input,perform_distribution_analysis,write_simple_sumrules,write_simple_charge_arm
 
 	CONTAINS
 
@@ -59,6 +59,33 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CLOSE(UNIT=8)
 			IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
 		END SUBROUTINE write_simple_sumrules
+
+		!WRITING input file to unit 8, which shouldn't be open.
+		!has to be compliant with 'read_input_for_distribution'
+		SUBROUTINE write_simple_charge_arm()
+		IMPLICIT NONE
+		LOGICAL :: file_exists,connected
+		INTEGER :: n,ios
+			FILENAME_DISTRIBUTION_INPUT="prealpha_simple.inp"
+			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),EXIST=file_exists)
+			IF (file_exists) CALL report_error(114)
+			INQUIRE(UNIT=8,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=8)
+			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			WRITE(8,'("charge_arm ",I0)') give_number_of_molecule_types()
+			DO n=1,give_number_of_molecule_types(),1
+				WRITE(8,'("+0 +0 +1 ",I0)') n
+			ENDDO
+			WRITE(8,'("maxdist_optimize")')
+			WRITE(8,'("subtract_uniform F")')
+			WRITE(8,'("sampling_interval 1")')
+			WRITE(8,'("bin_count_a 100")')
+			WRITE(8,'("bin_count_b 100")')
+			WRITE(8,'("quit")')
+			CLOSE(UNIT=8)
+			IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+		END SUBROUTINE write_simple_charge_arm
 
 		!WRITING input file to unit 8, which shouldn't be open.
 		!has to be compliant with 'read_input_for_distribution'
@@ -893,8 +920,9 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: binpos_a,binpos_b,ios,reference_charge
 		CHARACTER(LEN=1024) :: filename_trace,filename_distribution_output,filename_number_integral,filename_energy_integral
 		CHARACTER(LEN=1024) :: headerline,unitline
-		LOGICAL :: connected
+		LOGICAL :: connected,write_energy_integral
 			reference_charge=give_charge_of_molecule(references(4,reference_number))
+			write_energy_integral=((reference_charge/=0).AND.(weigh_charge))
 			INQUIRE(UNIT=3,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=3)
 			INQUIRE(UNIT=4,OPENED=connected)
@@ -962,7 +990,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (VERBOSE_OUTPUT) THEN
 					WRITE(*,*) "  writing trace (rdf) into file: ",TRIM(filename_trace)
 					WRITE(*,*) "  writing number integral into file: ",TRIM(filename_number_integral)
-					IF (reference_charge/=0) WRITE(*,*) "  writing (Coulomb) energy integral into file: ",&
+					IF (write_energy_integral) WRITE(*,*) "  writing (Coulomb) energy integral into file: ",&
 					&TRIM(filename_energy_integral)
 				ENDIF
 				OPEN(UNIT=3,FILE=TRIM(filename_trace),IOSTAT=ios)
@@ -975,7 +1003,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				WRITE(10,'(A," number integral INT(4*pi*r^2*rho*g(r))dR")') TRIM(headerline)
 				WRITE(10,'("distance n(r)")')
 				number_integral=0.0
-				IF (reference_charge/=0) THEN
+				IF (write_energy_integral) THEN
 					OPEN(UNIT=4,FILE=TRIM(filename_energy_integral),IOSTAT=ios)
 					IF (ios/=0) CALL report_error(26,exit_status=ios)
 					WRITE(4,'(A," (Coulomb) energy integral INT(z*e^2*r*rho*g(r)/(2*epsilon0))dR")') TRIM(headerline)
@@ -991,7 +1019,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!trapezoidal integration
 					number_integral=number_integral+number_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
 					WRITE(10,*) a,number_integral
-					IF (reference_charge/=0) THEN
+					IF (write_energy_integral) THEN
 						energy_integral=energy_integral+energy_integral_trapezoid(previous,trace,(a-step_a),a)*ideal_density
 						WRITE(4,*) a,energy_integral
 					ENDIF
@@ -1003,7 +1031,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDIF
 				ENDDO
 				CLOSE(UNIT=3)
-				IF (reference_charge/=0) CLOSE(UNIT=4)
+				IF (write_energy_integral) CLOSE(UNIT=4)
 				CLOSE(UNIT=10)
 				WRITE(unitline,'("a(distance) b(polar_angle) g(a,b)")')
 				WRITE(headerline,'(A," polar distribution function")') TRIM(headerline)

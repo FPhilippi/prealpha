@@ -1692,6 +1692,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						&SNGL(autocorrelation_function((timeline+1),1)/firstvalue_a),& !The "normalised" function for molecule a
 						&SNGL(autocorrelation_function((timeline+1),2)),SNGL(integral_b),& !autocorrelation function for molecule b "lambdas_b(t)" and its "integral"
 						&SNGL(autocorrelation_function((timeline+1),2)/firstvalue_b) !The "normalised" function for molecule b
+						IF (timeline==(tmax-1)) EXIT
 						!integrating the trapezoids:
 						area_a=autocorrelation_function((timeline+2),1)+autocorrelation_function((timeline+1),1)
 						area_a=area_a*(DFLOAT(TIME_SCALING_FACTOR)/2.0d0)
