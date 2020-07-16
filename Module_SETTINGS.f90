@@ -1068,6 +1068,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		INTEGER,INTENT(IN),OPTIONAL :: total_iterations_in
 		INTEGER,SAVE :: progress_counter,total_iterations,iteration_counter
 		LOGICAL,SAVE :: printsteps
+			IF (.NOT.(VERBOSE_OUTPUT)) RETURN
 			IF (PRESENT(total_iterations_in)) THEN
 				!initialise
 				IF (total_iterations_in>100) THEN

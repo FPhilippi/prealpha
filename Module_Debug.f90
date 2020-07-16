@@ -998,6 +998,10 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
 				WRITE(*,ADVANCE="NO",FMT='(" Writing separate trajectory for molecule number ",I0," ...")')&
 				& molecule_type_index
+				IF (VERBOSE_OUTPUT) THEN
+					IF ((endstep-startstep)>100) WRITE(*,*)
+					CALL print_progress(endstep-startstep)
+				ENDIF
 				WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
 				&"traj_",molecule_type_index,"."//output_format
 				INQUIRE(UNIT=4,OPENED=connected)
@@ -1018,10 +1022,17 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDDO
 					!Here, all the molecules for the current timestep have been appended. Thus, transfer to output:
 					CALL center_xyz(3,addhead=.FALSE.,outputunit=4)
+					CALL print_progress()
 				ENDDO
 				ENDFILE 4
 				CLOSE(UNIT=4)
-				WRITE(*,*)"done"
+				IF (VERBOSE_OUTPUT) THEN
+					IF ((give_number_of_timesteps())>100) THEN
+						WRITE(*,*)
+						WRITE(*,FMT='(" ")',ADVANCE="NO")
+					ENDIF
+				ENDIF
+				WRITE(*,'("done.")')
 			ENDDO
 			CLOSE(UNIT=3)
 		END SUBROUTINE dump_split
@@ -1048,7 +1059,11 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (connected) CALL report_error(27,exit_status=3)
 				WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
 				OPEN(UNIT=3,FILE=TRIM(fstring))
-				WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
+				IF (VERBOSE_OUTPUT) THEN
+					WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
+					IF (give_number_of_timesteps()>100) WRITE(*,*)
+					CALL print_progress(give_number_of_timesteps())
+				ENDIF
 				DO stepcounter=1,give_number_of_timesteps(),1
 					!Write head, depending on which type the trajectory has...
 					CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
@@ -1060,9 +1075,16 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
 						ENDDO
 					ENDDO
+					CALL print_progress()
 				ENDDO
+				IF (VERBOSE_OUTPUT) THEN
+					IF ((give_number_of_timesteps())>100) THEN
+						WRITE(*,*)
+						WRITE(*,FMT='(" ")',ADVANCE="NO")
+					ENDIF
+					WRITE(*,'("done.")')
+				ENDIF
 				CLOSE(UNIT=3)
-				WRITE(*,*) "done"
 			ENDIF
 			IF (writemolecularinputfile) THEN
 				INQUIRE(UNIT=3,OPENED=connected)
@@ -1275,6 +1297,11 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			OPEN(UNIT=4,FILE=TRIM(fstring))
 			!iterate over the specified timesteps
+			IF (VERBOSE_OUTPUT) THEN
+				WRITE(*,FMT='(A)',ADVANCE="NO") " writing new trajectory to file '"//TRIM(fstring)//"'..."
+				IF ((endstep_in-startstep_in)>100) WRITE(*,*)
+				CALL print_progress(endstep_in-startstep_in)
+			ENDIF
 			DO stepcounter=startstep_in,endstep_in,1
 				!Write head, depending on which type the trajectory has...
 				CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,&
@@ -1285,7 +1312,15 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						CALL write_molecule_merged_drudes(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
 					ENDDO
 				ENDDO
+				CALL print_progress()
 			ENDDO
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((endstep_in-startstep_in)>100) THEN
+					WRITE(*,*)
+					WRITE(*,FMT='(" ")',ADVANCE="NO")
+				ENDIF
+				WRITE(*,'("done.")')
+			ENDIF
 			ENDFILE 4
 			CLOSE(UNIT=4)
 			IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
