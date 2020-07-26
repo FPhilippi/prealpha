@@ -1025,6 +1025,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				covalence_radius=1.06
 			CASE ("Li")
 				covalence_radius=1.34
+			CASE ("Na")
+				covalence_radius=1.54
 			CASE DEFAULT
 				covalence_radius=1.00
 			END SELECT

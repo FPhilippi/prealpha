@@ -1,4 +1,4 @@
-! RELEASED ON 16_Jul_2020 AT 09:31
+! RELEASED ON 26_Jul_2020 AT 20:50
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1026,6 +1026,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     covalence_radius=1.06
    CASE ("Li")
     covalence_radius=1.34
+   CASE ("Na")
+    covalence_radius=1.54
    CASE DEFAULT
     covalence_radius=1.00
    END SELECT
@@ -1303,12 +1305,14 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL,PARAMETER :: default_mass_sulfur=32.066
  REAL,PARAMETER :: default_mass_phosphorus=30.974
  REAL,PARAMETER :: default_mass_lithium=6.94
+ REAL,PARAMETER :: default_mass_sodium=22.990
 
  REAL,PARAMETER :: default_charge_hydrogen=0.0
  REAL,PARAMETER :: default_charge_fluorine=0.0
  REAL,PARAMETER :: default_charge_boron=0.0
  REAL,PARAMETER :: default_charge_chlorine=0.0
  REAL,PARAMETER :: default_charge_bromine=0.0
+ REAL,PARAMETER :: default_charge_sodium=0.0
  REAL,PARAMETER :: default_charge_iodine=0.0
  REAL,PARAMETER :: default_charge_nitrogen=0.0
  REAL,PARAMETER :: default_charge_oxygen=0.0
@@ -1329,6 +1333,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL :: charge_sulfur=default_charge_sulfur
  REAL :: charge_phosphorus=default_charge_phosphorus
  REAL :: charge_lithium=default_charge_lithium
+ REAL :: charge_sodium=default_charge_sodium
 
  REAL :: mass_hydrogen=default_mass_hydrogen
  REAL :: mass_fluorine=default_mass_fluorine
@@ -1342,6 +1347,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  REAL :: mass_sulfur=default_mass_sulfur
  REAL :: mass_phosphorus=default_mass_phosphorus
  REAL :: mass_lithium=default_mass_lithium
+ REAL :: mass_sodium=default_mass_sodium
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1461,6 +1467,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    mass_sulfur=default_mass_sulfur
    mass_phosphorus=default_mass_phosphorus
    mass_lithium=default_mass_lithium
+   mass_sodium=default_mass_sodium
   END SUBROUTINE set_default_masses
 
   SUBROUTINE set_default_charges()
@@ -1477,6 +1484,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    charge_sulfur=default_charge_sulfur
    charge_phosphorus=default_charge_phosphorus
    charge_lithium=default_charge_lithium
+   charge_sodium=default_charge_sodium
   END SUBROUTINE set_default_charges
 
   SUBROUTINE subtract_drude_masses()
@@ -3962,6 +3970,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       old_charge=charge_lithium
       charge_lithium=new_charge
       element_name_full="Lithium"
+     CASE ("Na")
+      old_charge=charge_sodium
+      charge_sodium=new_charge
+      element_name_full="Sodium"
      CASE ("D","X")
       old_charge=drude_charge
       drude_charge=new_charge
@@ -4035,6 +4047,10 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       old_mass=mass_lithium
       mass_lithium=new_mass
       element_name_full="Lithium"
+     CASE ("Na")
+      old_mass=mass_sodium
+      mass_sodium=new_mass
+      element_name_full="Sodium"
      CASE ("D","X")
       old_mass=drude_mass
       drude_mass=new_mass
@@ -4853,6 +4869,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     atomic_weight=mass_bromine
    CASE ("I")
     atomic_weight=mass_iodine
+   CASE ("Na")
+    atomic_weight=(mass_sodium)
    CASE ("N")
     atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
    CASE ("O")
@@ -4907,6 +4925,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     atomic_charge=charge_phosphorus
    CASE ("Li")
     atomic_charge=charge_lithium
+   CASE ("Na")
+    atomic_charge=charge_sodium
    CASE ("X")
     atomic_charge=drude_charge
    CASE ("D")
@@ -12223,7 +12243,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 16_Jul_2020"
+ PRINT *, "   Date of Release: 26_Jul_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
