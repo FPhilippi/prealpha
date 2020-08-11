@@ -1,4 +1,4 @@
-! RELEASED ON 26_Jul_2020 AT 20:50
+! RELEASED ON 11_Aug_2020 AT 15:25
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1375,6 +1375,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  TYPE,PRIVATE :: molecule
   INTEGER :: constraints=0
   INTEGER :: charge=0
+  REAL :: realcharge=0.0
   INTEGER :: number_of_atoms=0 ! = extent of dimension one of trajectory, number of atoms PER SINGLE MOLECULE, not total!
   INTEGER :: total_molecule_count=0 ! = extent of dimension two of trajectory, number of molecules of this type in the box
   INTEGER :: number_of_drudes_in_molecule=0 ! = number of drude particles in this molecule (counter for successfully assigned drude pairs)
@@ -3386,7 +3387,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    IF (molecule_list(molecule_type_index)%charge==0) THEN
     charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
    ELSE
-    charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/DBLE(molecule_list(molecule_type_index)%charge)
+    charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/molecule_list(molecule_type_index)%realcharge
     charge_arm(:)=charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index)
    ENDIF
   END FUNCTION charge_arm
@@ -3723,6 +3724,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       READ(3,IOSTAT=ios,FMT=*) a,b,c
       IF (ios/=0) CALL report_error(7,exit_status=ios)
       molecule_list(n)%charge=a
+      molecule_list(n)%realcharge=FLOAT(a)
       molecule_list(n)%number_of_atoms=b
       IF (b<1) CALL report_error(80,exit_status=b)
       molecule_list(n)%total_molecule_count=c
@@ -4502,8 +4504,16 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
       sum_of_atom_charges=sum_of_atom_charges+molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
      ENDDO
      IF (DEVELOPERS_VERSION) WRITE(*,'("  ! sum of atomic charges: ",E9.3)') sum_of_atom_charges
-     IF ((sum_of_atom_charges-FLOAT(molecule_list(molecule_type_index)%charge))>0.001) THEN
+     IF (ABS(sum_of_atom_charges-FLOAT(molecule_list(molecule_type_index)%charge))>0.001) THEN
       CALL report_error(126)
+      molecule_list(molecule_type_index)%realcharge=sum_of_atom_charges
+      IF (ABS(sum_of_atom_charges)>=1.0) THEN
+       WRITE(*,'(" Formal charge = ",I0,", using real charge = ",F0.3," for charge arm.")')&
+       &molecule_list(molecule_type_index)%charge,molecule_list(molecule_type_index)%realcharge
+      ELSE
+       WRITE(*,'(" Formal charge = ",I0,", using real charge = ",E10.3," for charge arm.")')&
+       &molecule_list(molecule_type_index)%charge,molecule_list(molecule_type_index)%realcharge
+      ENDIF
      ENDIF
     ENDIF
     box_weight=box_weight+molecule_list(molecule_type_index)%mass*molecule_list(molecule_type_index)%total_molecule_count
@@ -12243,7 +12253,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 26_Jul_2020"
+ PRINT *, "   Date of Release: 11_Aug_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
