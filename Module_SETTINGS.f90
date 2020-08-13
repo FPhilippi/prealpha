@@ -229,6 +229,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!130 requested number of jump analyses exceeded permissible maximum.
 	!131 jump length is a tiny bit too short
 	!132 distribution.inp is not available.
+	!133 Same molecule type for cross interactions
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -715,6 +716,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (132)
 					WRITE(*,*) " #  ERROR 132: couldn't find '",TRIM(FILENAME_DISTRIBUTION_INPUT),"'"
 					WRITE(*,*) "--> redelivering control to main unit"
+				CASE (133)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 133: Two times the same molecule_type_index - cross interactions will be zero."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

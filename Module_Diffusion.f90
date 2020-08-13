@@ -15,7 +15,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	INTEGER :: number_of_projections !number of different projections. '1 1 1' is the normal, three-dimensional self-diffusion, '0 0 1' would be along the z-axis, etc.
 	INTEGER :: tmax=tmax_default!max number of timesteps into the future for the mean-squared displacement. Default is 10000
 	INTEGER :: tstep=tstep_default!resolution of the diffusion functions x_num, x_squared and x_unsquared
-	INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index
+	INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index (2ns molecule_type_index)
     REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared !mean squared displacement, dimension is the time shift given in timesteps
 	REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: x_unsquared !mean displacement (=drift), first dimension = time shift, remaining dimensions = xyz of drift
     INTEGER(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_num !number of averages taken for the positions
@@ -184,6 +184,12 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (TRIM(operation_mode)=="mxd") operation_mode="msd"
 				!Now read the body of the diffusion input file in line with the requested operation mode:
 				SELECT CASE (TRIM(operation_mode))
+				CASE ("cross")
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "calculating mean-squared displacements for cross-diffusion."
+					CALL read_input_for_cross_diffusion()!uses unit 3!!
+					IF ((ERROR_CODE)==33) RETURN !UNIT 3 is closed by report_error
+					!allocating memory - first, check for sensible input.
+					CALL check_input_and_allocate_memory()
 				CASE ("msd")
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "calculating mean-squared displacements for self-diffusion."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "reading user-specified projections."
@@ -238,6 +244,100 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ALLOCATE(x_unsquared(tmax/tstep,3),STAT=allocstatus)
 					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
 				END SUBROUTINE check_input_and_allocate_memory
+
+				SUBROUTINE read_input_for_cross_diffusion()!This subroutine is responsible for reading the body of the diffusion input file, connected as unit 3.
+				IMPLICIT NONE
+				INTEGER :: n
+				CHARACTER(LEN=32) :: inputstring
+					!read user-specified projections
+					BACKSPACE 3
+					READ(3,IOSTAT=ios,FMT=*) operation_mode,number_of_projections
+					!Allocate memory to store the projections and the molecule_type_index
+					ALLOCATE(projections(5,number_of_projections),STAT=allocstatus)
+					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+					!Try to read all the projections from the input file.
+					DO n=1,number_of_projections,1
+						READ(3,IOSTAT=ios,FMT=*) projections(:,n)
+						IF (ios/=0) CALL report_error(34,exit_status=ios)!ERROR 14: incorrect format in diffusion.inp
+						IF ((projections(4,n)>give_number_of_molecule_types()).OR.(projections(4,n)<1)) THEN
+							!the specified molecule type doesn't exist. Stop execution.
+							CALL report_error(33,exit_status=projections(4,n))
+							CLOSE(UNIT=3)
+							RETURN
+						ENDIF
+						IF ((projections(5,n)>give_number_of_molecule_types()).OR.(projections(5,n)<1)) THEN
+							!the specified molecule type doesn't exist. Stop execution.
+							CALL report_error(33,exit_status=projections(4,n))
+							CLOSE(UNIT=3)
+							RETURN
+						ENDIF
+						IF (projections(4,n)==projections(5,n)) THEN
+							!same molecule type for cross...
+							CALL report_error(133,exit_status=projections(4,n))
+						ENDIF
+					ENDDO
+					DO n=1,MAXITERATIONS,1
+						READ(3,IOSTAT=ios,FMT=*) inputstring
+						IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "End-of-file condition in ",TRIM(FILENAME_DIFFUSION_INPUT)
+						IF (ios/=0) THEN
+							IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DIFFUSION_INPUT)
+							EXIT
+						ENDIF
+						SELECT CASE (TRIM(inputstring))
+						CASE ("tmax")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
+							IF (ios/=0) THEN
+								CALL report_error(32,exit_status=ios)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'tmax' to default (=",tmax_default,")"
+								tmax=tmax_default
+							ELSE
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'tmax' to ",tmax
+							ENDIF
+						CASE ("tstep")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,tstep
+							IF (ios/=0) THEN
+								CALL report_error(32,exit_status=ios)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'tstep' to default (=",tstep_default,")"
+								tstep=tstep_default
+							ELSE
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'tstep' to ",tstep
+							ENDIF
+						CASE ("exponent")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,msd_exponent
+							IF (ios/=0) THEN
+								CALL report_error(32,exit_status=ios)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "setting 'exponent' to default (=2)"
+								msd_exponent=2
+							ELSE
+								IF (VERBOSE_OUTPUT) THEN
+									WRITE(*,'(A,I0)') " setting 'exponent' to ",msd_exponent
+									WRITE(*,ADVANCE="NO",FMT='(" (Will report <|R|^",I0)') msd_exponent
+								ENDIF
+							ENDIF
+							SELECT CASE (msd_exponent)
+							CASE (1)
+								WRITE(*,'("> - mean displacement)")')
+							CASE (2)
+								WRITE(*,'("> - mean squared displacement)")')
+							CASE (0)
+								WRITE(*,'("> - unit projection for debug purposes)")')
+							CASE (4)
+								WRITE(*,'("> - use with MSD for non-gaussian parameter alpha2)")')
+							CASE DEFAULT
+								WRITE(*,'("> - exponent of unknown use)")')
+							END SELECT
+						CASE ("quit")
+							IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DIFFUSION_INPUT)
+							EXIT
+						CASE DEFAULT
+							IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
+						END SELECT
+					ENDDO
+				END SUBROUTINE read_input_for_cross_diffusion
+
 
 				SUBROUTINE read_input_for_self_diffusion()!This subroutine is responsible for reading the body of the diffusion input file, connected as unit 3.
 				IMPLICIT NONE
@@ -367,6 +467,16 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				DEALLOCATE(x_unsquared,STAT=deallocstatus)
 				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			ENDIF
+			IF (TRIM(operation_mode)=="cross") THEN
+				DEALLOCATE(projections,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+				DEALLOCATE(x_num,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+				DEALLOCATE(x_squared,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+				DEALLOCATE(x_unsquared,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			ENDIF
 		END SUBROUTINE finalise_diffusion
 
 		!gives information about what is actually calculated and printed.
@@ -388,19 +498,26 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			END SELECT
 			! provide the user with information about what will be reported
 			WRITE(*,*) "These quantities will be calculated and reported:"
-			IF (verbose_print) THEN
-				WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
-				WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':  mean",&
-				&TRIM(power_terminology)," displacement, not corrected"
-				WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
-				WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
-				&TRIM(power_terminology)," displacement, equals to <(X-drift)**"//TRIM(msd_exponent_str)//">"
-				WRITE(*,*) "   'drift_x(y/z)':  the x, y and z components of the drift vector (average over box)"
-				WRITE(*,*) "   '#(N)':          number of averages taken to obtain this value"
-			ELSE
+			IF (TRIM(operation_mode)=="cross") THEN
 				WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-				WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': mean",TRIM(power_terminology)," displacement, not corrected"
-				WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
+				WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
+				WRITE(*,*) "   here, R=x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+				WRITE(*,*) "   with R_a(t)=(1/N_a)*SUM(r_a(t)"
+			ELSE
+				IF (verbose_print) THEN
+					WRITE(*,*) "   'timeline':      number of the timestep * time scaling factor"
+					WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':  mean",&
+					&TRIM(power_terminology)," displacement, not corrected"
+					WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
+					WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
+					&TRIM(power_terminology)," displacement, equals to <(X-drift)**"//TRIM(msd_exponent_str)//">"
+					WRITE(*,*) "   'drift_x(y/z)':  the x, y and z components of the drift vector (average over box)"
+					WRITE(*,*) "   '#(N)':          number of averages taken to obtain this value"
+				ELSE
+					WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
+					WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': mean",TRIM(power_terminology)," displacement, not corrected"
+					WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
+				ENDIF
 			ENDIF
 			WRITE(*,'(" the time scaling factor is ",I0)') TIME_SCALING_FACTOR
 			WRITE(*,'(" averages taken: max = ",I0,", min = ",I0)') (give_number_of_timesteps()-tstep),(give_number_of_timesteps()-tmax)
@@ -527,11 +644,127 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDDO
 		END SUBROUTINE make_diffusion_functions
 
+		!This subroutine generates x_a*x_b*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
+		!With R_a(t)=(1/N_a)*SUM(r_a(t))
+		SUBROUTINE make_cross_diffusion_functions(projection_number)
+		IMPLICIT NONE
+	 !$ INTERFACE
+	 !$ 	FUNCTION OMP_get_num_threads()
+	 !$ 	INTEGER :: OMP_get_num_threads
+	 !$ 	END FUNCTION OMP_get_num_threads
+	 !$ END INTERFACE
+		INTEGER :: current_distance,starting_timestep,molecule_index,n,array_pos,molecule_type_index_a,molecule_type_index_b
+		INTEGER,INTENT(IN) :: projection_number
+		INTEGER :: number_of_timesteps,allocstatus,nmolecules_a,nmolecules_b,deallocstatus
+		REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3),x_a,x_b
+		REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: positions!first dimension: timestep, second dimension: the three coordinates.
+		!local functions for parallelisation
+		REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared_temp !mean squared displacement, dimension is the time shift given in timesteps
+		INTEGER(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_num_temp !number of averages taken for the positions
+			!get #timesteps, so that function doesn't have to be called every time.
+			number_of_timesteps=give_number_of_timesteps()
+			molecule_type_index_a=projections(4,projection_number)
+			molecule_type_index_b=projections(5,projection_number)
+			!get number of molecules
+			nmolecules_a=give_number_of_molecules_per_step(molecule_type_index_a)
+			nmolecules_b=give_number_of_molecules_per_step(molecule_type_index_b)
+			x_a=FLOAT(nmolecules_a)/FLOAT(nmolecules_a+nmolecules_b)
+			x_b=FLOAT(nmolecules_b)/FLOAT(nmolecules_a+nmolecules_b)
+			!initialise the diffusion functions:
+			x_num(:)=0
+			x_squared(:)=0.0d0
+			!Allocate memory to store the positions
+			ALLOCATE(positions(number_of_timesteps,3),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+			!initialise
+			positions(:,:)=0.0d0
+			!$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL))) &
+			!$OMP PRIVATE(molecule_index,vector_clip,x_num_temp,x_squared_temp,current_distance,array_pos)&
+			!$OMP PRIVATE(projektionsvektor)
+			!$OMP SINGLE
+			!$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+			!$ 	WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (mean squared RMM displacement)"
+			!$ 	CALL timing_parallel_sections(.TRUE.)
+			!$ ENDIF
+			!$OMP END SINGLE
+			!$OMP DO SCHEDULE(STATIC,1)
+			DO starting_timestep=1,number_of_timesteps,1
+				!Here, the positions for the relative mean molecular diffusion coefficients are prepared
+				vector_clip(:)=0.0d0
+				DO molecule_index=1,nmolecules_a,1
+					vector_clip(:)=vector_clip(:)+give_center_of_mass(starting_timestep,molecule_type_index_a,molecule_index)
+				ENDDO
+				positions(starting_timestep,:)=vector_clip(:)/DFLOAT(nmolecules_a)
+				vector_clip(:)=0.0d0
+				DO molecule_index=1,nmolecules_b,1
+					vector_clip(:)=vector_clip(:)+give_center_of_mass(starting_timestep,molecule_type_index_b,molecule_index)
+				ENDDO
+				positions(starting_timestep,:)=positions(starting_timestep,:)-vector_clip(:)/DFLOAT(nmolecules_b) !Calculating R_a(t)-R_b(t)
+			ENDDO
+			!$OMP END DO
+			!$OMP SINGLE
+			!$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+			!$ 	WRITE(*,ADVANCE="NO",FMT='(" ### Preparation took ")')
+			!$ 	CALL timing_parallel_sections(.FALSE.)
+			!$ ENDIF
+			!$OMP END SINGLE
+			!then, allocate and initialise the local diffusion functions:
+			ALLOCATE(x_num_temp(tmax/tstep),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+			ALLOCATE(x_squared_temp(tmax/tstep),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+			x_num_temp(:)=0!later, in the loop, the array indices will be addressed with 'current_distance'
+			x_squared_temp(:)=0.0d0
+			!outer loop iterates over all the possible starting points
+			!tmax can't be larger than #timesteps-1, in which case only the first timestep can be a starting point.
+			!$OMP DO SCHEDULE(STATIC,1)
+			DO starting_timestep=1,number_of_timesteps,1
+				!inner loop iterates over the time differences for the steps.
+				DO current_distance=tstep,tmax,tstep !zeroth entry is implied.
+					!The starting_timestep+current_distance shall never exceed the total number of timesteps.
+					IF ((starting_timestep+current_distance)>number_of_timesteps) EXIT
+					!array has only tmax/tstep members!
+					array_pos=current_distance/tstep
+					!increment x_num. It counts how many points were used for averaging. Not necessary, but less error prone than me calculating that analytically.
+					x_num_temp(array_pos)=x_num_temp(array_pos)+1
+					!calculate difference between starting_timestep+current_distance and starting_timestep
+					!This is the central part of the (cross) diffusion analysis.
+					!first, the shift of the center of mass of the current molecule is stored in 'projektionsvektor'.
+					projektionsvektor=positions(starting_timestep+current_distance,:)-positions(starting_timestep,:)!final position minus initial position.
+					!Then, the projection is applied - if all entries are one, then the 'normal', three-dimensional mean squared displacement is calculated.
+					projektionsvektor(:)=DFLOAT(projections(1:3,projection_number))*projektionsvektor(:)
+					!add the found distance to x_squared.
+					x_squared_temp(array_pos)=x_squared_temp(array_pos)+SQRT(SUM(projektionsvektor(:)**2))**msd_exponent !squared_clip collects the quantity x²+y²+z² (or parts thereof)
+				ENDDO
+			ENDDO
+			!$OMP END DO
+			!update the original functions
+			!$OMP CRITICAL
+			x_num(:)=x_num(:)+x_num_temp(:)
+			x_squared(:)=x_squared(:)+x_squared_temp(:)
+			!$OMP END CRITICAL
+			!deallocate temporary functions
+			DEALLOCATE(x_num_temp,STAT=deallocstatus)
+			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			DEALLOCATE(x_squared_temp,STAT=deallocstatus)
+			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			!$OMP END PARALLEL
+		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+		 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+		 !$ 	CALL timing_parallel_sections(.FALSE.)
+		 !$ ENDIF
+			DEALLOCATE(positions,STAT=deallocstatus)
+			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			!Account for the averaging, and the molar fractions:
+			x_squared(:)=x_squared(:)*(x_a*x_b/DFLOAT(x_num(:)))
+		END SUBROUTINE make_cross_diffusion_functions
+
 		!This subroutine is responsible for writing the output into a file.
 		SUBROUTINE write_diffusion_functions(projection_number)
 		IMPLICIT NONE
 		!Output formats
 		2	FORMAT (I15,2E15.6) !Module DIFFUSION - diffusion output file, no verbose_print
+		3	FORMAT (I15,E15.6) !Module DIFFUSION - cross diffusion output file, no verbose_print
 		6	FORMAT (I15,6E15.6,I15) !Module DIFFUSION - diffusion output file, verbose_print
 		INTEGER,INTENT(IN) :: projection_number
 		INTEGER :: array_pos,ios,i
@@ -542,33 +775,51 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			INQUIRE(UNIT=3,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=3)
 			!generate filename, depending on operation mode
-			IF (TRIM(operation_mode)=="default") THEN
+			SELECT CASE (TRIM(operation_mode))
+			CASE ("msd")
+				WRITE(filename_diffusion_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+				&//"projection_",projection_number,"_self_diffusion"
+			CASE ("default")
 				WRITE(filename_diffusion_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
 				&//"type_",projection_number,"_diffusion"
-			ELSE
+			CASE ("cross")
 				WRITE(filename_diffusion_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-				&//"projection_",projection_number,"_diffusion"
-			ENDIF
+				&//"projection_",projection_number,"_cross_diffusion"
+			CASE DEFAULT
+				CALL report_error(0)
+			END SELECT
 			IF (VERBOSE_OUTPUT) WRITE(*,*) "writing diffusion data (msd) into file: ",TRIM(filename_diffusion_output)
 			OPEN(UNIT=3,FILE=TRIM(filename_diffusion_output),IOSTAT=ios)
 			IF (ios/=0) CALL report_error(26,exit_status=ios)
 			!Write header
 			WRITE(3,*) "This file contains diffusion information based on the input file '"&
 			&,TRIM(FILENAME_DIFFUSION_INPUT),"'"
-			WRITE(3,'("   Projection ",I0," (",SP,I0," ",I0," ",I0,SS,"), Molecule type ",I0," (",A,")")')&
-			&projection_number,projections(:,projection_number),TRIM(give_sum_formula(projections(4,projection_number)))
-			IF (verbose_print) THEN
-				!also print the full drift information
-				WRITE(3,'(8A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">",&
-				&"<R>","<R**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str),"drift_x","drift_y","drift_z","#(N)"
-				WRITE(3,6) 0,0.,0.,0.,0.,0.,0.,0
+			IF (TRIM(operation_mode)=="cross") THEN
+				WRITE(3,'("   Projection ",I0," (",SP,I0," ",I0," ",I0,SS,"), Molecule types ",I0," (",A,") and ",I0," (",A,")")')&
+				&projection_number,projections(1:4,projection_number),&
+				&TRIM(give_sum_formula(projections(4,projection_number))),&
+				&projections(5,projection_number),&
+				&TRIM(give_sum_formula(projections(5,projection_number)))
+				WRITE(3,'(2A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">"!timestep*scaling, mean squared displacement
+				WRITE(3,3) 0,0.0
 			ELSE
-				!only write the basics
-				WRITE(3,'(3A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">","<R>"!timestep*scaling, mean squared displacement and mean displacement
-				WRITE(3,2) 0,0.,0.
+				WRITE(3,'("   Projection ",I0," (",SP,I0," ",I0," ",I0,SS,"), Molecule type ",I0," (",A,")")')&
+				&projection_number,projections(:,projection_number),TRIM(give_sum_formula(projections(4,projection_number)))
+				IF (verbose_print) THEN
+					!also print the full drift information
+					WRITE(3,'(8A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">",&
+					&"<R>","<R**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str),"drift_x","drift_y","drift_z","#(N)"
+					WRITE(3,6) 0,0.,0.,0.,0.,0.,0.,0
+				ELSE
+					!only write the basics
+					WRITE(3,'(3A15)') "timeline","<R**"//TRIM(msd_exponent_str)//">","<R>"!timestep*scaling, mean squared displacement and mean displacement
+					WRITE(3,2) 0,0.,0.
+				ENDIF
 			ENDIF
 			DO array_pos=1,tmax/tstep,1 !zeroth entry is already there.
-				IF (verbose_print) THEN
+				IF (TRIM(operation_mode)=="cross") THEN
+					WRITE(3,3) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos)
+				ELSEIF (verbose_print) THEN
 					WRITE(3,6) array_pos*TIME_SCALING_FACTOR*tstep,x_squared(array_pos),&!timeline and <R**msd_exponent>
 					&SQRT(SUM(x_unsquared(array_pos,:)**2)),&!<R>=SQRT(<x>²+<y>²+<z>²)
 					&x_squared(array_pos)-SQRT(SUM(x_unsquared(array_pos,:)**2))**msd_exponent,&!<(R-drift)**msd_exponent>
@@ -606,6 +857,13 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						!default projections, i.e. one per molecule type.
 						DO n=1,number_of_projections,1
 							CALL make_diffusion_functions(n)
+							CALL write_diffusion_functions(n)
+						ENDDO
+					CASE ("cross")
+						CALL print_helpful_info()
+						!default projections, i.e. one per molecule type.
+						DO n=1,number_of_projections,1
+							CALL make_cross_diffusion_functions(n)
 							CALL write_diffusion_functions(n)
 						ENDDO
 					CASE DEFAULT
