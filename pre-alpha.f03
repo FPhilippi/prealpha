@@ -1,4 +1,4 @@
-! RELEASED ON 13_Aug_2020 AT 15:55
+! RELEASED ON 14_Aug_2020 AT 08:18
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -9832,7 +9832,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
  PRIVATE :: finalise_diffusion,make_diffusion_functions,x_num,x_squared,x_unsquared
  PRIVATE :: tmax_default,tstep_default,verbose_print_default,verbose_print
  PRIVATE :: write_diffusion_functions
- PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input,write_simple_diffusion
+ PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input,write_simple_diffusion,user_cross_input
 
  CONTAINS
 
@@ -9967,6 +9967,98 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    CLOSE(UNIT=8)
    WRITE(*,*) "done"
   END SUBROUTINE user_msd_input
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_cross_diffusion'
+  SUBROUTINE user_cross_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+  IMPLICIT NONE
+  LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+  CHARACTER (LEN=*) :: filename_msd
+  LOGICAL :: use_default,connected
+  INTEGER,INTENT(IN) :: number_of_molecules,nsteps
+  INTEGER :: nprojections,allocstatus,deallocstatus,maxmol,tstep,tmax,n,ios
+ ! INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index, just as in module DIFFUSION
+   parallelisation_possible=.TRUE.
+   PRINT *,"Generating MSD input."
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"First of all, the calculation of diffusion functions benefits from parallelisation."
+    PRINT *,"Would you like to turn on parallelisation? (y/n)"
+    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   ENDIF
+   PRINT *,"This feature has the capability of calculating <R²> for different projections,"
+   PRINT *,"which is necessary for systems with anisotropic diffusion."
+   PRINT *,"(To name an example, if just the diffusion in z-direction is required, separated from x and y)"
+   PRINT *,"Please enter the number of projections you want to specify (including molecule types)."
+   nprojections=user_input_integer(1,100000)
+   !Allocate memory for intermediate storage...
+   ALLOCATE(projections(5,nprojections),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   maxmol=number_of_molecules
+   IF (maxmol<1) maxmol=10000!unknown molecule number... expect the worst.
+   !Then, read projections from the standard input.
+   DO n=1,nprojections,1
+    WRITE(*,'(" Reading projection number ",I0,"...")') n
+    PRINT *,"Please give the 1st molecule type index / number of the 1st molecule to observe:"
+    projections(4,n)=user_input_integer(1,maxmol)
+    PRINT *,"Please give the 2nd molecule type index / number of the 2nd molecule to observe:"
+    projections(5,n)=user_input_integer(1,maxmol)
+    PRINT *,"You now have to choose the projection for this molecule type."
+    PRINT *,"'1 1 1' is 3D, '0 0 1' is only in z-direction, '1 1 0' is in the x-y-plane, etc."
+    PRINT *,"Please provide the x-component as integer:"
+    projections(1,n)=user_input_integer(-10,10)
+    PRINT *,"Please provide the y-component as integer:"
+    projections(2,n)=user_input_integer(-10,10)
+    PRINT *,"Please provide the z-component as integer:"
+    projections(3,n)=user_input_integer(-10,10)
+   ENDDO
+   PRINT *
+   !At this point, projections should be initialised (if necessary!)
+   !Thus, continue with reading in the switches:
+   PRINT *,"How many steps do you want the shift of the displacement functions to be?"
+   WRITE(*,'(" The default is currently set to ",I0,".")') tmax_default
+   tmax=user_input_integer(10,(nsteps-1))
+   PRINT *,"How fine do you want the functions <x²> to be computed?"
+   PRINT *,"For example, when specifying '10', then the displacements are printed"
+   PRINT *,"in intervals of 10 timesteps."
+   WRITE(*,'(" The default is currently set to ",I0,".")') tstep_default
+   tstep=user_input_integer(1,(tmax/10))
+   PRINT *,"Would you like to use specify a custom exponent for the displacement? (y/n)"
+   PRINT *,"(the default is '2' for the mean squared displacement)"
+   IF (user_input_logical()) THEN
+    PRINT *,"Please enter the exponent n you would like to use for <x**n>"
+    msd_exponent=user_input_integer(0,4)
+   ELSE
+    msd_exponent=2
+   ENDIF
+   !tstep and tmax have sensible values.
+   WRITE(*,FMT='(A32)',ADVANCE="NO") " writing cross MSD input file..."
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_msd),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'(" cross ",I0," ### mean-squared displacement for given number of projections")') nprojections
+   DO n=1,nprojections,1
+    WRITE(8,'(" ",I0," ",I0," ",I0," ",I0," ",I0," ### x-y-z projection for molecule types ",I0," and ",I0)')&
+    &projections(:,n),projections(4,n),projections(5,n)
+   ENDDO
+   !Done writing - projections is no longer needed.
+   DEALLOCATE(projections,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   WRITE(8,'(" tmax ",I0," ### maximum time shift of the displacement function")') tmax
+   WRITE(8,'(" tstep ",I0)') tstep
+   IF (msd_exponent/=2) WRITE(8,'(" exponent ",I0," ### custom exponent - computing <x**",I0,">")')&
+   &msd_exponent,msd_exponent
+   WRITE(8,*) "quit"
+   WRITE(8,*)
+   WRITE(8,*) "R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+   WRITE(8,*) "with R_a(t)=(1/N_a)*SUM(r_a(t)"
+   WRITE(8,*)
+   WRITE(8,*) "This is an input file for the calculation of mean-squared displacements."
+   WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
+   ENDFILE 8
+   CLOSE(UNIT=8)
+   WRITE(*,*) "done"
+  END SUBROUTINE user_cross_input
 
   !initialises the diffusion module by reading the specified input file.
   SUBROUTINE initialise_diffusion()
@@ -10307,7 +10399,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    IF (TRIM(operation_mode)=="cross") THEN
     WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
     WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
-    WRITE(*,*) "   here, R=x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+    WRITE(*,*) "   here, R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
     WRITE(*,*) "   with R_a(t)=(1/N_a)*SUM(r_a(t)"
    ELSE
     IF (verbose_print) THEN
@@ -10450,7 +10542,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    ENDDO
   END SUBROUTINE make_diffusion_functions
 
-  !This subroutine generates x_a*x_b*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
+  !This subroutine generates (N_a+N_b)*x_a*x_b*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
   !With R_a(t)=(1/N_a)*SUM(r_a(t))
   SUBROUTINE make_cross_diffusion_functions(projection_number)
   IMPLICIT NONE
@@ -10562,7 +10654,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
    DEALLOCATE(positions,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    !Account for the averaging, and the molar fractions:
-   x_squared(:)=x_squared(:)*(x_a*x_b/DFLOAT(x_num(:)))
+   x_squared(:)=x_squared(:)*(FLOAT(nmolecules_a+nmolecules_b)*x_a*x_b/DFLOAT(x_num(:)))
   END SUBROUTINE make_cross_diffusion_functions
 
   !This subroutine is responsible for writing the output into a file.
@@ -12515,7 +12607,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 13_Aug_2020"
+ PRINT *, "   Date of Release: 14_Aug_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -12895,8 +12987,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"   Important note: the distinct contributions are extremely expensive to calculate."
    PRINT *,"   If possible at all, it is advisable to use the RMM-VCFs, or even the 'conductivity_simple' keyword."
    PRINT *
-   PRINT *,"   Mean Squared Displacement: (PARALLELISED)"
+   PRINT *,"   Mean (Squared) Displacement 1: (PARALLELISED)"
    PRINT *,"   Calculates the mean squared displacement including a drift correction."
+   PRINT *,"   (other exponents can be chosen as well, e.g. for the mean fourth power displacement)"
    PRINT *,"   The diffusion coefficients obtained by that can be used for comparison with the VACFs."
    PRINT *,"   Different projections can by chosen by which the displacement vector is to be multiplied."
    PRINT *,"   This could be e.g. '1 1 1' (giving the 'standard' 3D diffusion coefficient),"
@@ -12909,12 +13002,18 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    - All three components of the drift vector, <x>, <y>, and <z>"
    PRINT *,"    - The number of averages taken to obtain these values."
    PRINT *
+   PRINT *,"   Mean (Squared) Displacement 2: (PARALLELISED)"
+   PRINT *,"   It is also possible to calculate the relative mean molecular diffusion coefficients,"
+   PRINT *,"   using the corresponding Einstein relation."
+   PRINT *
    PRINT *,"   Distribution Functions: (PARALLELISED)"
    PRINT *,"   Calculates distribution functions referenced to a fixed vector in space."
    PRINT *,"   cylindrical and polar coordinate systems are supported."
    PRINT *,"   Different references vectors can be chosen, including a randomised reference vector (debug purposes)."
    PRINT *,"   This could be e.g. '0 0 1' (z-direction is the reference)."
    PRINT *,"   In both coordinate systems, values are averaged over all azimuthal angles."
+   PRINT *,"   This feature is also capable of calculating Sum Rules and Coulomb interaction energies."
+   PRINT *,"   Number integrals and radial distribution functions are also printed."
    PRINT *
    PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
    PRINT *,"Some of the more demanding routines exist also in a parallelised version."
@@ -13196,7 +13295,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"It is possible (and a lot faster) to just calculate the overall electrical conductivity."
    PRINT *,"To request this, just put 'conductivity' in the first line."
    PRINT *
-   PRINT *,"diffusion input file:"
+   PRINT *,"diffusion input file for self diffusion:"
    PRINT *,"The first line contains the expression 'msd', followed by the number of projections N."
    PRINT *,"The latter are read from the following N lines. The format of each line is:"
    PRINT *,"x - y - z - number of the molecule type."
@@ -13211,6 +13310,25 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    then only shifts by 1,10,20,...,tmax are computed."
    PRINT *," -  'print_verbose':"
    PRINT *,"    If yes (T), then the detailed drift is printed, too."
+   PRINT *," - 'exponent':"
+   PRINT *,"    Expects an integer, which is used as exponent in the displacement."
+   PRINT *,"    Thus, 'exponent 2' is the normal MSD, but others can be used, too."
+   PRINT *," - 'quit'"
+   PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+   PRINT *
+   PRINT *,"diffusion input file for cross diffusion:"
+   PRINT *,"The first line contains the expression 'cross', followed by the number of projections N."
+   PRINT *,"The latter are read from the following N lines. The format of each line is:"
+   PRINT *,"x - y - z - number of the first molecule type - number of the second molecule type."
+   PRINT *,"To get the cross diffusion between the first two molecule types, the line would thus be '1 1 1 1 2'."
+   PRINT *,"After the projections have been specified, switches can be specified in an arbitrary order."
+   PRINT *,"Available are:"
+   PRINT *," - 'tmax':"
+   PRINT *,"    Expects an integer, which is then taken as the maximum number of steps"
+   PRINT *,"    into the future for the mean squared displacement."
+   PRINT *," - 'tstep':"
+   PRINT *,"    The given integer is taken as the step size. i.e. if 'tstep 10' is specified,"
+   PRINT *,"    then only shifts by 1,10,20,...,tmax are computed."
    PRINT *," - 'exponent':"
    PRINT *,"    Expects an integer, which is used as exponent in the displacement."
    PRINT *,"    Thus, 'exponent 2' is the normal MSD, but others can be used, too."
@@ -13955,7 +14073,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     ENDIF
     PRINT *," 0 - No more actions needed."
     PRINT *," 1 - Dihedral condition analysis"
-    PRINT *," 2 - Calculate mean squared displacements"
+    PRINT *," 2 - Calculate mean squared displacements (self or cross)"
     PRINT *," 3 - Change prefix. (Currently '",TRIM(OUTPUT_PREFIX),"')"
     PRINT *," 4 - Print settings."
     IF (TIME_OUTPUT) THEN
@@ -14025,13 +14143,19 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       ELSE
        analysis_number=analysis_number+1
       ENDIF
-      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+      PRINT *,"There is a default mode (self-diffusion) available for this analysis that doesn't require additional input."
       PRINT *,"Would you like to take this shortcut? (y/n)"
       IF (user_input_logical()) THEN
        CALL append_string("diffusion_simple ### mean squared displacement with default values.")
        CYCLE
       ENDIF
-      CALL user_msd_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+      PRINT *,"Would you like to calculate self components (y) or cross components (n)?"
+      PRINT *,"('cross' components are calculated using the Einstein Relation equivalent of the RMM-VCFs)"
+      IF (user_input_logical()) THEN
+       CALL user_msd_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+      ELSE
+       CALL user_cross_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+      ENDIF
       IF (parallelisation_requested) THEN
        CALL append_string("parallel_operation T ### turn on parallel operation")
        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
