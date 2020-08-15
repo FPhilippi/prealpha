@@ -151,7 +151,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
 	PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
-	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes
+	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -2375,6 +2375,56 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				END SELECT
 			ENDDO
 		END SUBROUTINE write_molecule_merged_drudes
+
+		!Writes all drude particles into a trajectory file - with their respective core positions subtracted! good for power spectra...
+		SUBROUTINE write_only_drudes_relative_to_core(unit_number,timestep_in,molecule_type_index,molecule_index,include_header)
+		IMPLICIT NONE
+		LOGICAL,INTENT(IN),OPTIONAL :: include_header
+		INTEGER,INTENT(IN) :: unit_number,molecule_type_index,molecule_index,timestep_in
+		INTEGER :: atom_index,natoms,timestep,drude_flag
+		REAL :: drudepos(3),corepos(3)
+			timestep=timestep_in
+			IF (READ_SEQUENTIAL) THEN
+				IF (timestep==-1) THEN
+					!not really required, but included for safety here in case I change something in the procedures' body that requires the timestep.
+					timestep=file_position
+				ELSE
+					CALL goto_timestep(timestep)
+				ENDIF
+			ELSE
+				IF (timestep==-1) timestep=1
+			ENDIF
+			natoms=molecule_list(molecule_type_index)%number_of_atoms
+			IF (PRESENT(include_header)) THEN
+				IF (include_header) THEN
+					WRITE(unit_number,'(I0)') molecule_list(molecule_type_index)%number_of_drudes_in_molecule
+					WRITE(unit_number,'("Drude positions - Core positions.")')
+				ENDIF
+			ENDIF
+			DO atom_index=1,natoms,1
+				!drude_flag is the atom index of the drude particle attached to this core.
+				!Will be -1 if no drude particle is found, and 0 if this is a drude itself.
+				drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+				SELECT CASE (drude_flag)
+				CASE (-1) !non-polarisable atom - skip by cycling.
+					CYCLE
+				CASE (0) !this is a drude particle - skip by cycling.
+					CYCLE
+				CASE DEFAULT
+					!everything else should be drude cores - merge with the drude particle.
+					IF (READ_SEQUENTIAL) THEN
+						corepos(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+						drudepos(:)=molecule_list(molecule_type_index)%snapshot(drude_flag,molecule_index)%coordinates(:)
+					ELSE
+						corepos(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+						drudepos(:)=molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)
+					ENDIF
+					!subtract corepos from drudepos - write to output.
+					WRITE(unit_number,ADVANCE="NO",FMT='("X",I0," ")') MODULO(drude_flag-1,natoms)+1
+					WRITE(unit_number,*) drudepos(:)-corepos(:)
+				END SELECT
+			ENDDO
+		END SUBROUTINE write_only_drudes_relative_to_core
 
 		!initialises the molecular module by reading the input file 'molecular.inp'
 		SUBROUTINE initialise_molecular()

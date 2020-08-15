@@ -1,4 +1,4 @@
-! RELEASED ON 14_Aug_2020 AT 08:18
+! RELEASED ON 15_Aug_2020 AT 16:40
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1442,7 +1442,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: give_charge_of_molecule,give_number_of_timesteps,give_fragment_information,give_dihedral_member_indices
  PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
- PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes
+ PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -3667,6 +3667,56 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    ENDDO
   END SUBROUTINE write_molecule_merged_drudes
 
+  !Writes all drude particles into a trajectory file - with their respective core positions subtracted! good for power spectra...
+  SUBROUTINE write_only_drudes_relative_to_core(unit_number,timestep_in,molecule_type_index,molecule_index,include_header)
+  IMPLICIT NONE
+  LOGICAL,INTENT(IN),OPTIONAL :: include_header
+  INTEGER,INTENT(IN) :: unit_number,molecule_type_index,molecule_index,timestep_in
+  INTEGER :: atom_index,natoms,timestep,drude_flag
+  REAL :: drudepos(3),corepos(3)
+   timestep=timestep_in
+   IF (READ_SEQUENTIAL) THEN
+    IF (timestep==-1) THEN
+     !not really required, but included for safety here in case I change something in the procedures' body that requires the timestep.
+     timestep=file_position
+    ELSE
+     CALL goto_timestep(timestep)
+    ENDIF
+   ELSE
+    IF (timestep==-1) timestep=1
+   ENDIF
+   natoms=molecule_list(molecule_type_index)%number_of_atoms
+   IF (PRESENT(include_header)) THEN
+    IF (include_header) THEN
+     WRITE(unit_number,'(I0)') molecule_list(molecule_type_index)%number_of_drudes_in_molecule
+     WRITE(unit_number,'("Drude positions - Core positions.")')
+    ENDIF
+   ENDIF
+   DO atom_index=1,natoms,1
+    !drude_flag is the atom index of the drude particle attached to this core.
+    !Will be -1 if no drude particle is found, and 0 if this is a drude itself.
+    drude_flag=molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index)%drude_flag
+    SELECT CASE (drude_flag)
+    CASE (-1) !non-polarisable atom - skip by cycling.
+     CYCLE
+    CASE (0) !this is a drude particle - skip by cycling.
+     CYCLE
+    CASE DEFAULT
+     !everything else should be drude cores - merge with the drude particle.
+     IF (READ_SEQUENTIAL) THEN
+      corepos(:)=molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+      drudepos(:)=molecule_list(molecule_type_index)%snapshot(drude_flag,molecule_index)%coordinates(:)
+     ELSE
+      corepos(:)=molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+      drudepos(:)=molecule_list(molecule_type_index)%trajectory(drude_flag,molecule_index,timestep)%coordinates(:)
+     ENDIF
+     !subtract corepos from drudepos - write to output.
+     WRITE(unit_number,ADVANCE="NO",FMT='("X",I0," ")') MODULO(drude_flag-1,natoms)+1
+     WRITE(unit_number,*) drudepos(:)-corepos(:)
+    END SELECT
+   ENDDO
+  END SUBROUTINE write_only_drudes_relative_to_core
+
   !initialises the molecular module by reading the input file 'molecular.inp'
   SUBROUTINE initialise_molecular()
   IMPLICIT NONE
@@ -4965,7 +5015,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
  PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
- PUBLIC dump_neighbour_traj
+ PUBLIC dump_neighbour_traj,remove_cores
  PRIVATE test_dihedrals
  CONTAINS
 
@@ -6279,6 +6329,54 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
    CLOSE(UNIT=4)
    IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
   END SUBROUTINE
+
+  !This SUBROUTINE writes a SUBROUTINE with removed core particles. This requires assigned drude particles!
+  SUBROUTINE remove_cores(startstep_in,endstep_in,output_format)
+  IMPLICIT NONE
+  INTEGER :: stepcounter,molecule_type_index,molecule_index
+  INTEGER,INTENT(IN) :: startstep_in,endstep_in
+  LOGICAL :: connected
+  CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
+   !open the output file
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   IF (startstep_in==endstep_in) THEN
+    WRITE(fstring,'(2A,I0,A)') &
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nocores_step_",startstep_in,"."//output_format
+   ELSE
+    WRITE(fstring,'(2A,I0,A,I0,A)') &
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nocores_step_",startstep_in,"-",endstep_in,"."//output_format
+   ENDIF
+   OPEN(UNIT=4,FILE=TRIM(fstring))
+   !iterate over the specified timesteps
+   IF (VERBOSE_OUTPUT) THEN
+    WRITE(*,FMT='(A)',ADVANCE="NO") " writing new trajectory to file '"//TRIM(fstring)//"'..."
+    IF ((endstep_in-startstep_in)>100) WRITE(*,*)
+    CALL print_progress(endstep_in-startstep_in)
+   ENDIF
+   DO stepcounter=startstep_in,endstep_in,1
+    !Write head, depending on which type the trajectory has...
+    CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,&
+    &(give_number_of_drude_particles()),output_format)
+    DO molecule_type_index=1,give_number_of_molecule_types(),1
+     DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+      !the following line appends the drudes of one molecule to the output trajectory.
+      CALL write_only_drudes_relative_to_core(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
+     ENDDO
+    ENDDO
+    CALL print_progress()
+   ENDDO
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((endstep_in-startstep_in)>100) THEN
+     WRITE(*,*)
+     WRITE(*,FMT='(" ")',ADVANCE="NO")
+    ENDIF
+    WRITE(*,'("done.")')
+   ENDIF
+   ENDFILE 4
+   CLOSE(UNIT=4)
+  END SUBROUTINE remove_cores
 
   !This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
   SUBROUTINE report_drude_temperature(startstep,endstep)
@@ -12607,7 +12705,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 14_Aug_2020"
+ PRINT *, "   Date of Release: 15_Aug_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -13145,6 +13243,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    The range of analysis, given as first step and last step."
    PRINT *," - 'remove_drudes': (simple mode available)"
    PRINT *,"    writes a new trajectory, with drude particles merged into their respective cores."
+   PRINT *,"    (requires assigned drude particles, either manually or automatically)"
+   PRINT *,"    This keyword expects exactly two integers:"
+   PRINT *,"    The range of analysis, given as first step and last step."
+   PRINT *," - 'remove_cores': (simple mode available)"
+   PRINT *,"    writes a new trajectory only with drude particles minus the positions of their respective cores."
    PRINT *,"    (requires assigned drude particles, either manually or automatically)"
    PRINT *,"    This keyword expects exactly two integers:"
    PRINT *,"    The range of analysis, given as first step and last step."
@@ -13791,7 +13894,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 13 - Print atomic masses (in format suitable for a molecular input file)"
     PRINT *," 14 - Electrical conductivity via CACF / components thereof."
     PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
-    SELECT CASE (user_input_integer(0,15))
+    PRINT *," 16 - Write trajectory only with drude particles (minus velocity of their cores)"
+    SELECT CASE (user_input_integer(0,16))
     CASE (0)!done here.
      EXIT
     CASE (1)!compute VACFs...
@@ -14040,6 +14144,29 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (15)!show the atomic masses at this point
      CALL append_string("print_atomic_charges ### print atomic charges")
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (16) !remove cores
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("remove_cores_simple ### subtract cores, write drude particles.")
+      CYCLE
+     ENDIF
+     PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
+     PRINT *,"To this end, please enter the first timestep to analyse"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"Now, enter the last timestep of the range."
+     endstep=user_input_integer(startstep,nsteps)
+     IF ((endstep-startstep)>50) smalltask=.FALSE.
+     WRITE(fstring,'("remove_cores ",I0," ",I0)') startstep,endstep
+     WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
+     &TRIM(fstring),startstep,endstep
+     CALL append_string(fstring)
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -14110,7 +14237,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 24 - Dump close contact dimers for one step"
     PRINT *," 25 - Print atomic charges (in format suitable for a molecular input file)"
     PRINT *," 26 - Calculate dipole moment statistics from first timestep."
-    SELECT CASE (user_input_integer(0,26))
+    PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
+    SELECT CASE (user_input_integer(0,27))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -14623,6 +14751,29 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (26)!show the atomic charges at this point
      CALL append_string("print_dipole_statistics ### print atomic charges")
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (27) !remove cores
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+     PRINT *,"Would you like to take this shortcut? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("remove_cores_simple ### subtract cores, write drude particles.")
+      CYCLE
+     ENDIF
+     PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
+     PRINT *,"To this end, please enter the first timestep to analyse"
+     startstep=user_input_integer(1,nsteps)
+     PRINT *,"Now, enter the last timestep of the range."
+     endstep=user_input_integer(startstep,nsteps)
+     IF ((endstep-startstep)>50) smalltask=.FALSE.
+     WRITE(fstring,'("remove_cores ",I0," ",I0)') startstep,endstep
+     WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
+     &TRIM(fstring),startstep,endstep
+     CALL append_string(fstring)
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -14884,6 +15035,7 @@ INTEGER :: ios,n
     IF (TRIM(inputstring)=="show_drudes") inputstring="show_drude"!support for synonyms
     IF (TRIM(inputstring)=="drude_temperature") inputstring="drude_temp"!support for synonyms
     IF (TRIM(inputstring)=="remove_drude") inputstring="remove_drudes"!support for synonyms
+    IF (TRIM(inputstring)=="remove_core") inputstring="remove_cores"!support for synonyms
     IF (TRIM(inputstring)=="exit") inputstring="quit"!support for synonyms
     IF (TRIM(inputstring)=="read_sequential") inputstring="sequential_read"!support for synonyms
     IF (TRIM(inputstring)=="time_scaling_factor") inputstring="time_scaling"!support for synonyms
@@ -14998,6 +15150,34 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
       CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
+     ELSE
+      CALL report_error(91)
+     ENDIF
+    CASE ("remove_cores") !Module DEBUG
+     BACKSPACE 7
+     READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
+     IF (ios/=0) THEN
+      CALL report_error(19,exit_status=ios)
+      EXIT
+     ENDIF
+     IF (are_drudes_assigned()) THEN
+      CALL check_timesteps(startstep,endstep)
+      WRITE(*,*) "Writing trajectory with only drude particles (minus cores)."
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+      CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
+     ELSE
+      CALL report_error(91)
+     ENDIF
+    CASE ("remove_cores_simple") !Module DEBUG
+     IF (are_drudes_assigned()) THEN
+      WRITE(*,*) "Writing trajectory with only drude particles (minus cores) - simple mode."
+      startstep=1
+      endstep=give_number_of_timesteps()
+      CALL check_timesteps(startstep,endstep)
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+      CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
      ELSE
       CALL report_error(91)
      ENDIF
@@ -15435,7 +15615,11 @@ INTEGER :: ios,n
     CASE ("DEBUG")
      !Here is some space for testing stuff
      WRITE(*,*) "################################"
-     CALL write_molecule_input_file_without_drudes(14)
+      startstep=1
+      endstep=give_number_of_timesteps()
+      CALL check_timesteps(startstep,endstep)
+      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+     CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
      !update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
      WRITE(*,*) "################################"
     CASE DEFAULT

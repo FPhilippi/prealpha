@@ -11,7 +11,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	!PRIVATE/PUBLIC declarations
 	PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
 	PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
-	PUBLIC dump_neighbour_traj
+	PUBLIC dump_neighbour_traj,remove_cores
 	PRIVATE test_dihedrals
 	CONTAINS
 
@@ -1325,6 +1325,54 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CLOSE(UNIT=4)
 			IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
 		END SUBROUTINE
+
+		!This SUBROUTINE writes a SUBROUTINE with removed core particles. This requires assigned drude particles!
+		SUBROUTINE remove_cores(startstep_in,endstep_in,output_format)
+		IMPLICIT NONE
+		INTEGER :: stepcounter,molecule_type_index,molecule_index
+		INTEGER,INTENT(IN) :: startstep_in,endstep_in
+		LOGICAL :: connected
+		CHARACTER(LEN=1024) :: fstring
+		CHARACTER(LEN=3),INTENT(IN) :: output_format
+			!open the output file
+			INQUIRE(UNIT=4,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=4)
+			IF (startstep_in==endstep_in) THEN
+				WRITE(fstring,'(2A,I0,A)') &
+				&TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nocores_step_",startstep_in,"."//output_format
+			ELSE
+				WRITE(fstring,'(2A,I0,A,I0,A)') &
+				&TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_nocores_step_",startstep_in,"-",endstep_in,"."//output_format
+			ENDIF
+			OPEN(UNIT=4,FILE=TRIM(fstring))
+			!iterate over the specified timesteps
+			IF (VERBOSE_OUTPUT) THEN
+				WRITE(*,FMT='(A)',ADVANCE="NO") " writing new trajectory to file '"//TRIM(fstring)//"'..."
+				IF ((endstep_in-startstep_in)>100) WRITE(*,*)
+				CALL print_progress(endstep_in-startstep_in)
+			ENDIF
+			DO stepcounter=startstep_in,endstep_in,1
+				!Write head, depending on which type the trajectory has...
+				CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,&
+				&(give_number_of_drude_particles()),output_format)
+				DO molecule_type_index=1,give_number_of_molecule_types(),1
+					DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+						!the following line appends the drudes of one molecule to the output trajectory.
+						CALL write_only_drudes_relative_to_core(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
+					ENDDO
+				ENDDO
+				CALL print_progress()
+			ENDDO
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((endstep_in-startstep_in)>100) THEN
+					WRITE(*,*)
+					WRITE(*,FMT='(" ")',ADVANCE="NO")
+				ENDIF
+				WRITE(*,'("done.")')
+			ENDIF
+			ENDFILE 4
+			CLOSE(UNIT=4)
+		END SUBROUTINE remove_cores
 
 		!This SUBROUTINE reports the temperatures as given in Eq. (13), (14) and (15) in 10.1021/acs.jpclett.9b02983
 		SUBROUTINE report_drude_temperature(startstep,endstep)

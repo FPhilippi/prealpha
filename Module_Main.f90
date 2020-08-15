@@ -592,6 +592,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    (requires assigned drude particles, either manually or automatically)"
 			PRINT *,"    This keyword expects exactly two integers:"
 			PRINT *,"    The range of analysis, given as first step and last step."
+			PRINT *," - 'remove_cores': (simple mode available)"
+			PRINT *,"    writes a new trajectory only with drude particles minus the positions of their respective cores."
+			PRINT *,"    (requires assigned drude particles, either manually or automatically)"
+			PRINT *,"    This keyword expects exactly two integers:"
+			PRINT *,"    The range of analysis, given as first step and last step."
 			PRINT *," - 'gyradius': (simple mode available)"
 			PRINT *,"    Computes the ensemble averages and standard deviations of radius of gyration,"
 			PRINT *,"    radius of gyration squared, and maximum distance of any atom in a molecule from its centre of mass."
@@ -1235,7 +1240,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 13 - Print atomic masses (in format suitable for a molecular input file)"
 				PRINT *," 14 - Electrical conductivity via CACF / components thereof."
 				PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
-				SELECT CASE (user_input_integer(0,15))
+				PRINT *," 16 - Write trajectory only with drude particles (minus velocity of their cores)"
+				SELECT CASE (user_input_integer(0,16))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!compute VACFs...
@@ -1484,6 +1490,29 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				CASE (15)!show the atomic masses at this point
 					CALL append_string("print_atomic_charges ### print atomic charges")
 					PRINT *,"The corresponding section has been added to the input file."
+				CASE (16) !remove cores
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+					PRINT *,"Would you like to take this shortcut? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("remove_cores_simple ### subtract cores, write drude particles.")
+						CYCLE
+					ENDIF
+					PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
+					PRINT *,"To this end, please enter the first timestep to analyse"
+					startstep=user_input_integer(1,nsteps)
+					PRINT *,"Now, enter the last timestep of the range."
+					endstep=user_input_integer(startstep,nsteps)
+					IF ((endstep-startstep)>50) smalltask=.FALSE.
+					WRITE(fstring,'("remove_cores ",I0," ",I0)') startstep,endstep
+					WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
+					&TRIM(fstring),startstep,endstep
+					CALL append_string(fstring)
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -1554,7 +1583,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 24 - Dump close contact dimers for one step"
 				PRINT *," 25 - Print atomic charges (in format suitable for a molecular input file)"
 				PRINT *," 26 - Calculate dipole moment statistics from first timestep."
-				SELECT CASE (user_input_integer(0,26))
+				PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
+				SELECT CASE (user_input_integer(0,27))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2067,6 +2097,29 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				CASE (26)!show the atomic charges at this point
 					CALL append_string("print_dipole_statistics ### print atomic charges")
 					PRINT *,"The corresponding section has been added to the input file."
+				CASE (27) !remove cores
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+					PRINT *,"Would you like to take this shortcut? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("remove_cores_simple ### subtract cores, write drude particles.")
+						CYCLE
+					ENDIF
+					PRINT *,"It is necessary to provide a range of timesteps which are to be analysed."
+					PRINT *,"To this end, please enter the first timestep to analyse"
+					startstep=user_input_integer(1,nsteps)
+					PRINT *,"Now, enter the last timestep of the range."
+					endstep=user_input_integer(startstep,nsteps)
+					IF ((endstep-startstep)>50) smalltask=.FALSE.
+					WRITE(fstring,'("remove_cores ",I0," ",I0)') startstep,endstep
+					WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
+					&TRIM(fstring),startstep,endstep
+					CALL append_string(fstring)
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -2328,6 +2381,7 @@ INTEGER :: ios,n
 				IF (TRIM(inputstring)=="show_drudes") inputstring="show_drude"!support for synonyms
 				IF (TRIM(inputstring)=="drude_temperature") inputstring="drude_temp"!support for synonyms
 				IF (TRIM(inputstring)=="remove_drude") inputstring="remove_drudes"!support for synonyms
+				IF (TRIM(inputstring)=="remove_core") inputstring="remove_cores"!support for synonyms
 				IF (TRIM(inputstring)=="exit") inputstring="quit"!support for synonyms
 				IF (TRIM(inputstring)=="read_sequential") inputstring="sequential_read"!support for synonyms
 				IF (TRIM(inputstring)=="time_scaling_factor") inputstring="time_scaling"!support for synonyms
@@ -2442,6 +2496,34 @@ INTEGER :: ios,n
 						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 						IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 						CALL remove_drudes(startstep,endstep,TRAJECTORY_TYPE,.TRUE.)
+					ELSE
+						CALL report_error(91)
+					ENDIF
+				CASE ("remove_cores") !Module DEBUG
+					BACKSPACE 7
+					READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
+					IF (ios/=0) THEN
+						CALL report_error(19,exit_status=ios)
+						EXIT
+					ENDIF
+					IF (are_drudes_assigned()) THEN
+						CALL check_timesteps(startstep,endstep)
+						WRITE(*,*) "Writing trajectory with only drude particles (minus cores)."
+						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+						IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+						CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
+					ELSE
+						CALL report_error(91)
+					ENDIF
+				CASE ("remove_cores_simple") !Module DEBUG
+					IF (are_drudes_assigned()) THEN
+						WRITE(*,*) "Writing trajectory with only drude particles (minus cores) - simple mode."
+						startstep=1
+						endstep=give_number_of_timesteps()
+						CALL check_timesteps(startstep,endstep)
+						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+						IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+						CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
 					ELSE
 						CALL report_error(91)
 					ENDIF
@@ -2879,7 +2961,11 @@ INTEGER :: ios,n
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################"
-					CALL write_molecule_input_file_without_drudes(14)
+						startstep=1
+						endstep=give_number_of_timesteps()
+						CALL check_timesteps(startstep,endstep)
+						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
+					CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
 					!update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
 					WRITE(*,*) "################################"
 				CASE DEFAULT
