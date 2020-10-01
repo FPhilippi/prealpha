@@ -703,6 +703,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (127)
 					WRITE(*,*) " #  WARNING 127: Something is wrong with the atomic charges of this molecule type index."
 					WRITE(*,*) "--> Main program will continue anyway - check molecular input file."
+					WRITE(*,*) "--> specify charges in the molecular input file?"
 				CASE (128)
 					WRITE(*,*) " #  WARNING 128: Neither default nor atomic charges have been defined by the user."
 					WRITE(*,*) "--> Main program will continue anyway - check molecular input file."

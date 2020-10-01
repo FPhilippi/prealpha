@@ -450,7 +450,7 @@ MODULE RECOGNITION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						WRITE(*,*) '  dump_example'
 						WRITE(*,*) '  sequential_read T'
 						WRITE(*,*) '  #parallel_operation T'
-						WRITE(*,*) '  #set_threads_simple T'
+						WRITE(*,*) '  #set_threads_simple'
 						WRITE(*,*) '  #trajectory_type lmp'
 						WRITE(*,*) '  quit'
 					ELSE
@@ -474,15 +474,31 @@ MODULE RECOGNITION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							WRITE(8,*) 'dump_example'
 							WRITE(8,*) 'sequential_read T'
 							WRITE(8,*) '#parallel_operation T'
-							WRITE(8,*) '#set_threads_simple T'
+							WRITE(8,*) '#set_threads_simple'
 							WRITE(8,*) '#trajectory_type lmp'
 							WRITE(8,*) 'quit'
 							WRITE(8,*)
-							WRITE(8,*) ''
-							WRITE(8,*) ''
-							WRITE(8,*) ''
+							WRITE(8,*)
+							IF (number_of_drude_particles/=0) THEN
+								WRITE(8,*) 'remove_drudes_simple'
+								WRITE(8,*) 'remove_cores_simple'
+								WRITE(8,*) 'drude_temp_simple'
+							ENDIF
+							WRITE(8,*)
 							WRITE(8,*) 'diffusion_simple'
 							WRITE(8,*) 'distribution_simple'
+							WRITE(8,*) 'dump_snapshot_simple'
+							WRITE(8,*) 'dump_split_simple'
+							WRITE(8,*) 'contact_distance_simple'
+							WRITE(8,*) 'dump_neighbour_traj_simple'
+							WRITE(8,*) 'convert_simple'
+							WRITE(8,*) 'temperature_simple'
+							WRITE(8,*) 'gyradius_simple'
+							WRITE(8,*) 'charge_arm_simple'
+							WRITE(8,*) 'conductivity_simple'
+							WRITE(8,*) 'jump_velocity_simple'
+							WRITE(8,*)
+							WRITE(8,*)
 							WRITE(8,*) 'This is the general input file.'
 							WRITE(8,*) 'It controls the behaviour of the trajectory analyser.'
 							CLOSE(UNIT=8)

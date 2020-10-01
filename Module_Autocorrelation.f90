@@ -15,6 +15,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL,PARAMETER :: skip_autocorr_default=.FALSE.
 	LOGICAL,PARAMETER :: export_dihedral_default=.FALSE.
 	LOGICAL,PARAMETER :: jump_analysis_dihedral_default=.FALSE.
+	LOGICAL,PARAMETER :: use_dipole_moment_default=.FALSE.
 	INTEGER,PARAMETER :: sampling_interval_default=1
 	INTEGER,PARAMETER :: legendre_order_default=2
 	INTEGER,PARAMETER :: maximum_number_of_jump_analyses=20
@@ -34,6 +35,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	TYPE(vc_component),ALLOCATABLE :: vc_components(:) ! list of velocity correlation components to be calculated.
 	INTEGER :: legendre_order !the order of the legendre polynomial to use, usually 2, maybe 1.
 	LOGICAL,ALLOCATABLE :: autocorr_array(:,:)!first dimension: number of timesteps. second dimension: number of molecules per step.
+	LOGICAL :: use_dipole_moment=use_dipole_moment_default !uses vector from centre of mass to centre of charge when true.
 	LOGICAL :: fold=fold_default !when true, then on top of the values a,b,... specified in the dihedral_list, (360-b),(360-a)... will be considered, too.
 	LOGICAL :: dump_verbose=dump_verbose_default!controls if additional information is dumped into separate files for not.
 	LOGICAL :: export_dihedral=export_dihedral_default!Controls whether dihedrals are to be exported.
@@ -443,37 +445,48 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			legendre_order=user_input_integer(0,4)
 			!tmax, molecule_type_index, legendre_order are initialised now.
 			PRINT *,"You have to specify the vector whose reorientation dynamics are to be computed."
-			PRINT *,"For this vector, you have to define a base fragment and a tip fragment."
-			PRINT *,"The centres of mass of these fragments define the base and tip points of the vector."
-			PRINT *,"It is possible to just specify two atoms (e.g. for a N-H vector)."
-			PRINT *,"How many atoms are in the base fragment?"
-			number_of_base_atoms=user_input_integer(1,100)
-			ALLOCATE(fragment_list_base(number_of_base_atoms),STAT=allocstatus)
-			IF (allocstatus/=0) CALL report_error(79,exit_status=allocstatus)
-			PRINT *,"You have to enter the atom indices of the (base) fragment atoms now."
-			DO n=1,number_of_base_atoms,1
-				WRITE(*,'(A,I0,A,I0,A)') " Please enter the atom index for fragment atom ",n," out of ",number_of_base_atoms,"."
-				fragment_list_base(n)=user_input_integer(1,10000)
-				!check for double specifications, and print warning
-				IF (n>1) THEN
-					IF (ANY(fragment_list_base(1:n-1)==fragment_list_base(n))) &
-					&PRINT *,"This atom has already been specified. (Which is allowed, but not necessarily sensible.)"
-				ENDIF
-			ENDDO
-			PRINT *,"How many atoms are in the tip fragment?"
-			number_of_tip_atoms=user_input_integer(1,100)
-			ALLOCATE(fragment_list_tip(number_of_tip_atoms),STAT=allocstatus)
-			IF (allocstatus/=0) CALL report_error(79,exit_status=allocstatus)
-			PRINT *,"You have to enter the atom indices of the (tip) fragment atoms now."
-			DO n=1,number_of_tip_atoms,1
-				WRITE(*,'(A,I0,A,I0,A)') " Please enter the atom index for fragment atom ",n," out of ",number_of_tip_atoms,"."
-				fragment_list_tip(n)=user_input_integer(1,10000)
-				!check for double specifications, and print warning
-				IF (n>1) THEN
-					IF (ANY(fragment_list_tip(1:n-1)==fragment_list_tip(n))) &
-					&PRINT *,"This atom has already been specified. (Which is allowed, but not necessarily sensible.)"
-				ENDIF
-			ENDDO
+			PRINT *,"This vector can be defined either between the centres of mass of two fragments (base + tip),"
+			PRINT *,"or alternatively the charge arm / dipole moment vector can be used."
+			PRINT *,"(For the latter, atomic charges need to be defined in some way)"
+			PRINT *,"Would you like to use the charge arm (y) or the two fragments (n) to define a vector?"
+			IF (user_input_logical()) THEN
+				!charge arm / dipole moment
+				use_dipole_moment=.TRUE.
+			ELSE
+				use_dipole_moment=.FALSE.
+				!two fragments
+				PRINT *,"For this vector, you have to define a base fragment and a tip fragment."
+				PRINT *,"The centres of mass of these fragments define the base and tip points of the vector."
+				PRINT *,"It is possible to just specify two atoms (e.g. for a N-H vector)."
+				PRINT *,"How many atoms are in the base fragment?"
+				number_of_base_atoms=user_input_integer(1,100)
+				ALLOCATE(fragment_list_base(number_of_base_atoms),STAT=allocstatus)
+				IF (allocstatus/=0) CALL report_error(79,exit_status=allocstatus)
+				PRINT *,"You have to enter the atom indices of the (base) fragment atoms now."
+				DO n=1,number_of_base_atoms,1
+					WRITE(*,'(A,I0,A,I0,A)') " Please enter the atom index for fragment atom ",n," out of ",number_of_base_atoms,"."
+					fragment_list_base(n)=user_input_integer(1,10000)
+					!check for double specifications, and print warning
+					IF (n>1) THEN
+						IF (ANY(fragment_list_base(1:n-1)==fragment_list_base(n))) &
+						&PRINT *,"This atom has already been specified. (Which is allowed, but not necessarily sensible.)"
+					ENDIF
+				ENDDO
+				PRINT *,"How many atoms are in the tip fragment?"
+				number_of_tip_atoms=user_input_integer(1,100)
+				ALLOCATE(fragment_list_tip(number_of_tip_atoms),STAT=allocstatus)
+				IF (allocstatus/=0) CALL report_error(79,exit_status=allocstatus)
+				PRINT *,"You have to enter the atom indices of the (tip) fragment atoms now."
+				DO n=1,number_of_tip_atoms,1
+					WRITE(*,'(A,I0,A,I0,A)') " Please enter the atom index for fragment atom ",n," out of ",number_of_tip_atoms,"."
+					fragment_list_tip(n)=user_input_integer(1,10000)
+					!check for double specifications, and print warning
+					IF (n>1) THEN
+						IF (ANY(fragment_list_tip(1:n-1)==fragment_list_tip(n))) &
+						&PRINT *,"This atom has already been specified. (Which is allowed, but not necessarily sensible.)"
+					ENDIF
+				ENDDO
+			ENDIF
 			PRINT *,"Every how many steps would you like to use for the time correlation function?"
 			WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
 			sampling_interval=user_input_integer(1,nsteps)
@@ -494,26 +507,30 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(8,'(" tmax ",I0," ### maximum time shift of the time correlation function")') tmax
 			WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used for the tcf")') sampling_interval
 			WRITE(8,'(" legendre ",I0," ### use legendre polynomial of order ",I0)') legendre_order,legendre_order
-			WRITE(8,FMT='(" base ",I0)',ADVANCE="NO") number_of_base_atoms
-			IF (number_of_base_atoms==1) THEN
-				WRITE(8,'(" ### the atom with index ",I0," is used as base point")') fragment_list_base(1)
+			IF (use_dipole_moment) THEN
+				WRITE(8,*) "charge_arm ### use charge arm (or dipole moment for neutral molecules)"
 			ELSE
-				WRITE(8,'(" ### ",I0," atoms are used to define the base point (as centre of mass)")') number_of_base_atoms
+				WRITE(8,FMT='(" base ",I0)',ADVANCE="NO") number_of_base_atoms
+				IF (number_of_base_atoms==1) THEN
+					WRITE(8,'(" ### the atom with index ",I0," is used as base point")') fragment_list_base(1)
+				ELSE
+					WRITE(8,'(" ### ",I0," atoms are used to define the base point (as centre of mass)")') number_of_base_atoms
+				ENDIF
+				DO n=1,number_of_base_atoms,1
+					WRITE(8,FMT='(" ",I0)',ADVANCE="NO") fragment_list_base(n)
+				ENDDO
+				WRITE(8,*)
+				WRITE(8,FMT='(" tip ",I0)',ADVANCE="NO") number_of_tip_atoms
+				IF (number_of_tip_atoms==1) THEN
+					WRITE(8,'(" ### the atom with index ",I0," is used as tip point")') fragment_list_tip(1)
+				ELSE
+					WRITE(8,'(" ### ",I0," atoms are used to define the tip point (as centre of mass)")') number_of_tip_atoms
+				ENDIF
+				DO n=1,number_of_tip_atoms,1
+					WRITE(8,FMT='(" ",I0)',ADVANCE="NO") fragment_list_tip(n)
+				ENDDO
+				WRITE(8,*)
 			ENDIF
-			DO n=1,number_of_base_atoms,1
-				WRITE(8,FMT='(" ",I0)',ADVANCE="NO") fragment_list_base(n)
-			ENDDO
-			WRITE(8,*)
-			WRITE(8,FMT='(" tip ",I0)',ADVANCE="NO") number_of_tip_atoms
-			IF (number_of_tip_atoms==1) THEN
-				WRITE(8,'(" ### the atom with index ",I0," is used as tip point")') fragment_list_tip(1)
-			ELSE
-				WRITE(8,'(" ### ",I0," atoms are used to define the tip point (as centre of mass)")') number_of_tip_atoms
-			ENDIF
-			DO n=1,number_of_tip_atoms,1
-				WRITE(8,FMT='(" ",I0)',ADVANCE="NO") fragment_list_tip(n)
-			ENDDO
-			WRITE(8,*)
 			WRITE(8,*) "quit"
 			WRITE(8,*)
 			WRITE(8,*) "This is an input file for the calculation of a vector reorientational time correlation function."
@@ -836,6 +853,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					legendre_order=legendre_order_default
 					jump_analysis_dihedral=jump_analysis_dihedral_default
 					jump_length_total_number=0
+					use_dipole_moment=use_dipole_moment_default
 				END SUBROUTINE set_defaults
 
 				SUBROUTINE read_input_for_reorientation()
@@ -913,6 +931,10 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								IF (ios==0) THEN
 									tip_read=.TRUE.
 									IF (VERBOSE_OUTPUT) WRITE(*,'(" ",I0,A)') number_of_tip_atoms," tip atoms read from fragment record."
+									IF (use_dipole_moment) THEN
+										IF (VERBOSE_OUTPUT) WRITE(*,'(" (turned off use of dipole moment.)")')
+										use_dipole_moment=.FALSE.
+									ENDIF
 								ELSE
 									CALL report_error(81,exit_status=n+2)
 									DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
@@ -944,6 +966,10 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								IF (ios==0) THEN
 									base_read=.TRUE.
 									IF (VERBOSE_OUTPUT) WRITE(*,'(" ",I0,A)') number_of_base_atoms," base atoms read from fragment record."
+									IF (use_dipole_moment) THEN
+										IF (VERBOSE_OUTPUT) WRITE(*,'(" (turned off use of dipole moment.)")')
+										use_dipole_moment=.FALSE.
+									ENDIF
 								ELSE
 									CALL report_error(81,exit_status=n+2)
 									DEALLOCATE(fragment_list_base,STAT=deallocstatus)
@@ -952,6 +978,21 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								CALL report_error(81,exit_status=n+2)
 							ENDIF
+						CASE ("dipole","charge_arm")
+							use_dipole_moment=.TRUE.
+							IF (VERBOSE_OUTPUT) WRITE(*,'(" Using dipole moment / charge arm vector for reorientation.")')
+							!reset everything
+							IF (base_read) THEN
+								DEALLOCATE(fragment_list_base,STAT=deallocstatus)
+								IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(" (fragment_list_base reset)")')
+							ENDIF
+							IF (tip_read) THEN
+								DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
+								IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(" (fragment_list_tip reset)")')
+							ENDIF
+							!start with the assumption that something will go wrong:
 						CASE DEFAULT
 							IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
 						END SELECT
@@ -1850,9 +1891,23 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!allocate memory for the number of averages taken
 			ALLOCATE(x_num(tmax+1),STAT=allocstatus)
 			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-			!Report fragment information
-			CALL give_fragment_information(tip_fragment=.FALSE.)
-			CALL give_fragment_information(tip_fragment=.TRUE.)
+			IF (use_dipole_moment) THEN
+				IF (give_charge_of_molecule(molecule_type_index)==0) THEN
+					WRITE(*,'(" Vector for reorientation is the dipole moment of ",A,".")')&
+					&TRIM(give_sum_formula(molecule_type_index))
+					WRITE(*,'(" (defined as SUM(q*r), q=atom charge, r=atom position)")')
+				ELSE
+					WRITE(*,'(" Vector for reorientation is the charge arm of ",A,".")')&
+					&TRIM(give_sum_formula(molecule_type_index))
+					WRITE(*,'(" (defined as (SUM(q*r)/SUM(q))-(SUM(m*r)/SUM(m)),")')
+					WRITE(*,'(" q=atom charge, r=atom position, m=atom mass)")')
+				ENDIF
+				IF (.NOT.(check_charges(molecule_type_index))) CALL report_error(127)
+			ELSE
+				!Report fragment information
+				CALL give_fragment_information(tip_fragment=.FALSE.)
+				CALL give_fragment_information(tip_fragment=.TRUE.)
+			ENDIF
 			!Main part: compute the tcf
 			CALL compute_reorientational_tcf_parallel(sampling_interval)
 			!Report the tcf
@@ -1906,9 +1961,14 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!$OMP DO SCHEDULE(STATIC,1)
 					DO startstep=1,nsteps,sampling
 						DO molecule_counter=1,na,1
-							!initial orientation = normalised vector from 'base atom' to 'tip atom' at the initial timestep
-							initial_orientation(molecule_counter,:)=&
-							&give_tip_fragment(startstep,molecule_counter)-give_base_fragment(startstep,molecule_counter)
+							IF (use_dipole_moment) THEN
+								!initial orientation = dipole moment or charge arm vector
+								initial_orientation(molecule_counter,:)=charge_arm(startstep,molecule_type_index,molecule_counter)
+							ELSE
+								!initial orientation = normalised vector from 'base atom' to 'tip atom' at the initial timestep
+								initial_orientation(molecule_counter,:)=&
+								&give_tip_fragment(startstep,molecule_counter)-give_base_fragment(startstep,molecule_counter)
+							ENDIF
 							CALL normalize3D(initial_orientation(molecule_counter,:))
 						ENDDO
 						CALL iterate_timesteps_tcf(startstep,temp_function,initial_orientation,x_num_temp)
@@ -1965,8 +2025,14 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						DO molecule_counter=1,na,1
 							!The first vector is already stored in initial_orientation as unit vector.
 							!get the second vector:
-							second_vector(:)=&
-							&give_tip_fragment(startstep+timeline,molecule_counter)-give_base_fragment(startstep+timeline,molecule_counter)
+							IF (use_dipole_moment) THEN
+								second_vector(:)=&
+								&charge_arm(startstep+timeline,molecule_type_index,molecule_counter)
+							ELSE
+								second_vector(:)=&
+								&give_tip_fragment(startstep+timeline,molecule_counter)-&
+								&give_base_fragment(startstep+timeline,molecule_counter)
+							ENDIF
 							!then, normalise:
 							CALL normalize3D(second_vector(:))
 							!take the two normalised values and compute the legendre polynomial of the dot product.
