@@ -1001,7 +1001,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						!both fragment lists should be filled now, call the initialisation in MODULE MOLECULAR
 						CALL initialise_fragments(fragment_list_tip,fragment_list_base,number_of_tip_atoms,number_of_base_atoms,molecule_type_index)
 					ELSE
-						CALL report_error(83)
+						IF (.NOT.(use_dipole_moment)) CALL report_error(83)
 					ENDIF
 					IF (base_read) THEN
 						DEALLOCATE(fragment_list_base,STAT=deallocstatus)
@@ -1899,8 +1899,8 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ELSE
 					WRITE(*,'(" Vector for reorientation is the charge arm of ",A,".")')&
 					&TRIM(give_sum_formula(molecule_type_index))
-					WRITE(*,'(" (defined as (SUM(q*r)/SUM(q))-(SUM(m*r)/SUM(m)),")')
-					WRITE(*,'(" q=atom charge, r=atom position, m=atom mass)")')
+					WRITE(*,'(" ( defined as (SUM(q*r)/SUM(q))-(SUM(m*r)/SUM(m)),")')
+					WRITE(*,'("   q=atom charge, r=atom position, m=atom mass )")')
 				ENDIF
 				IF (.NOT.(check_charges(molecule_type_index))) CALL report_error(127)
 			ELSE

@@ -1,4 +1,4 @@
-! RELEASED ON 01_Oct_2020 AT 20:45
+! RELEASED ON 06_Oct_2020 AT 18:12
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1507,8 +1507,9 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
 
   SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
   LOGICAL :: connected
-  CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=1024) :: fstring,chargestring
   INTEGER,INTENT(IN) :: nsteps
+  REAL :: DrudeCharge,CoreCharge
   INTEGER :: output(3),atom_index,natoms,counter,drude_flag,molecule_type_index
    INQUIRE(UNIT=3,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=3)
@@ -1552,13 +1553,37 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
        CYCLE
       CASE DEFAULT
        !everything else should be drude cores - merge with the drude particle.
-       WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",F0.4,"+",F0.4,")")')&
+       CoreCharge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+       DrudeCharge=molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+       IF ((CoreCharge<1.0).AND.(CoreCharge>-1.0)) THEN
+        IF (CoreCharge>=0.0) THEN
+         WRITE(chargestring,'(F6.4)') CoreCharge
+        ELSE
+         WRITE(chargestring,'(F7.4)') CoreCharge
+        ENDIF
+       ELSE
+        WRITE(chargestring,'(F0.4)') CoreCharge
+       ENDIF
+
+       IF ((DrudeCharge<1.0).AND.(DrudeCharge>-1.0)) THEN
+        IF (DrudeCharge>=0.0) THEN
+         WRITE(chargestring,'(A,"+",F6.4)') TRIM(chargestring),DrudeCharge
+        ELSE
+         WRITE(chargestring,'(A,F7.4)') TRIM(chargestring),DrudeCharge
+        ENDIF
+       ELSE
+        IF (DrudeCharge>=0.0) THEN
+         WRITE(chargestring,'(A,"+",F0.4)') TRIM(chargestring),DrudeCharge
+        ELSE
+         WRITE(chargestring,'(A,F0.4)') TRIM(chargestring),DrudeCharge
+        ENDIF
+       ENDIF
+       WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",A,")")')&
        &molecule_type_index,counter,&
        &molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)+&
        &molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag),&
        &TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index)),&
-       &molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
-       &molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+       &TRIM(chargestring)
        counter=counter+1
       END SELECT
      ENDDO
@@ -7635,7 +7660,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
       !both fragment lists should be filled now, call the initialisation in MODULE MOLECULAR
       CALL initialise_fragments(fragment_list_tip,fragment_list_base,number_of_tip_atoms,number_of_base_atoms,molecule_type_index)
      ELSE
-      CALL report_error(83)
+      IF (.NOT.(use_dipole_moment)) CALL report_error(83)
      ENDIF
      IF (base_read) THEN
       DEALLOCATE(fragment_list_base,STAT=deallocstatus)
@@ -8533,8 +8558,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
     ELSE
      WRITE(*,'(" Vector for reorientation is the charge arm of ",A,".")')&
      &TRIM(give_sum_formula(molecule_type_index))
-     WRITE(*,'(" (defined as (SUM(q*r)/SUM(q))-(SUM(m*r)/SUM(m)),")')
-     WRITE(*,'(" q=atom charge, r=atom position, m=atom mass)")')
+     WRITE(*,'(" ( defined as (SUM(q*r)/SUM(q))-(SUM(m*r)/SUM(m)),")')
+     WRITE(*,'("   q=atom charge, r=atom position, m=atom mass )")')
     ENDIF
     IF (.NOT.(check_charges(molecule_type_index))) CALL report_error(127)
    ELSE
@@ -12788,7 +12813,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 01_Oct_2020"
+ PRINT *, "   Date of Release: 06_Oct_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"

@@ -215,8 +215,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 		SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
 		LOGICAL :: connected
-		CHARACTER(LEN=1024) :: fstring
+		CHARACTER(LEN=1024) :: fstring,chargestring
 		INTEGER,INTENT(IN) :: nsteps
+		REAL :: DrudeCharge,CoreCharge
 		INTEGER :: output(3),atom_index,natoms,counter,drude_flag,molecule_type_index
 			INQUIRE(UNIT=3,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=3)
@@ -260,13 +261,37 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							CYCLE
 						CASE DEFAULT
 							!everything else should be drude cores - merge with the drude particle.
-							WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",F0.4,"+",F0.4,")")')&
+							CoreCharge=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+							DrudeCharge=molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+							IF ((CoreCharge<1.0).AND.(CoreCharge>-1.0)) THEN
+								IF (CoreCharge>=0.0) THEN
+									WRITE(chargestring,'(F6.4)') CoreCharge
+								ELSE
+									WRITE(chargestring,'(F7.4)') CoreCharge
+								ENDIF
+							ELSE
+								WRITE(chargestring,'(F0.4)') CoreCharge
+							ENDIF
+
+							IF ((DrudeCharge<1.0).AND.(DrudeCharge>-1.0)) THEN
+								IF (DrudeCharge>=0.0) THEN
+									WRITE(chargestring,'(A,"+",F6.4)') TRIM(chargestring),DrudeCharge
+								ELSE
+									WRITE(chargestring,'(A,F7.4)') TRIM(chargestring),DrudeCharge
+								ENDIF
+							ELSE
+								IF (DrudeCharge>=0.0) THEN
+									WRITE(chargestring,'(A,"+",F0.4)') TRIM(chargestring),DrudeCharge
+								ELSE
+									WRITE(chargestring,'(A,F0.4)') TRIM(chargestring),DrudeCharge
+								ENDIF
+							ENDIF
+							WRITE(3,'("   ",I0," ",I0," ",F0.4," (Element ",A,", Core+Drude=",A,")")')&
 							&molecule_type_index,counter,&
 							&molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)+&
 							&molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag),&
 							&TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index)),&
-							&molecule_list(molecule_type_index)%list_of_atom_charges(atom_index),&
-							&molecule_list(molecule_type_index)%list_of_atom_charges(drude_flag)
+							&TRIM(chargestring)
 							counter=counter+1
 						END SELECT
 					ENDDO
