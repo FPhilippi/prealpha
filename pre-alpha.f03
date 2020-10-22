@@ -1,4 +1,4 @@
-! RELEASED ON 06_Oct_2020 AT 18:12
+! RELEASED ON 22_Oct_2020 AT 18:43
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2020 Frederik Philippi
@@ -1676,7 +1676,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   !as well as the furthest distance of any atom from the centre of mass of the molecule.
   SUBROUTINE compute_squared_radius_of_gyration(timestep,molecule_type_index,molecule_index,rgy_sq,maxdist)
   IMPLICIT NONE
-  REAL(KIND=WORKING_PRECISION),INTENT(OUT) :: rgy_sq,maxdist
+  REAL(KIND=WORKING_PRECISION),INTENT(OUT) :: rgy_sq
+  REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: maxdist
   REAL(KIND=WORKING_PRECISION) :: centre_of_mass(3),difference_vector(3),maxdist_squared,current_distance_squared
   INTEGER, INTENT(IN) :: timestep,molecule_type_index,molecule_index
   INTEGER :: atom_index
@@ -1699,7 +1700,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     rgy_sq=rgy_sq+(molecule_list(molecule_type_index)%list_of_atom_masses(atom_index))*current_distance_squared
    ENDDO
    rgy_sq=rgy_sq/molecule_list(molecule_type_index)%mass
-   maxdist=SQRT(maxdist_squared)
+   IF (PRESENT(maxdist)) maxdist=SQRT(maxdist_squared)
   END SUBROUTINE compute_squared_radius_of_gyration
 
   !The following subroutine computes equation (13), (14), and (15) in 10.1021/acs.jpclett.9b02983.
@@ -3410,6 +3411,16 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    !for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
   END FUNCTION give_qd_vector
 
+  !charge arm |Q*lq| as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
+  FUNCTION charge_arm_length(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+  REAL(KIND=WORKING_PRECISION) :: charge_arm_length
+   charge_arm_length=SQRT(SUM((charge_arm(timestep,molecule_type_index,molecule_index))**2))
+  END FUNCTION charge_arm_length
+
+  !charge arm vector Q*lq as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
+  !if he molecule is not charged, then the dipole moment is given.
   FUNCTION charge_arm(timestep,molecule_type_index,molecule_index)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
@@ -3418,7 +3429,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
     charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
    ELSE
     charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/molecule_list(molecule_type_index)%realcharge
-    charge_arm(:)=charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index)
+    charge_arm(:)=molecule_list(molecule_type_index)%realcharge*&
+    &(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
    ENDIF
   END FUNCTION charge_arm
 
@@ -11613,6 +11625,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
  INTEGER,PARAMETER :: bin_count_default=100
  LOGICAL,PARAMETER :: subtract_uniform_default=.FALSE.
  LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
+ LOGICAL,PARAMETER :: normalise_CLM_default=.FALSE.
  REAL,PARAMETER :: maxdist_default=10.0
  !variables
  CHARACTER (LEN=10) :: operation_mode="NONE"!operation mode of the distribution module.
@@ -11624,6 +11637,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
  REAL :: foolsproof_ratio!for the cdf, consider rare sampling of corners.
  LOGICAL :: subtract_uniform=subtract_uniform_default!subtract the uniform density
  LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
+ LOGICAL :: normalise_CLM=normalise_CLM_default!divide charge arm by product of mass and radius of gyration squared.
  INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
  REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
  REAL :: step_a,step_b !step sizes in angströms or radians
@@ -11973,6 +11987,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     INTEGER :: n,inputbin,molecule_index,m
     CHARACTER(LEN=32) :: inputstring
     REAL :: chargearm
+    REAL(KIND=WORKING_PRECISION) :: rgy_sq
      IF ((TRIM(operation_mode)=="cdf").OR.(TRIM(operation_mode)=="pdf")) THEN
       !read user-specified references
       BACKSPACE 3
@@ -12092,16 +12107,28 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         DO m=1,number_of_references,1
          DO molecule_index=1,give_number_of_molecules_per_step(references(4,m)),1
           chargearm=SQRT(SUM(charge_arm(1,references(4,m),molecule_index)**2))
+          IF (normalise_CLM) THEN
+           CALL compute_squared_radius_of_gyration(1,references(4,m),molecule_index,rgy_sq)
+           chargearm=chargearm/(give_mass_of_molecule(references(4,m))*rgy_sq)
+          ENDIF
           IF (chargearm>maxdist) maxdist=chargearm
          ENDDO
         ENDDO
-        maxdist=maxdist*10.0
-        maxdist=FLOAT(CEILING(maxdist))
-        maxdist=maxdist/10.0
+        IF (normalise_CLM) THEN
+         maxdist=maxdist*100000.0
+         maxdist=FLOAT(CEILING(maxdist))
+         maxdist=maxdist/100000.0
+        ELSE
+         maxdist=maxdist*10.0
+         maxdist=FLOAT(CEILING(maxdist))
+         maxdist=maxdist/10.0
+        ENDIF
         IF (maxdist<0.0d0) THEN
          IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
          &"  setting 'maxdist' to default (=",maxdist_default,")"
          maxdist=maxdist_default
+        ELSEIF (maxdist<1.0d0) THEN
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,E10.3,A)') "   setting 'maxdist' to",maxdist," (based on maximum charge arm)"
         ELSE
          IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (based on maximum charge arm)"
         ENDIF
@@ -12143,6 +12170,21 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
         ELSE
          IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
         ENDIF
+       ENDIF
+      CASE ("normalise_CLM","normalise_charge_arm","normalize_CLM","normalize_charge_arm")
+       IF (TRIM(operation_mode)=="charge_arm") THEN
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,normalise_CLM
+        IF (ios/=0) THEN
+         CALL report_error(100,exit_status=ios)
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+         &"  setting 'normalise_CLM' to default (=",normalise_CLM_default,")"
+         normalise_CLM=normalise_CLM_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'normalise_CLM' to ",normalise_CLM
+        ENDIF
+       ELSE
+        WRITE(*,*) "The charge lever moment normalisation is only available for charge_arm analysis."
        ENDIF
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
@@ -12390,7 +12432,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     INTEGER :: binpos_a,binpos_b,molecule_index
     INTEGER,INTENT(IN) :: timestep_in
     REAL :: current_distance_squared,a,b
-    REAL(KIND=WORKING_PRECISION) :: link_vector(3),local_reference(3)
+    REAL(KIND=WORKING_PRECISION) :: link_vector(3),local_reference(3),rgy_sq
     INTEGER(KIND=DP),INTENT(INOUT) :: distribution_histogram_local(:,:)
     INTEGER(KIND=DP),INTENT(OUT) :: within_bin_local,out_of_bounds_local
     LOGICAL,INTENT(IN) :: random_debug
@@ -12401,6 +12443,10 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
       !iterate over all observed molecules
       !Calculate bin limits.
       link_vector(:)=charge_arm(timestep_in,molecule_type_index_ref,molecule_index)
+      IF (normalise_CLM) THEN
+       CALL compute_squared_radius_of_gyration(timestep_in,molecule_type_index_ref,molecule_index,rgy_sq)
+       link_vector(:)=link_vector(:)/(give_mass_of_molecule(molecule_type_index_ref)*rgy_sq)
+      ENDIF
       !If necessary, randomise uvector (debug mostly)
       IF (random_debug) THEN
        local_reference(1)=RAND()-0.5
@@ -12412,7 +12458,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
       ENDIF
       !polar distribution function: a will be distance, b will be angle in radians
       a=SQRT(SUM(link_vector(:)**2))
-      IF (a<0.001) THEN
+      IF (a<1E-8) THEN
        out_of_bounds_local=out_of_bounds_local+1
       ELSE
        !normalise
@@ -12542,6 +12588,10 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
     WRITE(headerline,'(A,SP,I0," ",I0," ",I0,SS,", ")') "reference vector ",references(1:3,reference_number)
    ENDIF
    IF (TRIM(operation_mode)=="charge_arm") THEN
+    IF (normalise_CLM) THEN
+     WRITE(filename_distribution_output,'(A,"CLM-normalised_")')&
+     &TRIM(filename_distribution_output)
+    ENDIF
     !only charge arm
     IF (give_charge_of_molecule(references(4,reference_number))/=0) THEN
      WRITE(filename_distribution_output,'(A,"charge_arm_type_",I0)')&
@@ -12813,7 +12863,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 06_Oct_2020"
+ PRINT *, "   Date of Release: 22_Oct_2020"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -13577,6 +13627,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Only available for the polar distribution function."
    PRINT *," - 'weigh_charge'"
    PRINT *,"    The charges of observed molecules are added to the distribution histogram, rather than unity."
+   PRINT *," - 'normalise_CLM'"
+   PRINT *,"    The charge arm is divided by (M*Rgy**2) (charge lever moment correction)."
+   PRINT *,"    Here, M is the mass of the molecule, and Rgy is the radius of gyration."
+   PRINT *,"    Only available for the charge arm distribution function."
    PRINT *," - 'sampling_interval'"
    PRINT *,"    Expects an integer. Every so many steps are used for the analysis."
    PRINT *," - 'quit'"

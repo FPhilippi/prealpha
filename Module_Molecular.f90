@@ -384,7 +384,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!as well as the furthest distance of any atom from the centre of mass of the molecule.
 		SUBROUTINE compute_squared_radius_of_gyration(timestep,molecule_type_index,molecule_index,rgy_sq,maxdist)
 		IMPLICIT NONE
-		REAL(KIND=WORKING_PRECISION),INTENT(OUT) :: rgy_sq,maxdist
+		REAL(KIND=WORKING_PRECISION),INTENT(OUT) :: rgy_sq
+		REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: maxdist
 		REAL(KIND=WORKING_PRECISION) :: centre_of_mass(3),difference_vector(3),maxdist_squared,current_distance_squared
 		INTEGER, INTENT(IN) :: timestep,molecule_type_index,molecule_index
 		INTEGER :: atom_index
@@ -407,7 +408,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				rgy_sq=rgy_sq+(molecule_list(molecule_type_index)%list_of_atom_masses(atom_index))*current_distance_squared
 			ENDDO
 			rgy_sq=rgy_sq/molecule_list(molecule_type_index)%mass
-			maxdist=SQRT(maxdist_squared)
+			IF (PRESENT(maxdist)) maxdist=SQRT(maxdist_squared)
 		END SUBROUTINE compute_squared_radius_of_gyration
 
 		!The following subroutine computes equation (13), (14), and (15) in 10.1021/acs.jpclett.9b02983.
@@ -2118,6 +2119,16 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
 		END FUNCTION give_qd_vector
 
+		!charge arm |Q*lq| as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
+		FUNCTION charge_arm_length(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+		REAL(KIND=WORKING_PRECISION) :: charge_arm_length
+			charge_arm_length=SQRT(SUM((charge_arm(timestep,molecule_type_index,molecule_index))**2))
+		END FUNCTION charge_arm_length
+
+		!charge arm vector Q*lq as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
+		!if he molecule is not charged, then the dipole moment is given.
 		FUNCTION charge_arm(timestep,molecule_type_index,molecule_index)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
@@ -2126,7 +2137,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
 			ELSE
 				charge_arm(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/molecule_list(molecule_type_index)%realcharge
-				charge_arm(:)=charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index)
+				charge_arm(:)=molecule_list(molecule_type_index)%realcharge*&
+				&(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
 			ENDIF
 		END FUNCTION charge_arm
 
