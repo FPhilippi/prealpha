@@ -1,0 +1,11 @@
+ charge_arm 1 ### charge arm analysis.
+ +0 +0 +1 2
+ maxdist_optimize ### set maximum distance for charge arm
+ subtract_uniform F ### do not subtract anisotropic density.
+ sampling_interval 1 ### sample every 1 timesteps.
+ bin_count_a 100 ### set bin counts for a) to 100.
+ bin_count_b 100 ### set bin counts for b) to 100.
+ quit
+
+ This is an input file for the calculation of distribution functions.
+ To actually perform the implied calculations, it has to be referenced in 'general.inp'.

@@ -1,0 +1,38 @@
+ "N4441NTf2_298K_scaled_5ps.lmp" ### trajectory filename
+ "molecular.inp" ### inputfile for module MOLECULAR
+ "./" ### path to trajectory
+ "./" ### path to other input files
+ "./output_scaled/" ### output folder
+ 
+ #GENERAL_SETTINGS
+ time_scaling 5000 ### stride of trajectory is 5 ps.
+ parallel_operation T ### turn on parallel operation
+ set_threads_simple ### set the number of threads to use to maximum
+ sequential_read F ### load trajectory into RAM.
+ trajectory_type lmp ### which format the (input) trajectory has
+ show_settings ### print the settings at this point
+ print_atomic_masses
+ print_atomic_charges
+ dump_example
+ gyradius_simple
+
+ #CHARGE_ARM
+ set_prefix "cation_"
+ distribution "charge_arm_cation.inp"
+
+ set_prefix anion_ ### This prefix will be used subsequently.
+ dihedral "anion_dihedral.inp" ### invoke dihedral condition analysis
+ set_prefix cation_ ### This prefix will be used subsequently.
+ dihedral "cation_dihedral.inp" ### invoke dihedral condition analysis
+
+ distribution_simple ### sum rules and coulomb energy integral.
+
+ set_prefix MSD_
+ diffusion "exponent_2_diffusion_long.inp" ### mean squared displacement
+ set_prefix Quartic_
+ diffusion "exponent_4_diffusion_long.inp" ### mean displacement to the power of 4
+
+ quit
+ 
+ This is the general input file.
+ It controls the behaviour of the trajectory analyser.

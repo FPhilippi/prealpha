@@ -1,0 +1,22 @@
+ "N4441NTf2_400K_unscaled_5ps.lmp" ### trajectory filename
+ "molecular_COC.inp" ### inputfile for module MOLECULAR
+ "./" ### path to trajectory
+ "./" ### path to other input files
+ "./output_COC/" ### output folder
+ 
+ #GENERAL_SETTINGS
+ time_scaling 5000 ### stride of trajectory is 5 ps.
+ parallel_operation T ### turn on parallel operation
+ set_threads_simple ### set the number of threads to use to maximum
+ sequential_read F ### load trajectory into RAM.
+ trajectory_type lmp ### which format the (input) trajectory has
+ show_settings ### print the settings at this point
+ print_atomic_masses
+
+ set_prefix "COC_" ### This prefix will be used subsequently.
+ distribution_simple ### sum rules and coulomb energy integral.
+
+ quit
+ 
+ This is the general input file.
+ It controls the behaviour of the trajectory analyser.

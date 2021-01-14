@@ -1,0 +1,12 @@
+ 1 ### Molecule type index (i.e. the molecule to observe)
+ dihedral 2 ### dihedral autocorrelation + number of dihedral conditions to be fulfilled 
+ 1 5 6 9    0.0 150.0
+ 5 6 9 12    0.0 150.0
+ skip_autocorrelation T  ### no autocorrelation, just the PES & indicences.
+ fold T ### also check for the range (360-b) to (360-a), not just a to b
+ dump_verbose T ### dump verbose information such as the PES subset population.
+ bin_count 100 ### Setting the bin count to 100 (default is 100)
+ quit
+
+ This is an input file for the dihedral conditions analysis.
+ To actually perform the implied calculations, it has to be referenced in 'general.inp'.
