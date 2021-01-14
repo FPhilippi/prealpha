@@ -24,7 +24,7 @@
  dihedral "anion_dihedral.inp" ### invoke dihedral condition analysis
  set_prefix cation_ ### This prefix will be used subsequently.
  dihedral "cation_dihedral.inp" ### invoke dihedral condition analysis
-
+ set_prefix ""
  distribution_simple ### sum rules and coulomb energy integral.
 
  set_prefix MSD_
