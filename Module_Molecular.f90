@@ -152,6 +152,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
+	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
+	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -816,7 +818,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			&(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2))
 		END FUNCTION give_smallest_atom_distance
 
-		!This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs - as well as the corresponding translation vector.
+		!This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
 		REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
 		&(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
 		IMPLICIT NONE
@@ -1708,6 +1710,80 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER,INTENT(IN) :: molecule_type_index
 			give_number_of_atoms_per_molecule=molecule_list(molecule_type_index)%number_of_atoms
 		END FUNCTION give_number_of_atoms_per_molecule
+
+		!This subroutine reports the molecule_type_index and atom_index values for the atoms in "give_number_of_specific_atoms"
+		SUBROUTINE give_indices_of_specific_atoms(element_name_input,indices_array)
+		IMPLICIT NONE
+		CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+		INTEGER,DIMENSION(:,:),ALLOCATABLE,INTENT(INOUT) :: indices_array
+		INTEGER :: atom_index,counter,molecule_type_index
+			IF (SIZE(indices_array(:,2))/=give_number_of_specific_atoms(element_name_input))&
+			&CALL report_error(138)
+			counter=0
+			DO molecule_type_index=1,number_of_molecule_types,1
+				DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+					IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input)) THEN
+						counter=counter+1
+						indices_array(counter,2)=atom_index
+						indices_array(counter,1)=molecule_type_index
+					ENDIF
+				ENDDO
+			ENDDO
+		END SUBROUTINE give_indices_of_specific_atoms
+
+		CHARACTER(LEN=2) FUNCTION give_element_symbol(molecule_type_index,atom_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: atom_index,molecule_type_index
+			give_element_symbol=molecule_list(molecule_type_index)%list_of_elements(atom_index)
+		END FUNCTION give_element_symbol
+
+		!This subroutine gives out how many specific atoms with label "element_name_input" are present.
+		!A "specific atom" is one defined by its combination of molecule_type_index and atom_index, ignoring molecule_index.
+		INTEGER FUNCTION give_number_of_specific_atoms(element_name_input)
+		IMPLICIT NONE
+		CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+		INTEGER :: atom_index,molecule_type_index
+			give_number_of_specific_atoms=0
+			DO molecule_type_index=1,number_of_molecule_types,1
+				DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+					IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input))&
+					&give_number_of_specific_atoms=give_number_of_specific_atoms+1
+				ENDDO
+			ENDDO
+		END FUNCTION give_number_of_specific_atoms
+
+		!This subroutine gives all the atom indices in "molecule_type_index" which have the label "element_name_input"
+		SUBROUTINE give_indices_of_specific_atoms_per_molecule(molecule_type_index,element_name_input,indices_array)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index
+		CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+		INTEGER,DIMENSION(:,:),ALLOCATABLE,INTENT(INOUT) :: indices_array
+		INTEGER :: atom_index,counter
+			IF (SIZE(indices_array(:,2))/=give_number_of_specific_atoms_per_molecule(molecule_type_index,element_name_input))&
+			&CALL report_error(138)
+			counter=0
+			DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+				IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input)) THEN
+					counter=counter+1
+					indices_array(counter,2)=atom_index
+				ENDIF
+			ENDDO
+			indices_array(:,1)=molecule_type_index
+		END SUBROUTINE give_indices_of_specific_atoms_per_molecule
+
+		!This subroutine gives out how many specific atoms with label "element_name_input" are present in the given molecule type.
+		!A "specific atom" is one defined by its combination of molecule_type_index and atom_index, ignoring molecule_index.
+		INTEGER FUNCTION give_number_of_specific_atoms_per_molecule(molecule_type_index,element_name_input)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index
+		CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+		INTEGER :: atom_index
+			give_number_of_specific_atoms_per_molecule=0
+			DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+				IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input))&
+				&give_number_of_specific_atoms_per_molecule=give_number_of_specific_atoms_per_molecule+1
+			ENDDO
+		END FUNCTION give_number_of_specific_atoms_per_molecule
 
 		INTEGER FUNCTION give_maximum_distance_squared()
 		IMPLICIT NONE

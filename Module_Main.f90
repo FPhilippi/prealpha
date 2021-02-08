@@ -135,7 +135,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 							IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting sequential_read to default."
 							READ_SEQUENTIAL=READ_SEQUENTIAL_DEFAULT!setting to default
 						ELSE
-							IF (TRIM(inputstring)=="sequential_read") THEN
+							IF ((TRIM(inputstring)=="sequential_read").OR.(TRIM(inputstring)=="read_sequential")) THEN
 								READ_SEQUENTIAL=input_condition
 							ELSE
 								CALL report_error(0)
@@ -1535,6 +1535,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		USE DIFFUSION
 		USE AUTOCORRELATION
 		USE DISTRIBUTION
+		USE DISTANCE
 		IMPLICIT NONE
 		LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
 		INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index
@@ -2321,6 +2322,7 @@ USE AUTOCORRELATION
 USE DIFFUSION
 USE SETTINGS
 USE DISTRIBUTION
+USE DISTANCE
 IMPLICIT NONE
 	 !$ INTERFACE
 	 !$ 	FUNCTION OMP_get_num_threads()
@@ -2971,12 +2973,9 @@ INTEGER :: ios,n
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################"
-						startstep=1
-						endstep=give_number_of_timesteps()
-						CALL check_timesteps(startstep,endstep)
-						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-					CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
-					!update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
+					CALL perform_distance_analysis()
+					FILENAME_DISTANCE_INPUT="intra.inp"
+					CALL perform_distance_analysis()
 					WRITE(*,*) "################################"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
@@ -3029,6 +3028,7 @@ INTEGER :: ios,n
 			WRITE(*,*) '   AUTOCORRELATION "',TRIM(FILENAME_AUTOCORRELATION_INPUT),'"'
 			WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
 			WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
+			WRITE(*,*) '   DISTANCE        "',TRIM(FILENAME_DISTANCE_INPUT),'"'
 			WRITE(*,*) "Paths:"
 			WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
 			WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

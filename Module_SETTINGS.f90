@@ -92,6 +92,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	CHARACTER(LEN=1024) :: FILENAME_AUTOCORRELATION_INPUT="autocorrelation.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
+	CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
 	CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
 	CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
 	CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
@@ -230,6 +231,15 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!131 jump length is a tiny bit too short
 	!132 distribution.inp is not available.
 	!133 Same molecule type for cross interactions
+	!134 distance.inp is not available
+	!135 distance.inp is not correctly formatted
+	!136 the molecule (cf molecule_type_index) does not have an element with this name
+	!137 Couldn't allocate memory for distance list
+	!138 mismatch in array size (atomic indices)
+	!139 no valid subjobs in distance module
+	!140 distance module: swapped "wildcard -> specific" to "specific -> wildcard"
+	!141 not enough molecules (molecule_index)
+	!142 problem when streaming distance input.
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -508,7 +518,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
 					WRITE(*,*) "--> analysis skipped."
 				CASE (69)
-					WRITE(*,*) " #   ERROR 69: the specified molecule index doesn't exist."
+					WRITE(*,*) " #  ERROR 69: the specified molecule index doesn't exist."
 					WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
 				CASE (70)
 					WRITE(*,*) " #  SERIOUS WARNING 70: A mismatch of element names in the trajectory has been detected!"
@@ -720,6 +730,35 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (133)
 					error_count=error_count-1
 					WRITE(*,*) " #  NOTICE 133: Two times the same molecule_type_index - cross interactions will be zero."
+				CASE (134)
+					WRITE(*,*) " #  ERROR 134: couldn't find '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+					WRITE(*,*) "--> redelivering control to main unit"
+				CASE (135)
+					WRITE(*,*) " #  SEVERE ERROR 135: couldn't read '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+					WRITE(*,*) " #  Check format of input file!"
+					CLOSE(UNIT=3)!unit 3 is the distance input file
+					CALL finalise_global()
+					STOP
+				CASE (136)
+					WRITE(*,*) " #  WARNING 136: Invalid element name (for this molecule type). This line is ignored."
+				CASE (137)
+					WRITE(*,*) " #  SEVERE ERROR 137: couldn't allocate memory for distance list (or atom_indices)."
+					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+					STOP
+				CASE (138)
+					WRITE(*,*) " #  ERROR 138: indices_array of wrong size was passed to module MOLECULAR (atomic indices)."
+					WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
+				CASE (139)
+					WRITE(*,*) " #  ERROR 139: No (remaining) valid subjobs in module DISTANCE."
+					WRITE(*,*) "--> Check your input files."
+				CASE (140)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 140: Swapped reference and observed atoms (wildcard -> specific not allowed)."
+				CASE (141)
+					WRITE(*,*) " #  WARNING 141: Not enough molecules available (as defined by molecule_index). This line is ignored."
+				CASE (142)
+					WRITE(*,*) " #  ERROR 142: problem streaming '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+					WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISTANCE_INPUT),"'!"
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

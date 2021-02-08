@@ -1138,6 +1138,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				WRITE(*,'(" Taking ensemble average from step ",I0," to ",I0,".")') startstep,endstep
 				CALL print_gyradius()
 			ENDIF
+			WRITE(*,FMT='(A)')" ('maxdist' is the largest intramolecular distance of any atom from the COM)."
 			CALL finalise_gyradius()
 			
 			CONTAINS

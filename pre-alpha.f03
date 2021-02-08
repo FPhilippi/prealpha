@@ -1,7 +1,7 @@
-! RELEASED ON 22_Oct_2020 AT 18:43
+! RELEASED ON 08_Feb_2021 AT 15:00
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
-    ! Copyright (C) 2020 Frederik Philippi
+    ! Copyright (C) 2021 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
 
     ! This program is free software: you can redistribute it and/or modify
@@ -93,6 +93,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  CHARACTER(LEN=1024) :: FILENAME_AUTOCORRELATION_INPUT="autocorrelation.inp"
  CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
  CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
+ CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
  CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
  CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
  CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
@@ -231,6 +232,15 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !131 jump length is a tiny bit too short
  !132 distribution.inp is not available.
  !133 Same molecule type for cross interactions
+ !134 distance.inp is not available
+ !135 distance.inp is not correctly formatted
+ !136 the molecule (cf molecule_type_index) does not have an element with this name
+ !137 Couldn't allocate memory for distance list
+ !138 mismatch in array size (atomic indices)
+ !139 no valid subjobs in distance module
+ !140 distance module: swapped "wildcard -> specific" to "specific -> wildcard"
+ !141 not enough molecules (molecule_index)
+ !142 problem when streaming distance input.
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -509,7 +519,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      FILENAME_GENERAL_INPUT=FILENAME_GENERAL_INPUT_DEFAULT
      WRITE(*,*) "--> analysis skipped."
     CASE (69)
-     WRITE(*,*) " #   ERROR 69: the specified molecule index doesn't exist."
+     WRITE(*,*) " #  ERROR 69: the specified molecule index doesn't exist."
      WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
     CASE (70)
      WRITE(*,*) " #  SERIOUS WARNING 70: A mismatch of element names in the trajectory has been detected!"
@@ -721,6 +731,35 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (133)
      error_count=error_count-1
      WRITE(*,*) " #  NOTICE 133: Two times the same molecule_type_index - cross interactions will be zero."
+    CASE (134)
+     WRITE(*,*) " #  ERROR 134: couldn't find '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+     WRITE(*,*) "--> redelivering control to main unit"
+    CASE (135)
+     WRITE(*,*) " #  SEVERE ERROR 135: couldn't read '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+     WRITE(*,*) " #  Check format of input file!"
+     CLOSE(UNIT=3)!unit 3 is the distance input file
+     CALL finalise_global()
+     STOP
+    CASE (136)
+     WRITE(*,*) " #  WARNING 136: Invalid element name (for this molecule type). This line is ignored."
+    CASE (137)
+     WRITE(*,*) " #  SEVERE ERROR 137: couldn't allocate memory for distance list (or atom_indices)."
+     WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+     STOP
+    CASE (138)
+     WRITE(*,*) " #  ERROR 138: indices_array of wrong size was passed to module MOLECULAR (atomic indices)."
+     WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
+    CASE (139)
+     WRITE(*,*) " #  ERROR 139: No (remaining) valid subjobs in module DISTANCE."
+     WRITE(*,*) "--> Check your input files."
+    CASE (140)
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 140: Swapped reference and observed atoms (wildcard -> specific not allowed)."
+    CASE (141)
+     WRITE(*,*) " #  WARNING 141: Not enough molecules available (as defined by molecule_index). This line is ignored."
+    CASE (142)
+     WRITE(*,*) " #  ERROR 142: problem streaming '",TRIM(FILENAME_DISTANCE_INPUT),"'"
+     WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISTANCE_INPUT),"'!"
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1109,7 +1148,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
-MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
+MODULE ANGLES ! Copyright (C) 2021 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -1292,7 +1331,7 @@ MODULE ANGLES ! Copyright (C) 2020 Frederik Philippi
 END MODULE ANGLES
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This module is responsible for handling the trajectory and passing information to other modules.
-MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
+MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
@@ -1444,6 +1483,8 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
  PUBLIC :: report_element_lists,give_center_of_mass,write_header,give_maximum_distance_squared,set_default_masses
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
+ PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
+ PUBLIC :: give_indices_of_specific_atoms,give_element_symbol
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -2108,7 +2149,7 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
    &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2))
   END FUNCTION give_smallest_atom_distance
 
-  !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs - as well as the corresponding translation vector.
+  !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
   &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
   IMPLICIT NONE
@@ -3000,6 +3041,80 @@ MODULE MOLECULAR ! Copyright (C) 2020 Frederik Philippi
   INTEGER,INTENT(IN) :: molecule_type_index
    give_number_of_atoms_per_molecule=molecule_list(molecule_type_index)%number_of_atoms
   END FUNCTION give_number_of_atoms_per_molecule
+
+  !This subroutine reports the molecule_type_index and atom_index values for the atoms in "give_number_of_specific_atoms"
+  SUBROUTINE give_indices_of_specific_atoms(element_name_input,indices_array)
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+  INTEGER,DIMENSION(:,:),ALLOCATABLE,INTENT(INOUT) :: indices_array
+  INTEGER :: atom_index,counter,molecule_type_index
+   IF (SIZE(indices_array(:,2))/=give_number_of_specific_atoms(element_name_input))&
+   &CALL report_error(138)
+   counter=0
+   DO molecule_type_index=1,number_of_molecule_types,1
+    DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+     IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input)) THEN
+      counter=counter+1
+      indices_array(counter,2)=atom_index
+      indices_array(counter,1)=molecule_type_index
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE give_indices_of_specific_atoms
+
+  CHARACTER(LEN=2) FUNCTION give_element_symbol(molecule_type_index,atom_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: atom_index,molecule_type_index
+   give_element_symbol=molecule_list(molecule_type_index)%list_of_elements(atom_index)
+  END FUNCTION give_element_symbol
+
+  !This subroutine gives out how many specific atoms with label "element_name_input" are present.
+  !A "specific atom" is one defined by its combination of molecule_type_index and atom_index, ignoring molecule_index.
+  INTEGER FUNCTION give_number_of_specific_atoms(element_name_input)
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+  INTEGER :: atom_index,molecule_type_index
+   give_number_of_specific_atoms=0
+   DO molecule_type_index=1,number_of_molecule_types,1
+    DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+     IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input))&
+     &give_number_of_specific_atoms=give_number_of_specific_atoms+1
+    ENDDO
+   ENDDO
+  END FUNCTION give_number_of_specific_atoms
+
+  !This subroutine gives all the atom indices in "molecule_type_index" which have the label "element_name_input"
+  SUBROUTINE give_indices_of_specific_atoms_per_molecule(molecule_type_index,element_name_input,indices_array)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index
+  CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+  INTEGER,DIMENSION(:,:),ALLOCATABLE,INTENT(INOUT) :: indices_array
+  INTEGER :: atom_index,counter
+   IF (SIZE(indices_array(:,2))/=give_number_of_specific_atoms_per_molecule(molecule_type_index,element_name_input))&
+   &CALL report_error(138)
+   counter=0
+   DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+    IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input)) THEN
+     counter=counter+1
+     indices_array(counter,2)=atom_index
+    ENDIF
+   ENDDO
+   indices_array(:,1)=molecule_type_index
+  END SUBROUTINE give_indices_of_specific_atoms_per_molecule
+
+  !This subroutine gives out how many specific atoms with label "element_name_input" are present in the given molecule type.
+  !A "specific atom" is one defined by its combination of molecule_type_index and atom_index, ignoring molecule_index.
+  INTEGER FUNCTION give_number_of_specific_atoms_per_molecule(molecule_type_index,element_name_input)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index
+  CHARACTER(LEN=*),INTENT(IN) :: element_name_input
+  INTEGER :: atom_index
+   give_number_of_specific_atoms_per_molecule=0
+   DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+    IF (TRIM(molecule_list(molecule_type_index)%list_of_elements(atom_index))==TRIM(element_name_input))&
+    &give_number_of_specific_atoms_per_molecule=give_number_of_specific_atoms_per_molecule+1
+   ENDDO
+  END FUNCTION give_number_of_specific_atoms_per_molecule
 
   INTEGER FUNCTION give_maximum_distance_squared()
   IMPLICIT NONE
@@ -5042,7 +5157,7 @@ END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
 !This module contains procedures for debugging and technical purposes.
-MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
+MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -6180,6 +6295,7 @@ MODULE DEBUG ! Copyright (C) 2020 Frederik Philippi
     WRITE(*,'(" Taking ensemble average from step ",I0," to ",I0,".")') startstep,endstep
     CALL print_gyradius()
    ENDIF
+   WRITE(*,FMT='(A)')" ('maxdist' is the largest intramolecular distance of any atom from the COM)."
    CALL finalise_gyradius()
    
    CONTAINS
@@ -6675,7 +6791,7 @@ END MODULE DEBUG
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
 !reorientational autocorrelation functions.
 !relative mean molecular velocity correlation functions.
-MODULE AUTOCORRELATION ! Copyright (C) 2020 Frederik Philippi
+MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -10009,7 +10125,7 @@ END MODULE AUTOCORRELATION
 
 !This Module calculates (drift corrected) mean squared displacements.
 !The diffusion implementation is shit. Use TRAVIS.
-MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
+MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -10979,7 +11095,7 @@ MODULE DIFFUSION ! Copyright (C) 2020 Frederik Philippi
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs low-level command line tasks.
-MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
+MODULE RECOGNITION ! Copyright (C) 2021 Frederik Philippi
  USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -11615,7 +11731,7 @@ MODULE RECOGNITION ! Copyright (C) 2020 Frederik Philippi
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates special combined distribution functions - such as cylindrical or polar.
-MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
+MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -12458,7 +12574,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
       ENDIF
       !polar distribution function: a will be distance, b will be angle in radians
       a=SQRT(SUM(link_vector(:)**2))
-      IF (a<1E-8) THEN
+      IF (a<1E-8) THEN !decreased threshold because of CLM correction...
        out_of_bounds_local=out_of_bounds_local+1
       ELSE
        !normalise
@@ -12811,6 +12927,962 @@ MODULE DISTRIBUTION ! Copyright (C) 2020 Frederik Philippi
 
 END MODULE DISTRIBUTION
 !--------------------------------------------------------------------------------------------------------------------------------!
+!This Module calculates intra- and intermolecular contact distance estimates (averages of closest distance)
+MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
+ USE SETTINGS
+ USE MOLECULAR
+ IMPLICIT NONE
+ PRIVATE
+ !default values
+ REAL,PARAMETER :: maxdist_default=10.0
+ INTEGER,PARAMETER :: nsteps_default=1 !how many steps to use from trajectory
+ INTEGER,PARAMETER :: sampling_interval_default=1
+ LOGICAL,PARAMETER :: calculate_stdev_default=.FALSE.
+ LOGICAL,PARAMETER :: calculate_exponential_default=.FALSE.
+ LOGICAL,PARAMETER :: calculate_ffc_default=.FALSE.
+ !variables
+ TYPE,PRIVATE :: distance_subjob
+  CHARACTER(LEN=2) :: element1,element2
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: indices_1 !first dimension counts the indices, second dimension is molecule_type_index and atom_index
+  INTEGER :: size_indices_1
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: indices_2 !first dimension counts the indices, second dimension is molecule_type_index and atom_index
+  INTEGER :: size_indices_2
+  INTEGER(KIND=WORKING_PRECISION) :: weight !how many occurrences of this distance per timestep?
+  INTEGER(KIND=WORKING_PRECISION) :: missed_neighbours !how many times was the expected weight NOT obtained?
+  REAL(KIND=WORKING_PRECISION) :: closest_average
+  REAL(KIND=WORKING_PRECISION) :: closest_stdev
+  REAL(KIND=WORKING_PRECISION) :: exponential_average
+  REAL(KIND=WORKING_PRECISION) :: exponential_stdev
+  REAL(KIND=WORKING_PRECISION) :: exponential_weight
+  REAL(KIND=WORKING_PRECISION) :: ffc_average
+  REAL(KIND=WORKING_PRECISION) :: ffc_weight
+  CHARACTER(LEN=512) :: subjob_description
+ END TYPE distance_subjob
+ TYPE(distance_subjob),DIMENSION(:),ALLOCATABLE :: list_of_distances
+ CHARACTER(LEN=14) :: operation_mode="NONE"!operation mode of the distance module.
+ INTEGER :: nsteps
+ INTEGER :: sampling_interval
+ INTEGER :: number_of_subjobs
+ LOGICAL :: calculate_stdev=calculate_stdev_default !if TRUE, then the standard deviation is also calculated.
+ LOGICAL :: calculate_ffc=calculate_ffc_default !if TRUE, then the equivalents of dHH and rHH are calculated, see the ESI to 10.1021/acs.jpclett.0c00087.
+ LOGICAL :: calculate_exponential=calculate_exponential_default !also report distance average weighed with exp(-kr)
+ REAL :: maxdist=maxdist_default!only atom pairs with a distance < maxdist are considered. Should not exceed half the box size
+ REAL :: maxdist_squared=maxdist_default**2
+ REAL :: distance_exponent=1.0 !exponent for distance weighing with exp(-distance_exponent*distance)
+ !PRIVATE/PUBLIC declarations
+ PUBLIC :: write_simple_intramolecular_distances,perform_distance_analysis
+
+ CONTAINS
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distance'
+  SUBROUTINE write_simple_intramolecular_distances()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: n,ios
+   FILENAME_DISTANCE_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),IOSTAT=ios)
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_intramolecular_distances
+
+  SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
+  IMPLICIT NONE
+   maxdist=maxdist_default
+   maxdist_squared=maxdist_default**2
+   sampling_interval=sampling_interval_default
+   nsteps=nsteps_default
+   calculate_stdev=calculate_stdev_default
+   distance_exponent=1.0
+  END SUBROUTINE set_defaults
+
+  !initialises the distance module by reading the specified input file.
+  SUBROUTINE initialise_distance()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: ios,lines_to_skip,valid_lines,counter,allocstatus
+   ! first, check if file exists.
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
+   IF (file_exists) THEN
+    !setting defaults to start with.
+    CALL set_defaults()
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "reading file '",TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),"'"
+    INQUIRE(UNIT=3,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=3)
+    OPEN(UNIT=3,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),&
+    &ACTION='READ',IOSTAT=ios)
+    IF (ios/=0) CALL report_error(135,exit_status=ios)
+    READ(3,IOSTAT=ios,FMT=*) operation_mode,number_of_subjobs!read the operation mode.
+    IF (ios/=0) CALL report_error(135,exit_status=ios)
+    lines_to_skip=1
+    valid_lines=0
+    !support for synonyms
+    IF (TRIM(operation_mode)=="intramolecular") operation_mode="intra"
+    IF (TRIM(operation_mode)=="intermolecular") operation_mode="inter"
+    IF (VERBOSE_OUTPUT) THEN
+     WRITE(*,'(" reading ",I0," user-specified distances...")') number_of_subjobs
+    ENDIF
+    !open scratch file. Structure of the scratch file is:
+    ! number of wildcards (0,1,2) - molecule type index - atom index (or wildcard) - (molecule type index for inter) - atom index (or wildcard).
+    INQUIRE(UNIT=10,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=10)
+    OPEN(UNIT=10,STATUS="SCRATCH")
+    REWIND 10
+    !Now read the body of the distance input file in line with the requested operation mode:
+    SELECT CASE (TRIM(operation_mode))
+    CASE ("intra")
+     CALL read_input_intra()!also checks for valid atom indices, if not valid prints warning 111 ("this line is ignored")
+    CASE ("inter")
+     CALL read_input_inter()!also checks for valid atom indices, if not valid prints warning 111 ("this line is ignored")
+    CASE DEFAULT
+     CLOSE(UNIT=10)
+     CALL report_error(135)
+    END SELECT
+    IF (VERBOSE_OUTPUT) WRITE(*,'(" Successfully read ",I0,"/",I0," custom distance jobs.")')valid_lines,number_of_subjobs
+    number_of_subjobs=valid_lines
+    IF (number_of_subjobs==0) CALL report_error(139)
+    !allocate memory for the subjobs,...
+    IF (ALLOCATED(list_of_distances)) CALL report_error(0)
+    ALLOCATE(list_of_distances(number_of_subjobs),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+    REWIND 10
+    DO counter=1,number_of_subjobs,1
+     CALL prepare_subjob(counter)!... then allocate memory for the subsubjobs (if any)
+    ENDDO
+    CALL goto_currentline()
+    !read rest of input file.
+    CALL read_body()
+    CLOSE(UNIT=3)
+    CLOSE(UNIT=10)
+   ELSE
+    CALL report_error(134)!No input - no output. easy as that.
+   ENDIF
+   CONTAINS
+
+    SUBROUTINE read_body()
+    IMPLICIT NONE
+    INTEGER :: n
+    CHARACTER(LEN=32) :: inputstring
+     DO n=1,MAXITERATIONS,1
+      READ(3,IOSTAT=ios,FMT=*) inputstring
+      IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_DISTANCE_INPUT)
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTANCE_INPUT)
+       EXIT
+      ENDIF
+      SELECT CASE (TRIM(inputstring))
+      CASE ("sampling_interval")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'sampling_interval' to default (=",sampling_interval_default,")"
+        sampling_interval=sampling_interval_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'sampling_interval' to ",sampling_interval
+       ENDIF
+      CASE ("exponent")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,distance_exponent
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A)') "setting 'exponent' to default (k=1 in exp(-kr))"
+        distance_exponent=1.0
+       ELSE
+        IF (VERBOSE_OUTPUT) THEN
+         WRITE(*,'(A,E10.3)') " setting 'exponent' to k=",distance_exponent
+         IF (.NOT.(calculate_exponential)) WRITE(*,'(" (exponentially weighed averages are not turned on yet)")')
+        ENDIF
+       ENDIF
+      CASE ("exponential_weight","weigh_exponential","calculate_exponential","average_exponential")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,calculate_exponential
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        calculate_exponential=calculate_exponential_default
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+        &" setting 'calculate_exponential' to default (",calculate_exponential,")"
+       ELSE
+        IF (calculate_exponential) THEN
+         WRITE(*,'(" Turned on averaged distances with exponential weights exp(-k*r)")')
+         WRITE(*,*)"(r=distance, k can be set with 'exponent')"
+        ELSE
+         WRITE(*,'(" Turned off averaged distances with exponential weights.")')
+        ENDIF
+       ENDIF
+      CASE ("ffc_weight","weigh_ffc","calculate_ffc","average_ffc","ffc","dhh","rhh")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,calculate_ffc
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        calculate_ffc=calculate_ffc_default
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+        &" setting 'calculate_ffc' to default (",calculate_ffc,")"
+       ELSE
+        IF (calculate_ffc) THEN
+         IF (TRIM(operation_mode)=="intra") THEN
+          WRITE(*,'(" Will calculate intramolecular distances rHH as described in:")')
+         ELSE
+          WRITE(*,'(" Will calculate intermolecular distances dHH as described in:")')
+         ENDIF
+         WRITE(*,'(" J. Phys. Chem. Lett., 2020, 11, 2165–2170. DOI 10.1021/acs.jpclett.0c00087")')
+        ELSE
+         WRITE(*,*) "Turned off calculation of intra- or intermolecular distances for FFC/NMR"
+        ENDIF
+       ENDIF
+      CASE ("nsteps")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,nsteps
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'nsteps' to default (=",nsteps_default,")"
+        nsteps=nsteps_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'nsteps' to ",nsteps
+       ENDIF
+      CASE ("maxdist","cutoff")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,maxdist
+       IF (ios/=0) THEN
+        CALL report_error(142,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+        &"  setting 'maxdist' to default (=",maxdist_default,")"
+        maxdist=maxdist_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)') "   setting 'maxdist' to ",maxdist
+       ENDIF
+      CASE ("maxdist_optimize","cutoff_optimize")
+       maxdist=give_box_limit()/2.0
+       IF (maxdist<0.0d0) THEN
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
+        &"  setting 'maxdist' to default (=",maxdist_default,")"
+        maxdist=maxdist_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (half the box length)"
+       ENDIF
+      CASE ("quit")
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTANCE_INPUT)
+       EXIT
+      CASE DEFAULT
+       IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
+      END SELECT
+     ENDDO
+     maxdist_squared=maxdist**2
+     IF (nsteps<1) THEN
+      CALL report_error(57,exit_status=nsteps)
+      nsteps=1
+     ELSEIF (nsteps>give_number_of_timesteps()) THEN
+      CALL report_error(57,exit_status=nsteps)
+      nsteps=give_number_of_timesteps()
+     ENDIF
+    END SUBROUTINE read_body
+
+    SUBROUTINE prepare_subjob(number_of_subjob)
+    IMPLICIT NONE
+    INTEGER,INTENT(IN) :: number_of_subjob
+    INTEGER :: number_of_wildcards,ios
+    INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2
+    CHARACTER (LEN=2) :: element1,element2 !wildcards for element names
+     READ(10,IOSTAT=ios,FMT=*) number_of_wildcards
+     IF (ios/=0) CALL report_error(0,exit_status=ios)
+     BACKSPACE 10
+     SELECT CASE (number_of_wildcards)
+     CASE (0)
+      READ(10,IOSTAT=ios,FMT=*)number_of_wildcards,&
+      &molecule_type_index_1,atom_index_1,molecule_type_index_2,atom_index_2
+      IF (ios/=0) CALL report_error(0,exit_status=ios)
+      list_of_distances(number_of_subjob)%size_indices_1=1
+      list_of_distances(number_of_subjob)%size_indices_2=1
+      WRITE(list_of_distances(number_of_subjob)%subjob_description,&
+      &'("Atom #",I0," in molecule type ",I0," -> atom #",I0," in molecule type ",I0)')&
+      &atom_index_1,molecule_type_index_1,atom_index_2,molecule_type_index_2
+      !Allocate and initialise memory for reference atom
+      ALLOCATE(list_of_distances(number_of_subjob)%indices_1(1,2),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+      list_of_distances(number_of_subjob)%indices_1(1,1)=molecule_type_index_1
+      list_of_distances(number_of_subjob)%indices_1(1,2)=atom_index_1
+      !Allocate and initialise memory for observed atom
+      ALLOCATE(list_of_distances(number_of_subjob)%indices_2(1,2),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+      list_of_distances(number_of_subjob)%indices_2(1,1)=molecule_type_index_2
+      list_of_distances(number_of_subjob)%indices_2(1,2)=atom_index_2
+      !looks alright - I have this many molecules, and one distance for each.
+      list_of_distances(number_of_subjob)%weight=&
+      &give_number_of_molecules_per_step(molecule_type_index_1)
+     CASE (1)
+      READ(10,IOSTAT=ios,FMT=*) number_of_wildcards,molecule_type_index_1,atom_index_1,element2
+      IF (ios/=0) CALL report_error(0,exit_status=ios)
+      list_of_distances(number_of_subjob)%size_indices_1=1
+      IF (TRIM(operation_mode)=="intra") THEN
+       list_of_distances(number_of_subjob)%size_indices_2=&
+       &give_number_of_specific_atoms_per_molecule(molecule_type_index_1,TRIM(element2))
+       WRITE(list_of_distances(number_of_subjob)%subjob_description,&
+       &'("Atom #",I0," in molecule type ",I0," -> ",I0," ",A," atoms.")')&
+       &atom_index_1,molecule_type_index_1,&
+       &list_of_distances(number_of_subjob)%size_indices_2,&
+       &TRIM(element2)
+       !Allocate and initialise memory for reference atom
+       ALLOCATE(list_of_distances(number_of_subjob)%indices_1(1,2),STAT=allocstatus)
+       IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+       list_of_distances(number_of_subjob)%indices_1(1,1)=molecule_type_index_1
+       list_of_distances(number_of_subjob)%indices_1(1,2)=atom_index_1
+       !Allocate and initialise memory for observed atom
+       ALLOCATE(list_of_distances(number_of_subjob)%indices_2(&
+       &list_of_distances(number_of_subjob)%size_indices_2,2),STAT=allocstatus)
+       IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+       !The following subroutine also initialised all entries of the first dimension to "molecule_type_index_1"
+       CALL give_indices_of_specific_atoms_per_molecule(&
+       &molecule_type_index_1,element2,list_of_distances(number_of_subjob)%indices_2)
+      ELSE
+       list_of_distances(number_of_subjob)%size_indices_2=give_number_of_specific_atoms(TRIM(element2))
+       WRITE(list_of_distances(number_of_subjob)%subjob_description,&
+       &'("Atom #",I0," in molecule type ",I0," -> ",I0," ",A," atoms.")')&
+       &atom_index_1,molecule_type_index_1,&
+       &list_of_distances(number_of_subjob)%size_indices_2,&
+       &TRIM(element2)
+       !Allocate and initialise memory for reference atom
+       ALLOCATE(list_of_distances(number_of_subjob)%indices_1(1,2),STAT=allocstatus)
+       IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+       list_of_distances(number_of_subjob)%indices_1(1,1)=molecule_type_index_1
+       list_of_distances(number_of_subjob)%indices_1(1,2)=atom_index_1
+       !Allocate and initialise memory for observed atom
+       ALLOCATE(list_of_distances(number_of_subjob)%indices_2(&
+       &list_of_distances(number_of_subjob)%size_indices_2,2),STAT=allocstatus)
+       IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+       CALL give_indices_of_specific_atoms(element2,list_of_distances(number_of_subjob)%indices_2)
+      ENDIF
+      !there is still only one closest distance.
+      list_of_distances(number_of_subjob)%weight=&
+      &give_number_of_molecules_per_step(molecule_type_index_1)
+     CASE (2)
+      READ(10,IOSTAT=ios,FMT=*) number_of_wildcards,element1,element2
+      IF (ios/=0) CALL report_error(0,exit_status=ios)
+      list_of_distances(number_of_subjob)%size_indices_1=&
+      &give_number_of_specific_atoms(TRIM(element1))
+      list_of_distances(number_of_subjob)%size_indices_2=&
+      &give_number_of_specific_atoms(TRIM(element2))
+      WRITE(list_of_distances(number_of_subjob)%subjob_description,&
+      &'("",I0," ",A," atoms -> ",I0," ",A," atoms.")')&
+      &list_of_distances(number_of_subjob)%size_indices_1,TRIM(element1),&
+      &list_of_distances(number_of_subjob)%size_indices_2,TRIM(element2)
+      !Allocate and initialise memory for reference atom
+      ALLOCATE(list_of_distances(number_of_subjob)%indices_1(&
+      &list_of_distances(number_of_subjob)%size_indices_1,2),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+      CALL give_indices_of_specific_atoms(element1,list_of_distances(number_of_subjob)%indices_1)
+      !Allocate and initialise memory for observed atom
+      ALLOCATE(list_of_distances(number_of_subjob)%indices_2(&
+      &list_of_distances(number_of_subjob)%size_indices_2,2),STAT=allocstatus)
+      IF (allocstatus/=0) CALL report_error(137,exit_status=allocstatus)
+      CALL give_indices_of_specific_atoms(element2,list_of_distances(number_of_subjob)%indices_2)
+      !Here, calculating the weights gets more challenging - especially for the intermolecular distances.
+      list_of_distances(number_of_subjob)%weight=count_wildcard_weights(number_of_subjob)
+     CASE DEFAULT
+      CALL report_error(0,exit_status=number_of_wildcards)
+     END SELECT
+     list_of_distances(number_of_subjob)%element1=give_element_symbol(&
+     &list_of_distances(number_of_subjob)%indices_1(1,1),&
+     &list_of_distances(number_of_subjob)%indices_1(1,2))
+     list_of_distances(number_of_subjob)%element2=give_element_symbol(&
+     &list_of_distances(number_of_subjob)%indices_2(1,1),&
+     &list_of_distances(number_of_subjob)%indices_2(1,2))
+    END SUBROUTINE prepare_subjob
+
+    SUBROUTINE goto_currentline()
+    IMPLICIT NONE
+    INTEGER :: i
+     REWIND 3
+     DO i=1,lines_to_skip,1
+      READ(3,IOSTAT=ios,FMT=*)
+      IF (ios/=0) CALL report_error(0,exit_status=ios) 
+     ENDDO
+    END SUBROUTINE goto_currentline
+
+    SUBROUTINE read_input_inter()!This subroutine reads and checks input
+    IMPLICIT NONE
+    CHARACTER (LEN=2) :: element1,element2 !wildcards for element names
+    INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2
+     !try and read the current line
+     DO
+      READ(3,IOSTAT=ios,FMT=*) molecule_type_index_1,atom_index_1,molecule_type_index_2,atom_index_2
+      IF (ios<0) EXIT
+      IF (ios/=0) THEN
+       CALL goto_currentline()
+       !test for first wildcard
+       READ(3,IOSTAT=ios,FMT=*) element1,molecule_type_index_2,atom_index_2
+       IF (ios<0) EXIT
+       IF (ios/=0) THEN
+        CALL goto_currentline()
+        !test for second wildcard
+        READ(3,IOSTAT=ios,FMT=*) molecule_type_index_1,atom_index_1,element2
+        IF (ios<0) EXIT
+        IF (ios/=0) THEN
+         CALL goto_currentline()
+         !test for both wildcards
+         READ(3,IOSTAT=ios,FMT=*) element1,element2
+         IF (ios<0) EXIT
+         IF (ios/=0) THEN
+          !possibility to print error message here.
+          EXIT
+         ELSE
+          !two wildcards!
+          lines_to_skip=lines_to_skip+1
+          IF (give_number_of_specific_atoms(element1)==0) THEN
+           CALL report_error(136)
+          ELSEIF (give_number_of_specific_atoms(element2)==0) THEN
+           CALL report_error(136)
+          ELSE
+           valid_lines=valid_lines+1
+           WRITE(10,*) 2,element1,element2
+          ENDIF
+         ENDIF
+        ELSE
+         lines_to_skip=lines_to_skip+1
+         IF ((atom_index_1<1).OR.(atom_index_1>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+          CALL report_error(111,exit_status=atom_index_1)
+         ELSEIF ((molecule_type_index_1<1).OR.(molecule_type_index_1>give_number_of_molecule_types())) THEN
+          CALL report_error(110,exit_status=molecule_type_index_1)
+         ELSEIF (give_number_of_specific_atoms(element2)==0) THEN
+          CALL report_error(136)
+         ELSE
+          valid_lines=valid_lines+1
+          WRITE(10,*) 1,molecule_type_index_1,atom_index_1,element2
+         ENDIF
+        ENDIF
+       ELSE
+        lines_to_skip=lines_to_skip+1
+        IF ((atom_index_2<1).OR.(atom_index_2>give_number_of_atoms_per_molecule(molecule_type_index_2))) THEN
+         CALL report_error(111,exit_status=atom_index_2)
+        ELSEIF ((molecule_type_index_2<1).OR.(molecule_type_index_2>give_number_of_molecule_types())) THEN
+         CALL report_error(110,exit_status=molecule_type_index_2)
+        ELSEIF (give_number_of_specific_atoms(element1)==0) THEN
+         CALL report_error(136)
+        ELSE
+         valid_lines=valid_lines+1
+         CALL report_error(140)
+         WRITE(10,*) 1,molecule_type_index_2,atom_index_2,element1
+        ENDIF
+       ENDIF
+      ELSE
+       !no wildcards
+       lines_to_skip=lines_to_skip+1
+       IF ((atom_index_1<1).OR.(atom_index_1>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+        CALL report_error(111,exit_status=atom_index_1)
+       ELSEIF ((atom_index_2<1).OR.(atom_index_2>give_number_of_atoms_per_molecule(molecule_type_index_2))) THEN
+        CALL report_error(111,exit_status=atom_index_2)
+       ELSEIF ((molecule_type_index_1<1).OR.(molecule_type_index_1>give_number_of_molecule_types())) THEN
+        CALL report_error(110,exit_status=molecule_type_index_1)
+       ELSEIF ((molecule_type_index_2<1).OR.(molecule_type_index_2>give_number_of_molecule_types())) THEN
+        CALL report_error(110,exit_status=molecule_type_index_2)
+       ELSEIF ((molecule_type_index_1==molecule_type_index_2).AND.&
+       &(give_number_of_molecules_per_step(molecule_type_index_1)==1)) THEN
+        CALL report_error(141)
+       ELSE
+        valid_lines=valid_lines+1
+        WRITE(10,*) 0,molecule_type_index_1,atom_index_1,molecule_type_index_2,atom_index_2
+       ENDIF
+      ENDIF
+      IF (lines_to_skip==(number_of_subjobs+1)) EXIT
+     ENDDO
+    END SUBROUTINE read_input_inter
+
+    SUBROUTINE read_input_intra()!This subroutine reads and checks input
+    IMPLICIT NONE
+    CHARACTER (LEN=2) :: element1,element2 !wildcards for element names
+    INTEGER :: molecule_type_index_1,atom_index_1,atom_index_2,i
+    LOGICAL :: valid_elements
+     !try and read the current line
+     DO
+      READ(3,IOSTAT=ios,FMT=*) molecule_type_index_1,atom_index_1,atom_index_2
+      IF (ios<0) EXIT
+      IF (ios/=0) THEN
+       CALL goto_currentline()
+       !test for first wildcard
+       READ(3,IOSTAT=ios,FMT=*) molecule_type_index_1,element1,atom_index_2
+       IF (ios<0) EXIT
+       IF (ios/=0) THEN
+        CALL goto_currentline()
+        !test for second wildcard
+        READ(3,IOSTAT=ios,FMT=*) molecule_type_index_1,atom_index_1,element2
+        IF (ios<0) EXIT
+        IF (ios/=0) THEN
+         CALL goto_currentline()
+         !test for both wildcards
+         READ(3,IOSTAT=ios,FMT=*) element1,element2
+         IF (ios<0) EXIT
+         IF (ios/=0) THEN
+          !possibility to print error message here.
+          EXIT
+         ELSE
+          !both wildcards
+          lines_to_skip=lines_to_skip+1
+          valid_elements=.FALSE.
+          DO i=1,give_number_of_molecule_types(),1
+           IF ((give_number_of_specific_atoms_per_molecule(i,TRIM(element1))>0)&
+           &.AND.(give_number_of_specific_atoms_per_molecule(i,TRIM(element2))>0)) THEN
+            valid_elements=.TRUE.
+            EXIT
+           ENDIF
+          ENDDO
+          IF (valid_elements) THEN
+           valid_lines=valid_lines+1
+           WRITE(10,*) 2,element1,element2
+          ELSE
+           CALL report_error(136)
+          ENDIF
+         ENDIF
+        ELSE
+         !second wildcard
+         lines_to_skip=lines_to_skip+1
+         IF ((atom_index_1<1).OR.(atom_index_1>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+          CALL report_error(111,exit_status=atom_index_1)
+         ELSEIF ((molecule_type_index_1<1).OR.(molecule_type_index_1>give_number_of_molecule_types())) THEN
+          CALL report_error(110,exit_status=molecule_type_index_1)
+         ELSEIF (give_number_of_specific_atoms_per_molecule(molecule_type_index_1,element2)==0) THEN
+          CALL report_error(136,molecule_type_index_1)
+         ELSE
+          valid_lines=valid_lines+1
+          WRITE(10,*) 1,molecule_type_index_1,atom_index_1,element2
+         ENDIF
+        ENDIF
+       ELSE
+        !first wildcard
+        lines_to_skip=lines_to_skip+1
+        IF ((atom_index_2<1).OR.(atom_index_2>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+         CALL report_error(111,exit_status=atom_index_2)
+        ELSEIF ((molecule_type_index_1<1).OR.(molecule_type_index_1>give_number_of_molecule_types())) THEN
+         CALL report_error(110,exit_status=molecule_type_index_1)
+        ELSEIF (give_number_of_specific_atoms_per_molecule(molecule_type_index_1,element1)==0) THEN
+         CALL report_error(136,molecule_type_index_1)
+        ELSE
+         CALL report_error(140)
+         valid_lines=valid_lines+1
+         WRITE(10,*) 1,molecule_type_index_1,atom_index_2,element1
+        ENDIF
+       ENDIF
+      ELSE
+       !no wildcards
+       lines_to_skip=lines_to_skip+1
+       IF ((atom_index_1<1).OR.(atom_index_1>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+        CALL report_error(111,exit_status=atom_index_1)
+       ELSEIF ((atom_index_2<1).OR.(atom_index_2>give_number_of_atoms_per_molecule(molecule_type_index_1))) THEN
+        CALL report_error(111,exit_status=atom_index_2)
+       ELSEIF (atom_index_2==atom_index_1) THEN
+        CALL report_error(111,exit_status=atom_index_2)
+       ELSEIF ((molecule_type_index_1<1).OR.(molecule_type_index_1>give_number_of_molecule_types())) THEN
+        CALL report_error(110,exit_status=molecule_type_index_1)
+       ELSE
+        valid_lines=valid_lines+1
+        WRITE(10,*) 0,molecule_type_index_1,atom_index_1,molecule_type_index_1,atom_index_2
+       ENDIF
+      ENDIF
+      IF (lines_to_skip==(number_of_subjobs+1)) EXIT
+     ENDDO
+    END SUBROUTINE read_input_intra
+
+  END SUBROUTINE initialise_distance
+
+  INTEGER FUNCTION count_wildcard_weights(number_of_subjob2)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: number_of_subjob2
+  INTEGER :: indices_counter_1,indices_counter_2
+  INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2
+   count_wildcard_weights=0
+   !two loops: over the reference atoms...
+   DO indices_counter_1=1,list_of_distances(number_of_subjob2)%size_indices_1,1
+    molecule_type_index_1=list_of_distances(number_of_subjob2)%indices_1(indices_counter_1,1)
+    atom_index_1=list_of_distances(number_of_subjob2)%indices_1(indices_counter_1,2)
+    !... and the observed atoms.
+    !Each reference atom will contribute to the weight IF it has at least one valid neighbour.
+    DO indices_counter_2=1,list_of_distances(number_of_subjob2)%size_indices_2,1
+     molecule_type_index_2=list_of_distances(number_of_subjob2)%indices_2(indices_counter_2,1)
+     atom_index_2=list_of_distances(number_of_subjob2)%indices_2(indices_counter_2,2)
+     IF (TRIM(operation_mode)=="intra") THEN
+      IF ((molecule_type_index_1==molecule_type_index_2).AND.(atom_index_1/=atom_index_2)) THEN
+       count_wildcard_weights=count_wildcard_weights+&
+       &give_number_of_molecules_per_step(molecule_type_index_1)
+       EXIT
+      ENDIF
+     ELSE
+      IF ((molecule_type_index_1/=molecule_type_index_2).OR.(atom_index_1/=atom_index_2)) THEN
+       count_wildcard_weights=count_wildcard_weights+&
+       &give_number_of_molecules_per_step(molecule_type_index_1)
+       EXIT
+      ELSEIF ((molecule_type_index_1==molecule_type_index_2).AND.(atom_index_1==atom_index_2)) THEN
+       IF (give_number_of_molecules_per_step(molecule_type_index_1)>1) THEN
+        count_wildcard_weights=count_wildcard_weights+&
+        &give_number_of_molecules_per_step(molecule_type_index_1)
+        EXIT
+       ENDIF
+      ENDIF
+     ENDIF
+    ENDDO
+   ENDDO
+  END FUNCTION count_wildcard_weights
+
+  !finalises the distance module.
+  SUBROUTINE finalise_distance()
+  IMPLICIT NONE
+  INTEGER :: deallocstatus
+   IF (ALLOCATED(list_of_distances)) THEN
+    DEALLOCATE(list_of_distances,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+  END SUBROUTINE finalise_distance
+
+  SUBROUTINE compute_intramolecular_distances(stdev_run)
+  IMPLICIT NONE
+  INTEGER :: stepcounter,subjob_counter,indices_counter_1,indices_counter_2,localweight
+  INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2,molecule_index
+  REAL :: distance_squared,closest_distance_squared,distance
+  REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev
+  LOGICAL :: valid_neighbour
+  LOGICAL,INTENT(IN) :: stdev_run
+  INTEGER(KIND=WORKING_PRECISION) :: localweight_ffc
+   !average over timesteps, a few should be enough
+   DO stepcounter=1,nsteps,sampling_interval
+    !iterating through the subjobs
+    DO subjob_counter=1,number_of_subjobs,1
+     localweight=0
+     local_closest=0.0d0
+     local_exponential=0.0d0
+     weight_exponential=0.0d0
+     local_exponential_stdev=0.0d0
+     local_ffc=0.0d0
+     localweight_ffc=0
+     DO indices_counter_1=1,list_of_distances(subjob_counter)%size_indices_1,1 !two loops: over the reference atoms...
+      molecule_type_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,1)
+      atom_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,2)
+      DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index_1),1
+       !Find the closest neighbour (=observed atom) for each molecule_index
+       closest_distance_squared=maxdist_squared
+       valid_neighbour=.FALSE.
+       !for the standard deviation, ensure values are reset before the loop over observed atoms
+       IF ((stdev_run).AND.(calculate_exponential)) THEN
+        local_exponential=0.0d0
+        weight_exponential=0.0d0
+       ENDIF
+       DO indices_counter_2=1,list_of_distances(subjob_counter)%size_indices_2,1 !... and the observed atoms.
+        molecule_type_index_2=list_of_distances(subjob_counter)%indices_2(indices_counter_2,1)
+        IF (molecule_type_index_1/=molecule_type_index_2) CYCLE !intramolecular distances only...
+        atom_index_2=list_of_distances(subjob_counter)%indices_2(indices_counter_2,2)
+        IF (atom_index_1/=atom_index_2) THEN
+         distance_squared=give_smallest_atom_distance_squared&
+         &(stepcounter,stepcounter,molecule_type_index_1,molecule_type_index_1,&
+         &molecule_index,molecule_index,atom_index_1,atom_index_2)
+         IF (distance_squared<maxdist_squared) THEN
+          !Atom pair is closer than cutoff
+          valid_neighbour=.TRUE.
+          IF (distance_squared<closest_distance_squared) THEN
+           closest_distance_squared=distance_squared
+          ENDIF
+          !include exp function
+          IF (calculate_exponential) THEN
+           distance=SQRT(distance_squared)
+           local_exponential=local_exponential+exp(-distance_exponent*distance)*distance
+           weight_exponential=weight_exponential+exp(-distance_exponent*distance)
+          ENDIF
+          IF (calculate_ffc) THEN
+           !eq (6) in the supporting information of J. Phys. Chem. Lett., 2020, 11, 2165–2170, DOI 10.1021/acs.jpclett.0c00087
+           !summing 1/(r^6) = 1/((r^2)^3)
+           local_ffc=local_ffc+1/((distance_squared)**3)
+           localweight_ffc=localweight_ffc+1
+          ENDIF
+         ENDIF
+        ENDIF
+       ENDDO
+       IF (valid_neighbour) THEN
+        localweight=localweight+1
+        IF (stdev_run) THEN
+         local_closest=local_closest+&
+         &(SQRT(closest_distance_squared)-list_of_distances(subjob_counter)%closest_average)**2
+         IF (calculate_exponential) THEN
+          local_exponential_stdev=local_exponential_stdev+&
+          &(local_exponential/weight_exponential-list_of_distances(subjob_counter)%exponential_average)**2
+         ENDIF
+        ELSE
+         local_closest=local_closest+SQRT(closest_distance_squared)
+        ENDIF
+       ELSE
+        list_of_distances(subjob_counter)%missed_neighbours=list_of_distances(subjob_counter)%missed_neighbours+1
+       ENDIF
+      ENDDO
+     ENDDO
+     !Update results for subjob
+     IF (stdev_run) THEN
+      list_of_distances(subjob_counter)%closest_stdev=&
+      &list_of_distances(subjob_counter)%closest_stdev+local_closest/FLOAT(localweight)
+      IF (calculate_exponential) list_of_distances(subjob_counter)%exponential_stdev=&
+      &list_of_distances(subjob_counter)%exponential_stdev+local_exponential_stdev/FLOAT(localweight)
+     ELSE
+      list_of_distances(subjob_counter)%closest_average=&
+      &list_of_distances(subjob_counter)%closest_average+local_closest/FLOAT(localweight)
+      IF ((list_of_distances(subjob_counter)%missed_neighbours+localweight)&
+      &/=(list_of_distances(subjob_counter)%weight)) THEN
+       CALL report_error(0)
+      ENDIF
+      IF (calculate_exponential) THEN
+       list_of_distances(subjob_counter)%exponential_average=&
+       &list_of_distances(subjob_counter)%exponential_average+local_exponential
+       list_of_distances(subjob_counter)%exponential_weight=&
+       &list_of_distances(subjob_counter)%exponential_weight+weight_exponential
+      ENDIF
+      IF (calculate_ffc) THEN
+       list_of_distances(subjob_counter)%ffc_average=&
+       &list_of_distances(subjob_counter)%ffc_average+local_ffc
+       list_of_distances(subjob_counter)%ffc_weight=&
+       &list_of_distances(subjob_counter)%ffc_weight+FLOAT(localweight_ffc)
+      ENDIF
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE compute_intramolecular_distances
+
+  SUBROUTINE compute_intermolecular_distances(stdev_run)
+  IMPLICIT NONE
+  INTEGER :: stepcounter,subjob_counter,indices_counter_1,indices_counter_2,localweight
+  INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2,molecule_index_1,molecule_index_2
+  REAL :: distance_squared,closest_distance_squared,distance
+  REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev
+  LOGICAL :: valid_neighbour
+  LOGICAL,INTENT(IN) :: stdev_run
+  INTEGER(KIND=WORKING_PRECISION) :: localweight_ffc
+   !average over timesteps, a few should be enough
+   DO stepcounter=1,nsteps,sampling_interval
+    !iterating through the subjobs
+    DO subjob_counter=1,number_of_subjobs,1
+     localweight=0
+     local_closest=0.0d0
+     local_exponential=0.0d0
+     weight_exponential=0.0d0
+     local_exponential_stdev=0.0d0
+     local_ffc=0.0d0
+     localweight_ffc=0
+     DO indices_counter_1=1,list_of_distances(subjob_counter)%size_indices_1,1 !two loops: over the reference atoms...
+      molecule_type_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,1)
+      atom_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,2)
+      DO molecule_index_1=1,give_number_of_molecules_per_step(molecule_type_index_1),1
+       !Find the closest neighbour (=observed atom) for each molecule_index_1
+       closest_distance_squared=maxdist_squared
+       valid_neighbour=.FALSE.
+       !for the standard deviation, ensure values are reset before the loop over observed atoms
+       IF ((stdev_run).AND.(calculate_exponential)) THEN
+        local_exponential=0.0d0
+        weight_exponential=0.0d0
+       ENDIF
+       DO indices_counter_2=1,list_of_distances(subjob_counter)%size_indices_2,1 !... and the observed atoms.
+        molecule_type_index_2=list_of_distances(subjob_counter)%indices_2(indices_counter_2,1)
+        atom_index_2=list_of_distances(subjob_counter)%indices_2(indices_counter_2,2)
+        DO molecule_index_2=1,give_number_of_molecules_per_step(molecule_type_index_2),1
+         IF ((molecule_index_1==molecule_index_2).AND.(molecule_type_index_1==molecule_type_index_2)) CYCLE
+         distance_squared=give_smallest_atom_distance_squared&
+         &(stepcounter,stepcounter,molecule_type_index_1,molecule_type_index_2,&
+         &molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
+         IF (distance_squared<maxdist_squared) THEN
+          !Atom pair is closer than cutoff
+          valid_neighbour=.TRUE.
+          IF (distance_squared<closest_distance_squared) THEN
+           closest_distance_squared=distance_squared
+          ENDIF
+          !include exp function
+          IF (calculate_exponential) THEN
+           distance=SQRT(distance_squared)
+           local_exponential=local_exponential+exp(-distance_exponent*distance)*distance
+           weight_exponential=weight_exponential+exp(-distance_exponent*distance)
+          ENDIF
+          IF (calculate_ffc) THEN
+           !eq (13) in the supporting information of J. Phys. Chem. Lett., 2020, 11, 2165–2170, DOI 10.1021/acs.jpclett.0c00087
+           !summing 1/(r^3)
+           distance=SQRT(distance_squared)
+           local_ffc=local_ffc+1/((distance)**3)
+           localweight_ffc=localweight_ffc+1
+          ENDIF
+         ENDIF
+        ENDDO
+       ENDDO
+       IF (valid_neighbour) THEN
+        localweight=localweight+1
+        IF (stdev_run) THEN
+         local_closest=local_closest+&
+         &(SQRT(closest_distance_squared)-list_of_distances(subjob_counter)%closest_average)**2
+         IF (calculate_exponential) THEN
+          local_exponential_stdev=local_exponential_stdev+&
+          &(local_exponential/weight_exponential-list_of_distances(subjob_counter)%exponential_average)**2
+         ENDIF
+        ELSE
+         local_closest=local_closest+SQRT(closest_distance_squared)
+        ENDIF
+       ELSE
+        list_of_distances(subjob_counter)%missed_neighbours=list_of_distances(subjob_counter)%missed_neighbours+1
+       ENDIF
+      ENDDO
+     ENDDO
+     !Update results for subjob
+     IF (stdev_run) THEN
+      list_of_distances(subjob_counter)%closest_stdev=&
+      &list_of_distances(subjob_counter)%closest_stdev+local_closest/FLOAT(localweight)
+      IF (calculate_exponential) list_of_distances(subjob_counter)%exponential_stdev=&
+      &list_of_distances(subjob_counter)%exponential_stdev+local_exponential_stdev/FLOAT(localweight)
+     ELSE
+      list_of_distances(subjob_counter)%closest_average=&
+      &list_of_distances(subjob_counter)%closest_average+local_closest/FLOAT(localweight)
+      IF ((list_of_distances(subjob_counter)%missed_neighbours+localweight)&
+      &/=(list_of_distances(subjob_counter)%weight)) THEN
+       CALL report_error(0)
+      ENDIF
+      IF (calculate_exponential) THEN
+       list_of_distances(subjob_counter)%exponential_average=&
+       &list_of_distances(subjob_counter)%exponential_average+local_exponential
+       list_of_distances(subjob_counter)%exponential_weight=&
+       &list_of_distances(subjob_counter)%exponential_weight+weight_exponential
+      ENDIF
+      IF (calculate_ffc) THEN
+       list_of_distances(subjob_counter)%ffc_average=&
+       &list_of_distances(subjob_counter)%ffc_average+local_ffc
+       list_of_distances(subjob_counter)%ffc_weight=&
+       &list_of_distances(subjob_counter)%ffc_weight+FLOAT(localweight_ffc)
+      ENDIF
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE compute_intermolecular_distances
+
+  SUBROUTINE report_distances()
+  IMPLICIT NONE
+  INTEGER :: subjob_counter
+   WRITE(*,'(" Done with ",A,"molecular distance calculation. Results:")') TRIM(operation_mode)
+   DO subjob_counter=1,number_of_subjobs,1
+    WRITE(*,'("   Subjob #",I0," out of ",I0,":")') subjob_counter,number_of_subjobs
+    WRITE(*,'("     ",A,"")') TRIM(list_of_distances(subjob_counter)%subjob_description)
+    IF (list_of_distances(subjob_counter)%missed_neighbours>0) THEN
+     WRITE(*,'("     ",I0," atoms without neighbour - consider increasing cutoff.")')&
+     &list_of_distances(subjob_counter)%missed_neighbours
+    ELSE
+     WRITE(*,'("     Used ",I0," reference atoms per step.")') list_of_distances(subjob_counter)%weight
+    ENDIF
+    CALL formatted_distance_output("average closest distance",list_of_distances(subjob_counter)%closest_average)
+    IF (calculate_stdev) CALL formatted_distance_output("standard deviation",list_of_distances(subjob_counter)%closest_stdev)
+    IF (calculate_exponential) THEN
+     CALL formatted_distance_output("exponentially weighed distance",list_of_distances(subjob_counter)%exponential_average)
+     IF (calculate_stdev) CALL formatted_distance_output("standard deviation",list_of_distances(subjob_counter)%exponential_stdev)
+    ENDIF
+    IF (calculate_ffc) THEN
+     IF (TRIM(operation_mode)=="intra") THEN
+      !"ffc" calculates rXX
+      CALL formatted_distance_output(&
+      &"FFC distance r"//TRIM(list_of_distances(subjob_counter)%element1)//&
+      &TRIM(list_of_distances(subjob_counter)%element2),&
+      &list_of_distances(subjob_counter)%ffc_average)
+      CALL formatted_distance_output("Number of averages for FFC: ",&
+      &list_of_distances(subjob_counter)%ffc_weight)
+     ELSE
+      !"ffc" calculates dXX
+      CALL formatted_distance_output(&
+      &"FFC distance d"//TRIM(list_of_distances(subjob_counter)%element1)//&
+      &TRIM(list_of_distances(subjob_counter)%element2),&
+      &list_of_distances(subjob_counter)%ffc_average)
+      CALL formatted_distance_output("Number of averages for FFC: ",&
+      &list_of_distances(subjob_counter)%ffc_weight)
+     ENDIF
+    ENDIF
+   ENDDO
+   WRITE(*,'(" ( reference atom(s) -> observed atom(s) )")')
+  CONTAINS
+
+   SUBROUTINE formatted_distance_output(description,distance)
+   IMPLICIT NONE
+   REAL(KIND=WORKING_PRECISION),INTENT(IN) :: distance
+   CHARACTER(LEN=*),INTENT(IN) :: description
+    WRITE(*,FMT='("     ",A,": ")',ADVANCE="NO") TRIM(description)
+    IF (distance>1000.0) THEN
+     WRITE(*,'(E9.3)') distance
+    ELSEIF (distance>1.0) THEN
+     WRITE(*,'(F0.3)') distance
+    ELSEIF (distance>0.01) THEN
+     WRITE(*,'(F5.3)') distance
+    ELSE
+     WRITE(*,'(E9.3)') distance
+    ENDIF
+   END SUBROUTINE formatted_distance_output
+
+  END SUBROUTINE report_distances
+
+  SUBROUTINE perform_distance_analysis()
+  IMPLICIT NONE
+   CALL initialise_distance()
+   IF ((ERROR_CODE/=134).AND.(ERROR_CODE/=139)) THEN
+    WRITE(*,'(" Using ",I0," timesteps in intervals of ",I0," for averaging.")')&
+    &MAX((nsteps-1+sampling_interval)/sampling_interval,0),sampling_interval
+    WRITE(*,'(" calculating average ",A,"molecular distances.")')TRIM(operation_mode)
+    !initialise averages
+    list_of_distances(:)%closest_average=0.0d0
+    list_of_distances(:)%closest_stdev=0.0d0
+    list_of_distances(:)%exponential_average=0.0d0
+    list_of_distances(:)%exponential_stdev=0.0d0
+    list_of_distances(:)%exponential_weight=0.0d0
+    list_of_distances(:)%missed_neighbours=0
+    list_of_distances(:)%ffc_average=0.0d0
+    list_of_distances(:)%ffc_weight=0.0d0
+    SELECT CASE (TRIM(operation_mode))
+    CASE ("intra")
+     CALL compute_intramolecular_distances(.FALSE.)
+    CASE ("inter")
+     CALL compute_intermolecular_distances(.FALSE.)
+    CASE DEFAULT
+     CALL report_error(0)
+    END SELECT
+    !post-processing
+    list_of_distances(:)%closest_average=&
+    &list_of_distances(:)%closest_average/FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+    IF (calculate_exponential) list_of_distances(:)%exponential_average=&
+    &list_of_distances(:)%exponential_average/list_of_distances(:)%exponential_weight
+    IF (calculate_ffc) THEN
+     list_of_distances(:)%ffc_average=&
+     &list_of_distances(:)%ffc_average/list_of_distances(:)%ffc_weight
+     IF (TRIM(operation_mode)=="intra") THEN
+      list_of_distances(:)%ffc_average=&
+      &list_of_distances(:)%ffc_average**(-1.0/6.0)
+     ELSE
+      list_of_distances(:)%ffc_average=&
+      &list_of_distances(:)%ffc_average**(-1.0/3.0)
+     ENDIF
+    ENDIF
+    !calculate standard deviation if necessary
+    IF (calculate_stdev) THEN
+     IF (VERBOSE_OUTPUT) WRITE(*,'(" calculating standard deviations.")')
+     SELECT CASE (TRIM(operation_mode))
+     CASE ("intra")
+      CALL compute_intramolecular_distances(.TRUE.)
+     CASE ("inter")
+      CALL compute_intermolecular_distances(.TRUE.)
+     CASE DEFAULT
+      CALL report_error(0)
+     END SELECT
+     !post-processing
+     list_of_distances(:)%closest_stdev=&
+     &SQRT(list_of_distances(:)%closest_stdev/FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0)))
+     IF (calculate_exponential) list_of_distances(:)%exponential_stdev=&
+     &SQRT(list_of_distances(:)%exponential_stdev/FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0)))
+    ENDIF
+    CALL report_distances()
+    CALL finalise_distance()
+   ELSE
+    ERROR_CODE=ERROR_CODE_DEFAULT
+   ENDIF
+  END SUBROUTINE perform_distance_analysis
+
+END MODULE DISTANCE
+!--------------------------------------------------------------------------------------------------------------------------------!
 !This is the main program unit. the MOLECULAR, DEBUG and ANGLES modules are general purpose, everything else is invoked as specified in general.inp
 RECURSIVE SUBROUTINE initialise_global()
 USE MOLECULAR
@@ -12860,10 +13932,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *, "   #######################"
   PRINT *
  ENDIF
- PRINT *, "   Copyright (C) 2020 Frederik Philippi (Tom Welton Group)"
+ PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 22_Oct_2020"
+ PRINT *, "   Date of Release: 08_Feb_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -12947,7 +14019,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
        IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting sequential_read to default."
        READ_SEQUENTIAL=READ_SEQUENTIAL_DEFAULT!setting to default
       ELSE
-       IF (TRIM(inputstring)=="sequential_read") THEN
+       IF ((TRIM(inputstring)=="sequential_read").OR.(TRIM(inputstring)=="read_sequential")) THEN
         READ_SEQUENTIAL=input_condition
        ELSE
         CALL report_error(0)
@@ -14347,6 +15419,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   USE DIFFUSION
   USE AUTOCORRELATION
   USE DISTRIBUTION
+  USE DISTANCE
   IMPLICIT NONE
   LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
   INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index
@@ -15133,6 +16206,7 @@ USE AUTOCORRELATION
 USE DIFFUSION
 USE SETTINGS
 USE DISTRIBUTION
+USE DISTANCE
 IMPLICIT NONE
   !$ INTERFACE
   !$  FUNCTION OMP_get_num_threads()
@@ -15783,12 +16857,9 @@ INTEGER :: ios,n
     CASE ("DEBUG")
      !Here is some space for testing stuff
      WRITE(*,*) "################################"
-      startstep=1
-      endstep=give_number_of_timesteps()
-      CALL check_timesteps(startstep,endstep)
-      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
-     CALL remove_cores(startstep,endstep,TRAJECTORY_TYPE)
-     !update_com,startstep_in,endstep_in,molecule_type_index_1,molecule_index_1,molecule_type_index_2,neighbour_num
+     CALL perform_distance_analysis()
+     FILENAME_DISTANCE_INPUT="intra.inp"
+     CALL perform_distance_analysis()
      WRITE(*,*) "################################"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
@@ -15841,6 +16912,7 @@ INTEGER :: ios,n
    WRITE(*,*) '   AUTOCORRELATION "',TRIM(FILENAME_AUTOCORRELATION_INPUT),'"'
    WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
    WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
+   WRITE(*,*) '   DISTANCE        "',TRIM(FILENAME_DISTANCE_INPUT),'"'
    WRITE(*,*) "Paths:"
    WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
    WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'
@@ -15973,7 +17045,7 @@ INTEGER :: deallocstatus
  IF (DISCONNECTED) CLOSE(UNIT=6)
 END SUBROUTINE finalise_command_line_arguments
 
-PROGRAM PREALPHA ! Copyright (C) 2020 Frederik Philippi
+PROGRAM PREALPHA ! Copyright (C) 2021 Frederik Philippi
 USE SETTINGS
 USE MOLECULAR
 USE DEBUG
