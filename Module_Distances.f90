@@ -42,16 +42,144 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: maxdist_squared=maxdist_default**2
 	REAL :: distance_exponent=1.0 !exponent for distance weighing with exp(-distance_exponent*distance)
 	!PRIVATE/PUBLIC declarations
-	PUBLIC :: write_simple_intramolecular_distances,perform_distance_analysis
+	PUBLIC :: write_simple_intramolecular_distances,write_simple_intermolecular_distances,perform_distance_analysis,user_distance_input
 
 	CONTAINS
 
 		!WRITING input file to unit 8, which shouldn't be open.
-		!has to be compliant with 'read_input_for_distance'
-		SUBROUTINE write_simple_intramolecular_distances()
+		!has to be compliant with 'initialise_distance'
+		SUBROUTINE user_distance_input(maxmol,filename_distance)
 		IMPLICIT NONE
-		LOGICAL :: file_exists,connected
-		INTEGER :: n,ios
+		CHARACTER (LEN=*) :: filename_distance
+		CHARACTER (LEN=2) :: element1,element2
+		LOGICAL :: connected
+		INTEGER :: n,ios,molecule_type_index,atom_index
+		INTEGER,INTENT(IN) :: maxmol
+			PRINT *,"Generating input for average distances."
+
+			PRINT *,"This feature reports an average of the distance between reference and observed atoms."
+			PRINT *,"the reference and observed atoms can also be element names as wildcards, such as 'H' or 'F'."
+			PRINT *,"Intra- or intermolecular distances are possible."
+			PRINT *,"Would you like to request intramolecular (y) or intermolecular (n) distances?"
+			IF (user_input_logical()) THEN
+				operation_mode="intra"
+			ELSE
+				operation_mode="inter"
+			ENDIF
+			WRITE(*,'(" How many ",A,"molecular distances would you like to calculate?")') TRIM(operation_mode)
+			PRINT *,"Please enter the number of subjobs as integer."
+			number_of_subjobs=user_input_integer(1,100000)
+			WRITE(*,'(" opening distance input file...")')
+			INQUIRE(UNIT=8,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=8)
+			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_distance),IOSTAT=ios)
+			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			WRITE(8,'(" ",A,"molecular ",I0," ### average ",A,"molecular distances.")')&
+			&TRIM(operation_mode),number_of_subjobs,TRIM(operation_mode)
+			DO n=1,number_of_subjobs,1
+				WRITE(*,'(" Reading subjob number ",I0,"...")') n
+				PRINT *,"Do you want to use a wildcard for the reference atom?"
+				PRINT *,"(For example 'all H atoms' / all atoms with element label 'H') "
+				PRINT *,"(If no (n), you will be asked to give a specific atom_index."
+				IF (user_input_logical()) THEN
+					PRINT *,"Please enter the desired wildcard / element name for the reference atoms."
+					element1=user_input_string(2)
+					PRINT *,"Please enter the desired wildcard / element name for the observed atoms."
+					element2=user_input_string(2)
+					WRITE(8,'(" ",A," ",A," ### consider ",A,"-",A," distances.")')&
+					&TRIM(element1),TRIM(element2),TRIM(element1),TRIM(element2)
+				ELSE
+					PRINT *,"Please enter the molecule_type_index of the reference atom."
+					molecule_type_index=user_input_integer(1,maxmol)
+					PRINT *,"Please enter the atom_index of the reference atom."
+					atom_index=user_input_integer(1,100000)
+					WRITE(8,FMT='(" ",I0," ",I0," ")',ADVANCE="NO") molecule_type_index,atom_index
+					PRINT *,"Do you want to use a wildcard for the observed atom?"
+					IF (user_input_logical()) THEN
+						!use wildcard
+						PRINT *,"Please enter the desired wildcard / element name for the observed atoms."
+						element2=user_input_string(2)
+						WRITE(8,'(A," ### atom #",I0," in molecule type #",I0," --> ",A," atoms")')&
+						&TRIM(element2),atom_index,molecule_type_index,TRIM(element2)
+					ELSE
+						!use specific atom. only intermolecular analysis needs extra molecule type index.
+						IF (TRIM(operation_mode)=="inter") THEN
+							PRINT *,"Please enter the molecule_type_index of the observed atom."
+							molecule_type_index=user_input_integer(1,maxmol)
+							WRITE(8,FMT='(I0," ")',ADVANCE="NO") molecule_type_index
+						ENDIF
+						PRINT *,"Please enter the atom_index of the observed atom."
+						atom_index=user_input_integer(1,100000)
+						WRITE(8,'(I0," ### distance between two specific atoms")') atom_index
+					ENDIF
+				ENDIF
+			ENDDO
+			!At this point, subjobs should be written.
+			!Thus, continue with reading in the switches:
+			PRINT *,"Would you like to also calculate standard deviations?"
+			calculate_stdev=user_input_logical()
+			IF (calculate_stdev) THEN
+				WRITE(8,'(" stdev T ### calculate standard deviations where reasonable.")')
+			ELSE
+				WRITE(8,'(" stdev F ### do not calculate standard deviations.")')
+			ENDIF
+			PRINT *,"Would you like to also calculate the FFC distances?"
+			PRINT *,"(see ESI of J. Phys. Chem. Lett., 2020, 11, 2165–2170.)"
+			calculate_ffc=user_input_logical()
+			IF (calculate_ffc) THEN
+				WRITE(8,'(" ffc T ### calculate distances as used in FFC.")')
+			ELSE
+				WRITE(8,'(" ffc F ### calculate distances as used in FFC.")')
+			ENDIF
+			PRINT *,"Would you like to calculate exponentially weighed average distances?"
+			PRINT *,"i.e. average distance = SUM(exp(-k*r)*r)/SUM(exp(-k*r))"
+			PRINT *,"(sum runs over valid neighbours within cutoff, r is the distance.)"
+			calculate_exponential=user_input_logical()
+			IF (calculate_exponential) THEN
+				WRITE(8,'(" average_exponential T ### also report average distance weighed with exp(-k*r).")')
+				PRINT *,"Please enter the exponent 'k'."
+				PRINT *,"(if you have no idea, '1.0' will do)"
+				distance_exponent=user_input_real(0.1,100.0)
+				WRITE(8,'(" exponent ",E12.5," ### defines the exponent k in exp(-k*r).")') distance_exponent
+			ELSE
+				WRITE(8,'(" average_exponential F ### do not calculate exponentially weighed averages.")')
+			ENDIF
+			PRINT *,"Would you like to change advanced settings?"
+			PRINT *,"These are sampling interval, range of timesteps and distance cutoff."
+			IF (user_input_logical()) THEN
+				PRINT *,"Every how many steps would you like to use?"
+				WRITE(*,'(A,I0,A)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+				sampling_interval=user_input_integer(1,1000)
+				WRITE(8,'(" sampling_interval ",I0," ### use every this many steps.")')sampling_interval
+				PRINT *,"What is the largest timestep you would like to use?"
+				nsteps=user_input_integer(1,10000)
+				WRITE(8,'(" nsteps ",I0," ### defines largest timestep to consider.")')nsteps
+				PRINT *,"You need to choose a maximum distance cutoff."
+				PRINT *,"Pairs of atoms with larger distance will be ignored."
+				PRINT *,"It is possible to use half the box length. Would you like to use that shortcut? (y/n)"
+				IF (user_input_logical()) THEN
+					WRITE(8,'(" maxdist_optimize ### take half the box length as cutoff.")')
+				ELSE
+					PRINT *,"Please enter the cutoff / maximum distance."
+					maxdist=user_input_real(1.0,1000.0)
+					WRITE(8,'(" maxdist ",E12.5," ### use specific cutoff distance.")') maxdist
+				ENDIF
+			ENDIF
+			WRITE(8,*) "quit"
+			WRITE(8,*)
+			WRITE(8,*) "This is an input file for the calculation of average distances."
+			WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
+			ENDFILE 8
+			CLOSE(UNIT=8)
+			WRITE(*,*) "...done"
+		END SUBROUTINE user_distance_input
+
+		!WRITING input file to unit 8, which shouldn't be open.
+		!has to be compliant with 'read_input_for_distance'
+		LOGICAL FUNCTION write_simple_intramolecular_distances()
+		IMPLICIT NONE
+		LOGICAL :: file_exists,connected,H_available,F_available
+		INTEGER :: n,ios,molecule_type_index
 			FILENAME_DISTANCE_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
 			IF (file_exists) CALL report_error(114)
@@ -59,10 +187,86 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (connected) CALL report_error(27,exit_status=8)
 			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),IOSTAT=ios)
 			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			!look if there are reasonable intramolecular pairs
+			H_available=.FALSE.
+			F_available=.FALSE.
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				IF (give_number_of_specific_atoms_per_molecule(molecule_type_index,"H")>1) H_available=.TRUE.
+				IF (give_number_of_specific_atoms_per_molecule(molecule_type_index,"F")>1) F_available=.TRUE.
+			ENDDO
+			n=0
+			IF (H_available) n=n+1
+			IF (F_available) n=n+1
+			WRITE(8,'("intra ",I0)') n
+			IF (n==0) THEN
+				write_simple_intramolecular_distances=.FALSE.
+				CLOSE(UNIT=8)
+				RETURN
+			ELSE
+				write_simple_intramolecular_distances=.TRUE.
+			ENDIF
+			IF (H_available) WRITE(8,'("H H")')
+			IF (F_available) WRITE(8,'("F F")')
+			WRITE(8,'("exponential_weight T")')
+			WRITE(8,'("ffc T")')
+			WRITE(8,'("stdev T")')
+			IF (give_number_of_timesteps()>5) THEN
+				WRITE(8,'("nsteps 5")')
+			ELSE
+				WRITE(8,'("nsteps ",I0)') give_number_of_timesteps()
+			ENDIF
+			WRITE(8,'("cutoff_optimize")')
 			WRITE(8,'("quit")')
 			CLOSE(UNIT=8)
 			IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
-		END SUBROUTINE write_simple_intramolecular_distances
+		END FUNCTION write_simple_intramolecular_distances
+
+		!WRITING input file to unit 8, which shouldn't be open.
+		!has to be compliant with 'read_input_for_distance'
+		LOGICAL FUNCTION write_simple_intermolecular_distances()
+		IMPLICIT NONE
+		LOGICAL :: file_exists,connected,H_available,F_available
+		INTEGER :: n,ios,molecule_type_index
+			FILENAME_DISTANCE_INPUT="prealpha_simple.inp"
+			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
+			IF (file_exists) CALL report_error(114)
+			INQUIRE(UNIT=8,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=8)
+			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),IOSTAT=ios)
+			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			!look if there are reasonable intramolecular pairs
+			H_available=.FALSE.
+			F_available=.FALSE.
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				IF (give_number_of_specific_atoms("H")>1) H_available=.TRUE.
+				IF (give_number_of_specific_atoms("F")>1) F_available=.TRUE.
+			ENDDO
+			n=0
+			IF (H_available) n=n+1
+			IF (F_available) n=n+1
+			WRITE(8,'("inter ",I0)') n
+			IF (n==0) THEN
+				write_simple_intermolecular_distances=.FALSE.
+				CLOSE(UNIT=8)
+				RETURN
+			ELSE
+				write_simple_intermolecular_distances=.TRUE.
+			ENDIF
+			IF (H_available) WRITE(8,'("H H")')
+			IF (F_available) WRITE(8,'("F F")')
+			WRITE(8,'("exponential_weight T")')
+			WRITE(8,'("ffc T")')
+			WRITE(8,'("stdev T")')
+			IF (give_number_of_timesteps()>10) THEN
+				WRITE(8,'("nsteps 10")')
+			ELSE
+				WRITE(8,'("nsteps ",I0)') give_number_of_timesteps()
+			ENDIF
+			WRITE(8,'("cutoff_optimize")')
+			WRITE(8,'("quit")')
+			CLOSE(UNIT=8)
+			IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+		END FUNCTION write_simple_intermolecular_distances
 
 		SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
 		IMPLICIT NONE
@@ -118,7 +322,12 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				END SELECT
 				IF (VERBOSE_OUTPUT) WRITE(*,'(" Successfully read ",I0,"/",I0," custom distance jobs.")')valid_lines,number_of_subjobs
 				number_of_subjobs=valid_lines
-				IF (number_of_subjobs==0) CALL report_error(139)
+				IF (number_of_subjobs==0) THEN
+					CALL report_error(139)
+					CLOSE(UNIT=3)
+					CLOSE(UNIT=10)
+					RETURN
+				ENDIF
 				!allocate memory for the subjobs,...
 				IF (ALLOCATED(list_of_distances)) CALL report_error(0)
 				ALLOCATE(list_of_distances(number_of_subjobs),STAT=allocstatus)
@@ -187,6 +396,21 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 									WRITE(*,*)"(r=distance, k can be set with 'exponent')"
 								ELSE
 									WRITE(*,'(" Turned off averaged distances with exponential weights.")')
+								ENDIF
+							ENDIF
+						CASE ("stdev","standard_deviation","standarddev")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,calculate_stdev
+							IF (ios/=0) THEN
+								CALL report_error(142,exit_status=ios)
+								calculate_stdev=calculate_stdev_default
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+								&" setting 'calculate_stdev' to default (",calculate_stdev,")"
+							ELSE
+								IF (calculate_stdev) THEN
+									WRITE(*,'(" Also calculate standard deviations, where applicable.")')
+								ELSE
+									WRITE(*,'(" Turned off calculation of standard deviation.")')
 								ENDIF
 							ENDIF
 						CASE ("ffc_weight","weigh_ffc","calculate_ffc","average_ffc","ffc","dhh","rhh")
@@ -808,10 +1032,6 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ELSE
 						list_of_distances(subjob_counter)%closest_average=&
 						&list_of_distances(subjob_counter)%closest_average+local_closest/FLOAT(localweight)
-						IF ((list_of_distances(subjob_counter)%missed_neighbours+localweight)&
-						&/=(list_of_distances(subjob_counter)%weight)) THEN
-							CALL report_error(0)
-						ENDIF
 						IF (calculate_exponential) THEN
 							list_of_distances(subjob_counter)%exponential_average=&
 							&list_of_distances(subjob_counter)%exponential_average+local_exponential
@@ -855,7 +1075,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						&"FFC distance r"//TRIM(list_of_distances(subjob_counter)%element1)//&
 						&TRIM(list_of_distances(subjob_counter)%element2),&
 						&list_of_distances(subjob_counter)%ffc_average)
-						CALL formatted_distance_output("Number of averages for FFC: ",&
+						CALL formatted_distance_output("Number of averages for FFC",&
 						&list_of_distances(subjob_counter)%ffc_weight)
 					ELSE
 						!"ffc" calculates dXX
@@ -863,7 +1083,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						&"FFC distance d"//TRIM(list_of_distances(subjob_counter)%element1)//&
 						&TRIM(list_of_distances(subjob_counter)%element2),&
 						&list_of_distances(subjob_counter)%ffc_average)
-						CALL formatted_distance_output("Number of averages for FFC: ",&
+						CALL formatted_distance_output("Number of averages for FFC",&
 						&list_of_distances(subjob_counter)%ffc_weight)
 					ENDIF
 				ENDIF

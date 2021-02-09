@@ -11,11 +11,12 @@ IMPLICIT NONE
 LOGICAL :: file_exists,connected,smalltask!'smalltask' means that the analysis can be run on a login node (usually)
 LOGICAL :: anytask !is there any task at all?
 LOGICAL :: wrapping_is_sensible!this variable is initialised to .TRUE., and set to .FALSE. as soom as something like msd is requested.
-CHARACTER(LEN=1024) :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
-CHARACTER(LEN=1024) :: filename_vc_components="vc_components.inp",filename_cacf_components="cacf_components.inp" !correlation module standard filenames
-CHARACTER(LEN=1024) :: filename_conductivity="conductivity.inp"!correlation module standard filenames
-CHARACTER(LEN=1024) :: filename_msd="diffusion.inp" !diffusion module standard filename
-CHARACTER(LEN=1024) :: filename_distribution="distribution.inp" !distribution module standard filename
+CHARACTER(LEN=*),PARAMETER :: filename_rmmvcf="rmmvcf.inp",filename_dihedral="dihedral.inp",filename_reorient="reorient.inp" !correlation module standard filenames
+CHARACTER(LEN=*),PARAMETER :: filename_vc_components="vc_components.inp",filename_cacf_components="cacf_components.inp" !correlation module standard filenames
+CHARACTER(LEN=*),PARAMETER :: filename_conductivity="conductivity.inp"!correlation module standard filenames
+CHARACTER(LEN=*),PARAMETER :: filename_msd="diffusion.inp" !diffusion module standard filename
+CHARACTER(LEN=*),PARAMETER :: filename_distribution="distribution.inp" !distribution module standard filename
+CHARACTER(LEN=*),PARAMETER :: filename_distance="distance.inp" !distance module standard filename
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
 	CALL set_default_masses()
@@ -460,6 +461,15 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"   This feature is also capable of calculating Sum Rules and Coulomb interaction energies."
 			PRINT *,"   Number integrals and radial distribution functions are also printed."
 			PRINT *
+			PRINT *,"   Average distances:"
+			PRINT *,"   Calculates the average closest distance between a reference atom and an observed atom."
+			PRINT *,"   Reference and observed atom can either be specific (i.e. a certain molecule_type_index and atom_index),"
+			PRINT *,"   or they can be of a certain type (such as 'H' or 'F')."
+			PRINT *,"   Two modi are available: intermolecular or intramolecular distances. Also available are:"
+			PRINT *,"    - exponentially weighed averaged distances ( weighed with exp(-k*r) )"
+			PRINT *,"    - distances used in FFC theory, using eq (6) and (13) in the ESI of J. Phys. Chem. Lett., 2020, 11, 2165–2170."
+			PRINT *,"    - standard deviations of closest distances and exponentially weighed distances."
+			PRINT *
 			PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
 			PRINT *,"Some of the more demanding routines exist also in a parallelised version."
 			PRINT *,"(see option '4' in the main menu for more information about parallelisation)"
@@ -642,6 +652,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'dihedral'      (requests feature 'Dihedral Conditions')"
 			PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
 			PRINT *," - 'distribution'  (requests feature 'polar/cylindrical distribution function) (simple mode available)"
+			PRINT *," - 'distance'      (requests feature 'Average distances') (simple mode available)"
 			PRINT *
 			PRINT *,"Molecular input file:"
 			PRINT *,"This file contains information about the system, located in the same folder as the executable"
@@ -888,6 +899,48 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory."
 			PRINT *," - 'quit'"
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+			PRINT *
+			PRINT *,"Distance Input File:"
+			PRINT *,"The first line must state the type of analysis, i.e. either 'intramolecular' or 'intermolecular',"
+			PRINT *,"followed by the number of subjobs as an integer."
+			PRINT *,"The following lines, one for each subjob, describe which atoms are reference and observed atoms."
+			PRINT *,"For intramolecular analysis, you need to specify one of these for every subjob:"
+			PRINT *," - Three integers: the molecule type index and the two atom indices for reference and observed atom, for example "
+			PRINT *,"   '3 1 2' calculates closest intramolecular distances for the atoms with indices 1 and 2 in molecule type 3."
+			PRINT *," - two integers and an element name, acting as wildcard."
+			PRINT *,"   The program will automatically consider all atoms of that type."
+			PRINT *,"   for example '3 1 H' uses all H atoms in molecule type 3 as observed atoms."
+			PRINT *," - two element names, such as 'H H'."
+			PRINT *,"   Note that this type of analysis averages over all possible intramolecular combinations,"
+			PRINT *,"   if you have more than one molecule type containing hydrogen atoms,"
+			PRINT *,"   then you will obtain an average over all of these."
+			PRINT *,"The same principles apply for intermolecular distance analyses,"
+			PRINT *,"only that the second molecule type index needs to be given:"
+			PRINT *," - Four integers: the molecule type index and atom index for the reference atom"
+			PRINT *,"   and the molecule type index and atom index for the observed atom."
+			PRINT *,"   Note that even if the molecule type indices are the same, the analysis is still intermolecular."
+			PRINT *,"   (and thus makes only sense if there are at least two molecules of that type)."
+			PRINT *," - two integers and an element name, acting as wildcard."
+			PRINT *,"   The program will automatically consider all atoms of that type."
+			PRINT *,"   For example '3 1 H' uses all H atoms in all molecule types as observed atoms."
+			PRINT *," - two element names, such as 'H H'."
+			PRINT *,"   Note that this type of analysis averages over all possible intermolecular combinations."
+			PRINT *,"After the subjob section, the following switches may be used:"
+			PRINT *," - 'quit' Terminates the analysis. Lines after this switch are ignored."
+			PRINT *," - 'maxdist': Expects one real number, which is the maximum distance / cutoff to consider."
+			PRINT *," - 'maxdist_optimize': sets the cutoff to half the box size."
+			PRINT *," - 'nsteps': Followed by one integer, which is interpreted as the highest timestep number to consider."
+			PRINT *," - 'sampling_interval': Expects one integer - the sampling interval,"
+			PRINT *,"    i.e. every this many steps of the trajectory will be used."
+			PRINT *," - 'ffc': expects a logical ('T' or 'F'). If 'T', then the average distances used for FFC are calculated"
+			PRINT *,"    (i.e. dHH and rHH depending on the operation mode.)"
+			PRINT *,"    Note that this average does not converge, which is not my fault."
+			PRINT *," - 'calculate_exponential': expects a logical ('T' or 'F'). If 'T',"
+			PRINT *,"    then the weighted average distances are also calculated."
+			PRINT *,"    The weights are exp(-kr), where r is the distance and k is a constant defaulting to 1."
+			PRINT *," - 'exponent': sets the exponent 'k' for the exponentially weighed average."
+			PRINT *," - 'standard_deviation': expects a logical ('T' or 'F')."
+			PRINT *,"    If 'T', then the standard deviation is - where reasonable - calculated."
 			PRINT *
 		END SUBROUTINE explain_input_files
 
@@ -1586,7 +1639,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 16 - Print information about drude particles."
 				PRINT *," 17 - Compute ensemble average of radius of gyration."
 				PRINT *," 18 - Write trajectory with drude particles merged into cores."
-				PRINT *," 19 - Calculate close contact distances (inter- and intramolecular)."
+				PRINT *," 19 - Calculate close contact distances (inter- and intramolecular). See also #28"
 				PRINT *," 20 - Calculate polar or cylindrical distribution function."
 				PRINT *," 21 - Jump analysis / jump velocity distribution"
 				PRINT *," 22 - Print atomic masses (in format suitable for a molecular input file)"
@@ -1595,7 +1648,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 25 - Print atomic charges (in format suitable for a molecular input file)"
 				PRINT *," 26 - Calculate dipole moment statistics from first timestep."
 				PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
-				SELECT CASE (user_input_integer(0,27))
+				PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
+				SELECT CASE (user_input_integer(0,28))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2131,6 +2185,31 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
 					&TRIM(fstring),startstep,endstep
 					CALL append_string(fstring)
+				CASE (28)!distances, usually rHH, dHH, rFF, dFF
+					smalltask=.FALSE.
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+					PRINT *,"Would you like to take this shortcut? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("distances_simple ### intra- and intermolecular H-H and F-F distances, where available.")
+						CYCLE
+					ELSE
+						IF (number_of_molecules<1) THEN
+							maxmol=10000!unknown molecule number... expect the worst.
+						ELSE
+							maxmol=number_of_molecules
+						ENDIF
+						CALL user_distance_input(maxmol,filename_distance)
+						CALL append_string('distance "'//TRIM(OUTPUT_PREFIX)//&
+						&TRIM(filename_distance)//'" ### compute distances')
+						!enough information for the analysis.
+						SKIP_ANALYSIS=.FALSE.
+					ENDIF
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -2847,6 +2926,32 @@ INTEGER :: ios,n
 					CALL perform_autocorrelation()
 				CASE ("correlation_simple")
 					CALL report_error(113)
+				CASE ("distance","distances") !Module DISTANCE
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					BACKSPACE 7
+					READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
+					IF (ios/=0) THEN
+						CALL report_error(19,exit_status=ios)
+						EXIT
+					ENDIF
+					FILENAME_DISTANCE_INPUT=dummy
+					WRITE(*,*) "distance module invoked."
+					CALL perform_distance_analysis()
+				CASE ("distance_simple","distances_simple") !Module DISTANCE
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					WRITE(*,*) "Calculating, where possible, intra- and intermolecular distances for H and F."
+					IF (write_simple_intramolecular_distances()) THEN
+						WRITE(*,*) "Intramolecular distance calculation, simple mode:"
+						CALL perform_distance_analysis()
+					ELSE
+						WRITE(*,*) "Can't do intramolecular distances. Do manually if necessary."
+					ENDIF
+					IF (write_simple_intermolecular_distances()) THEN
+						WRITE(*,*) "Intermolecular distance calculation, simple mode:"
+						CALL perform_distance_analysis()
+					ELSE
+						WRITE(*,*) "Can't do intermolecular distances. Do manually if necessary."
+					ENDIF
 				CASE ("dihedral") !Module AUTOCORRELATION
 					!the (INFORMATION_IN_TRAJECTORY=="VEL") test is done in perform_autocorrelation()!
 					!same for the wrap test.
@@ -2974,8 +3079,8 @@ INTEGER :: ios,n
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################"
 					CALL perform_distance_analysis()
-					FILENAME_DISTANCE_INPUT="intra.inp"
-					CALL perform_distance_analysis()
+					!FILENAME_DISTANCE_INPUT="intra.inp"
+					!CALL perform_distance_analysis()
 					WRITE(*,*) "################################"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

@@ -2324,7 +2324,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				out_of_bounds=0
 				jump_time=FLOAT(TIME_SCALING_FACTOR*jump_length)
 				jump_length_real=FLOAT(jump_length)
-				!$OMP PARALLEL IF(PARALLEL_OPERATION)&
+				!$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
 				!$OMP PRIVATE(jump_vs_share_local,jump_vs_changes_local,jump_velocity,number_of_changes,jump_vector,molecule_index)&
 				!$OMP PRIVATE(share,time_shift,allocstatus,deallocstatus,bin_position)
 				!$OMP SINGLE
