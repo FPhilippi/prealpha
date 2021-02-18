@@ -496,7 +496,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
 				IF (user_input_logical()) parallelisation_requested=.TRUE.
 			ENDIF
-			WRITE(*,FMT='(A30)',ADVANCE="NO") " writing input file for reorientational time correlation function..."
+			WRITE(*,FMT='(A)',ADVANCE="NO") " writing input file for reorientational time correlation function..."
 			INQUIRE(UNIT=8,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=8)
 			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_reorient),IOSTAT=ios)!input path is added for the reorientational tcf file!
@@ -538,10 +538,12 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDFILE 8
 			CLOSE(UNIT=8)
 			WRITE(*,*) "done"
-			DEALLOCATE(fragment_list_base,STAT=deallocstatus)
-			IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
-			DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
-			IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+			IF (.NOT.(use_dipole_moment)) THEN
+				DEALLOCATE(fragment_list_base,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+				DEALLOCATE(fragment_list_tip,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+			ENDIF
 		END SUBROUTINE user_reorientation_input
 
 		!initialises the autocorrelation module by reading the specified input file.

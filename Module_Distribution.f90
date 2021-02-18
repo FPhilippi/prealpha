@@ -64,9 +64,10 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 		!WRITING input file to unit 8, which shouldn't be open.
 		!has to be compliant with 'read_input_for_distribution'
-		SUBROUTINE write_simple_charge_arm()
+		SUBROUTINE write_simple_charge_arm(normalise)
 		IMPLICIT NONE
 		LOGICAL :: file_exists,connected
+		LOGICAL,INTENT(IN),OPTIONAL :: normalise
 		INTEGER :: n,ios
 			FILENAME_DISTRIBUTION_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTRIBUTION_INPUT),EXIST=file_exists)
@@ -84,6 +85,9 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(8,'("sampling_interval 1")')
 			WRITE(8,'("bin_count_a 100")')
 			WRITE(8,'("bin_count_b 100")')
+			IF (PRESENT(normalise)) THEN
+				IF (normalise) WRITE(8,'("normalise_clm T")')
+			ENDIF
 			WRITE(8,'("quit")')
 			CLOSE(UNIT=8)
 			IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
@@ -556,7 +560,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 									IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'weigh_charge' to ",weigh_charge
 								ENDIF
 							ENDIF
-						CASE ("normalise_CLM","normalise_charge_arm","normalize_CLM","normalize_charge_arm")
+						CASE ("normalise_CLM","normalise_charge_arm","normalize_CLM","normalize_charge_arm","normalise_clm")
 							IF (TRIM(operation_mode)=="charge_arm") THEN
 								BACKSPACE 3
 								READ(3,IOSTAT=ios,FMT=*) inputstring,normalise_CLM

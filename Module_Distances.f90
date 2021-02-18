@@ -28,6 +28,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		REAL(KIND=WORKING_PRECISION) :: exponential_weight
 		REAL(KIND=WORKING_PRECISION) :: ffc_average
 		REAL(KIND=WORKING_PRECISION) :: ffc_weight
+		REAL(KIND=WORKING_PRECISION) :: ffcexp_average
 		CHARACTER(LEN=512) :: subjob_description
 	END TYPE distance_subjob
 	TYPE(distance_subjob),DIMENSION(:),ALLOCATABLE :: list_of_distances
@@ -178,7 +179,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!has to be compliant with 'read_input_for_distance'
 		LOGICAL FUNCTION write_simple_intramolecular_distances()
 		IMPLICIT NONE
-		LOGICAL :: file_exists,connected,H_available,F_available
+		LOGICAL :: file_exists,connected,H_available,F_available,both_available
 		INTEGER :: n,ios,molecule_type_index
 			FILENAME_DISTANCE_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
@@ -190,13 +191,17 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!look if there are reasonable intramolecular pairs
 			H_available=.FALSE.
 			F_available=.FALSE.
+			both_available=.FALSE.
 			DO molecule_type_index=1,give_number_of_molecule_types(),1
 				IF (give_number_of_specific_atoms_per_molecule(molecule_type_index,"H")>1) H_available=.TRUE.
 				IF (give_number_of_specific_atoms_per_molecule(molecule_type_index,"F")>1) F_available=.TRUE.
+				IF ((give_number_of_specific_atoms_per_molecule(molecule_type_index,"F")>1)&
+				&.AND.(give_number_of_specific_atoms_per_molecule(molecule_type_index,"H")>1)) both_available=.TRUE.
 			ENDDO
 			n=0
 			IF (H_available) n=n+1
 			IF (F_available) n=n+1
+			IF (both_available) n=n+2
 			WRITE(8,'("intra ",I0)') n
 			IF (n==0) THEN
 				write_simple_intramolecular_distances=.FALSE.
@@ -207,11 +212,15 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			IF (H_available) WRITE(8,'("H H")')
 			IF (F_available) WRITE(8,'("F F")')
+			IF (both_available) THEN
+				WRITE(8,'("H F")')
+				WRITE(8,'("F H")')
+			ENDIF
 			WRITE(8,'("exponential_weight T")')
 			WRITE(8,'("ffc T")')
 			WRITE(8,'("stdev T")')
-			IF (give_number_of_timesteps()>5) THEN
-				WRITE(8,'("nsteps 5")')
+			IF (give_number_of_timesteps()>10) THEN
+				WRITE(8,'("nsteps 10")')
 			ELSE
 				WRITE(8,'("nsteps ",I0)') give_number_of_timesteps()
 			ENDIF
@@ -225,7 +234,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!has to be compliant with 'read_input_for_distance'
 		LOGICAL FUNCTION write_simple_intermolecular_distances()
 		IMPLICIT NONE
-		LOGICAL :: file_exists,connected,H_available,F_available
+		LOGICAL :: file_exists,connected,H_available,F_available,both_available
 		INTEGER :: n,ios,molecule_type_index
 			FILENAME_DISTANCE_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DISTANCE_INPUT),EXIST=file_exists)
@@ -237,13 +246,17 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!look if there are reasonable intramolecular pairs
 			H_available=.FALSE.
 			F_available=.FALSE.
+			both_available=.FALSE.
 			DO molecule_type_index=1,give_number_of_molecule_types(),1
 				IF (give_number_of_specific_atoms("H")>1) H_available=.TRUE.
 				IF (give_number_of_specific_atoms("F")>1) F_available=.TRUE.
+				IF ((give_number_of_specific_atoms("F")>1)&
+				&.AND.(give_number_of_specific_atoms("F")>1)) both_available=.TRUE.
 			ENDDO
 			n=0
 			IF (H_available) n=n+1
 			IF (F_available) n=n+1
+			IF (both_available) n=n+2
 			WRITE(8,'("inter ",I0)') n
 			IF (n==0) THEN
 				write_simple_intermolecular_distances=.FALSE.
@@ -254,6 +267,10 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			IF (H_available) WRITE(8,'("H H")')
 			IF (F_available) WRITE(8,'("F F")')
+			IF (both_available) THEN
+				WRITE(8,'("H F")')
+				WRITE(8,'("F H")')
+			ENDIF
 			WRITE(8,'("exponential_weight T")')
 			WRITE(8,'("ffc T")')
 			WRITE(8,'("stdev T")')
@@ -841,7 +858,8 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: stepcounter,subjob_counter,indices_counter_1,indices_counter_2,localweight
 		INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2,molecule_index
 		REAL :: distance_squared,closest_distance_squared,distance
-		REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev
+		REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev,local_ffcexp
+		REAL(KIND=WORKING_PRECISION) :: exponential_function,ffc_function
 		LOGICAL :: valid_neighbour
 		LOGICAL,INTENT(IN) :: stdev_run
 		INTEGER(KIND=WORKING_PRECISION) :: localweight_ffc
@@ -855,6 +873,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					weight_exponential=0.0d0
 					local_exponential_stdev=0.0d0
 					local_ffc=0.0d0
+					local_ffcexp=0.0d0
 					localweight_ffc=0
 					DO indices_counter_1=1,list_of_distances(subjob_counter)%size_indices_1,1 !two loops: over the reference atoms...
 						molecule_type_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,1)
@@ -885,14 +904,20 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 										!include exp function
 										IF (calculate_exponential) THEN
 											distance=SQRT(distance_squared)
-											local_exponential=local_exponential+exp(-distance_exponent*distance)*distance
-											weight_exponential=weight_exponential+exp(-distance_exponent*distance)
+											exponential_function=exp(-distance_exponent*distance)
+											local_exponential=local_exponential+exponential_function*distance
+											weight_exponential=weight_exponential+exponential_function
 										ENDIF
 										IF (calculate_ffc) THEN
 											!eq (6) in the supporting information of J. Phys. Chem. Lett., 2020, 11, 2165–2170, DOI 10.1021/acs.jpclett.0c00087
 											!summing 1/(r^6) = 1/((r^2)^3)
-											local_ffc=local_ffc+1/((distance_squared)**3)
+											ffc_function=1/((distance_squared)**3)
+											local_ffc=local_ffc+ffc_function
 											localweight_ffc=localweight_ffc+1
+											IF (calculate_exponential) THEN
+												!exponentially weighed ffc...
+												local_ffcexp=local_ffcexp+exponential_function*ffc_function
+											ENDIF
 										ENDIF
 									ENDIF
 								ENDIF
@@ -936,6 +961,10 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						IF (calculate_ffc) THEN
 							list_of_distances(subjob_counter)%ffc_average=&
 							&list_of_distances(subjob_counter)%ffc_average+local_ffc
+							IF (calculate_exponential) THEN
+								list_of_distances(subjob_counter)%ffcexp_average=&
+								&list_of_distances(subjob_counter)%ffcexp_average+local_ffcexp
+							ENDIF
 							list_of_distances(subjob_counter)%ffc_weight=&
 							&list_of_distances(subjob_counter)%ffc_weight+FLOAT(localweight_ffc)
 						ENDIF
@@ -949,7 +978,8 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: stepcounter,subjob_counter,indices_counter_1,indices_counter_2,localweight
 		INTEGER :: molecule_type_index_1,molecule_type_index_2,atom_index_1,atom_index_2,molecule_index_1,molecule_index_2
 		REAL :: distance_squared,closest_distance_squared,distance
-		REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev
+		REAL(KIND=WORKING_PRECISION) :: local_closest,local_exponential,local_ffc,weight_exponential,local_exponential_stdev,local_ffcexp
+		REAL(KIND=WORKING_PRECISION) :: exponential_function,ffc_function
 		LOGICAL :: valid_neighbour
 		LOGICAL,INTENT(IN) :: stdev_run
 		INTEGER(KIND=WORKING_PRECISION) :: localweight_ffc
@@ -963,6 +993,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					weight_exponential=0.0d0
 					local_exponential_stdev=0.0d0
 					local_ffc=0.0d0
+					local_ffcexp=0.0d0
 					localweight_ffc=0
 					DO indices_counter_1=1,list_of_distances(subjob_counter)%size_indices_1,1 !two loops: over the reference atoms...
 						molecule_type_index_1=list_of_distances(subjob_counter)%indices_1(indices_counter_1,1)
@@ -993,15 +1024,21 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 										!include exp function
 										IF (calculate_exponential) THEN
 											distance=SQRT(distance_squared)
-											local_exponential=local_exponential+exp(-distance_exponent*distance)*distance
-											weight_exponential=weight_exponential+exp(-distance_exponent*distance)
+											exponential_function=exp(-distance_exponent*distance)
+											local_exponential=local_exponential+exponential_function*distance
+											weight_exponential=weight_exponential+exponential_function
 										ENDIF
 										IF (calculate_ffc) THEN
 											!eq (13) in the supporting information of J. Phys. Chem. Lett., 2020, 11, 2165–2170, DOI 10.1021/acs.jpclett.0c00087
 											!summing 1/(r^3)
 											distance=SQRT(distance_squared)
-											local_ffc=local_ffc+1/((distance)**3)
+											ffc_function=1/((distance)**3)
+											local_ffc=local_ffc+ffc_function
 											localweight_ffc=localweight_ffc+1
+											IF (calculate_exponential) THEN
+												!exponentially weighed ffc...
+												local_ffcexp=local_ffcexp+exponential_function*ffc_function
+											ENDIF
 										ENDIF
 									ENDIF
 								ENDDO
@@ -1041,6 +1078,10 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						IF (calculate_ffc) THEN
 							list_of_distances(subjob_counter)%ffc_average=&
 							&list_of_distances(subjob_counter)%ffc_average+local_ffc
+							IF (calculate_exponential) THEN
+								list_of_distances(subjob_counter)%ffcexp_average=&
+								&list_of_distances(subjob_counter)%ffcexp_average+local_ffcexp
+							ENDIF
 							list_of_distances(subjob_counter)%ffc_weight=&
 							&list_of_distances(subjob_counter)%ffc_weight+FLOAT(localweight_ffc)
 						ENDIF
@@ -1075,6 +1116,10 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						&"FFC distance r"//TRIM(list_of_distances(subjob_counter)%element1)//&
 						&TRIM(list_of_distances(subjob_counter)%element2),&
 						&list_of_distances(subjob_counter)%ffc_average)
+						CALL formatted_distance_output(&
+						&"exp(-kr) weighed FFC distance r'"//TRIM(list_of_distances(subjob_counter)%element1)//&
+						&TRIM(list_of_distances(subjob_counter)%element2),&
+						&list_of_distances(subjob_counter)%ffcexp_average)
 						CALL formatted_distance_output("Number of averages for FFC",&
 						&list_of_distances(subjob_counter)%ffc_weight)
 					ELSE
@@ -1083,6 +1128,10 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						&"FFC distance d"//TRIM(list_of_distances(subjob_counter)%element1)//&
 						&TRIM(list_of_distances(subjob_counter)%element2),&
 						&list_of_distances(subjob_counter)%ffc_average)
+						CALL formatted_distance_output(&
+						&"exp(-kr) weighed FFC distance d'"//TRIM(list_of_distances(subjob_counter)%element1)//&
+						&TRIM(list_of_distances(subjob_counter)%element2),&
+						&list_of_distances(subjob_counter)%ffcexp_average)
 						CALL formatted_distance_output("Number of averages for FFC",&
 						&list_of_distances(subjob_counter)%ffc_weight)
 					ENDIF
@@ -1116,6 +1165,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				WRITE(*,'(" Using ",I0," timesteps in intervals of ",I0," for averaging.")')&
 				&MAX((nsteps-1+sampling_interval)/sampling_interval,0),sampling_interval
 				WRITE(*,'(" calculating average ",A,"molecular distances.")')TRIM(operation_mode)
+				CALL refresh_IO()
 				!initialise averages
 				list_of_distances(:)%closest_average=0.0d0
 				list_of_distances(:)%closest_stdev=0.0d0
@@ -1124,6 +1174,7 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				list_of_distances(:)%exponential_weight=0.0d0
 				list_of_distances(:)%missed_neighbours=0
 				list_of_distances(:)%ffc_average=0.0d0
+				list_of_distances(:)%ffcexp_average=0.0d0
 				list_of_distances(:)%ffc_weight=0.0d0
 				SELECT CASE (TRIM(operation_mode))
 				CASE ("intra")
@@ -1141,17 +1192,33 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (calculate_ffc) THEN
 					list_of_distances(:)%ffc_average=&
 					&list_of_distances(:)%ffc_average/list_of_distances(:)%ffc_weight
+					IF (calculate_exponential) THEN
+						!exponentially weighed ffc...
+						list_of_distances(:)%ffcexp_average=&
+						&list_of_distances(:)%ffcexp_average/list_of_distances(:)%exponential_weight
+					ENDIF
 					IF (TRIM(operation_mode)=="intra") THEN
 						list_of_distances(:)%ffc_average=&
 						&list_of_distances(:)%ffc_average**(-1.0/6.0)
+						IF (calculate_exponential) THEN
+							!exponentially weighed ffc...
+							list_of_distances(:)%ffcexp_average=&
+							&list_of_distances(:)%ffcexp_average**(-1.0/6.0)
+						ENDIF
 					ELSE
 						list_of_distances(:)%ffc_average=&
 						&list_of_distances(:)%ffc_average**(-1.0/3.0)
+						IF (calculate_exponential) THEN
+							!exponentially weighed ffc...
+							list_of_distances(:)%ffcexp_average=&
+							&list_of_distances(:)%ffcexp_average**(-1.0/3.0)
+						ENDIF
 					ENDIF
 				ENDIF
 				!calculate standard deviation if necessary
 				IF (calculate_stdev) THEN
 					IF (VERBOSE_OUTPUT) WRITE(*,'(" calculating standard deviations.")')
+					CALL refresh_IO()
 					SELECT CASE (TRIM(operation_mode))
 					CASE ("intra")
 						CALL compute_intramolecular_distances(.TRUE.)

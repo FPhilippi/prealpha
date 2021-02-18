@@ -497,6 +497,7 @@ MODULE RECOGNITION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							WRITE(8,*) 'charge_arm_simple'
 							WRITE(8,*) 'conductivity_simple'
 							WRITE(8,*) 'jump_velocity_simple'
+							WRITE(8,*) 'distance_simple'
 							WRITE(8,*)
 							WRITE(8,*)
 							WRITE(8,*) 'This is the general input file.'

@@ -3077,11 +3077,16 @@ INTEGER :: ios,n
 					CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep,.TRUE.)
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
-					WRITE(*,*) "################################"
-					CALL perform_distance_analysis()
+					WRITE(*,*) "################################RIGHT VERSION"
+					!CALL perform_distance_analysis()
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					WRITE(*,*) "Distribution module invoked - debug mode - normalised charge arm:"
+					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
+					CALL write_simple_charge_arm(normalise=.TRUE.)
+					CALL perform_distribution_analysis()
 					!FILENAME_DISTANCE_INPUT="intra.inp"
 					!CALL perform_distance_analysis()
-					WRITE(*,*) "################################"
+					WRITE(*,*) "################################RIGHT VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
 						IF (VERBOSE_OUTPUT) WRITE(*,'(" (is commented out)")')
