@@ -153,7 +153,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
-	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol
+	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -2217,6 +2217,20 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				&(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
 			ENDIF
 		END FUNCTION charge_arm
+
+		!gives back the center of charge.
+		!if he molecule is not charged, then the dipole moment is given.
+		FUNCTION give_center_of_charge(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+		REAL(KIND=WORKING_PRECISION) :: give_center_of_charge(3)
+			IF (molecule_list(molecule_type_index)%charge==0) THEN
+				give_center_of_charge(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
+			ELSE
+				give_center_of_charge(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/&
+				&molecule_list(molecule_type_index)%realcharge
+			ENDIF
+		END FUNCTION give_center_of_charge
 
 		SUBROUTINE print_dipole_statistics()
 		IMPLICIT NONE

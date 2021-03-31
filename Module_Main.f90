@@ -826,6 +826,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Only available for the polar distribution function."
 			PRINT *," - 'weigh_charge'"
 			PRINT *,"    The charges of observed molecules are added to the distribution histogram, rather than unity."
+			PRINT *," - 'center_of_charge'"
+			PRINT *,"    Uses centres of charge instead of centre of mass. Needs atomic charges to be specified."
+			PRINT *,"    For molecules with a total charge of zero, the dipole moment will be used, which might yield unexpected results."
 			PRINT *," - 'normalise_CLM'"
 			PRINT *,"    The charge arm is divided by (M*Rgy**2) (charge lever moment correction)."
 			PRINT *,"    Here, M is the mass of the molecule, and Rgy is the radius of gyration."
@@ -2734,11 +2737,11 @@ INTEGER :: ios,n
 						inputinteger2=1 !molecule index (reference)
 						inputinteger4=2 !number of neighbours
 						IF (give_number_of_molecule_types()==2) THEN
-							WRITE(*,'(A,I0,A,I0,A)') " Dumping neighbour trajectories, i.e. closest molecules of type ",&
-							&inputinteger3," around ",inputinteger," (and vice versa) for all timesteps."
 							WRITE(*,'(" The first molecule is always the reference, and 2 neighbours will be written.")')
 							inputinteger=1 !molecule type index 1(reference)
 							inputinteger3=2 !molecule type index 2 (the observed one)
+							WRITE(*,'(A,I0,A,I0,A)') " Dumping neighbour trajectories, i.e. closest molecules of type ",&
+							&inputinteger3," around ",inputinteger," (and vice versa) for all timesteps."
 							CALL dump_neighbour_traj(.FALSE.,startstep,endstep,&
 							&inputinteger,inputinteger2,inputinteger3,inputinteger4)
 							inputinteger=2 !molecule type index 1(reference)

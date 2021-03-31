@@ -10,6 +10,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	INTEGER,PARAMETER :: bin_count_default=100
 	LOGICAL,PARAMETER :: subtract_uniform_default=.FALSE.
 	LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
+	LOGICAL,PARAMETER :: use_COM_default=.FALSE.
 	LOGICAL,PARAMETER :: normalise_CLM_default=.FALSE.
 	REAL,PARAMETER :: maxdist_default=10.0
 	!variables
@@ -22,6 +23,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: foolsproof_ratio!for the cdf, consider rare sampling of corners.
 	LOGICAL :: subtract_uniform=subtract_uniform_default!subtract the uniform density
 	LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
+	LOGICAL :: use_COM=use_COM_default!use centre of charge
 	LOGICAL :: normalise_CLM=normalise_CLM_default!divide charge arm by product of mass and radius of gyration squared.
 	INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
 	REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
@@ -297,6 +299,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			subtract_uniform=subtract_uniform_default
 			weigh_charge=weigh_charge_default
 			maxdist=maxdist_default
+			use_COM=use_COM_default
 		END SUBROUTINE set_defaults
 
 		!initialises the distribution module by reading the specified input file.
@@ -575,6 +578,20 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								WRITE(*,*) "The charge lever moment normalisation is only available for charge_arm analysis."
 							ENDIF
+						CASE ("use_com","use_COM","center_of_charge","centre_of_charge")
+							IF (TRIM(operation_mode)=="charge_arm") THEN
+								WRITE(*,*) "center_of_charge not available for charge_arm analysis."
+							ELSE
+								BACKSPACE 3
+								READ(3,IOSTAT=ios,FMT=*) inputstring,use_COM
+								IF (ios/=0) THEN
+									CALL report_error(100,exit_status=ios)
+									IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'use_com' to default (=",use_COM_default,")"
+									use_COM=use_COM_default
+								ELSE
+									IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_com' to ",use_COM
+								ENDIF
+							ENDIF
 						CASE ("quit")
 							IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
 							EXIT
@@ -759,9 +776,15 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							&translation=link_vector(:))
 							IF (current_distance_squared<maxdist_squared) THEN
 								!molecule pair is close enough.
-								link_vector(:)=link_vector(:)+&
-								&give_center_of_mass(timestep_in,observed_type,molecule_index_obs)-&
-								&give_center_of_mass(timestep_in,molecule_type_index_ref,molecule_index_ref)
+								IF (use_COM) THEN
+									link_vector(:)=link_vector(:)+&
+									&give_center_of_charge(timestep_in,observed_type,molecule_index_obs)-&
+									&give_center_of_charge(timestep_in,molecule_type_index_ref,molecule_index_ref)
+								ELSE
+									link_vector(:)=link_vector(:)+&
+									&give_center_of_mass(timestep_in,observed_type,molecule_index_obs)-&
+									&give_center_of_mass(timestep_in,molecule_type_index_ref,molecule_index_ref)
+								ENDIF
 								!Calculate bin limits.
 								SELECT CASE (TRIM(operation_mode))
 								CASE ("cdf")

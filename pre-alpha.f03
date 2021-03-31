@@ -1,4 +1,4 @@
-! RELEASED ON 18_Feb_2021 AT 12:57
+! RELEASED ON 31_Mar_2021 AT 15:43
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -1484,7 +1484,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
- PUBLIC :: give_indices_of_specific_atoms,give_element_symbol
+ PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -3548,6 +3548,20 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     &(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
    ENDIF
   END FUNCTION charge_arm
+
+  !gives back the center of charge.
+  !if he molecule is not charged, then the dipole moment is given.
+  FUNCTION give_center_of_charge(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+  REAL(KIND=WORKING_PRECISION) :: give_center_of_charge(3)
+   IF (molecule_list(molecule_type_index)%charge==0) THEN
+    give_center_of_charge(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)
+   ELSE
+    give_center_of_charge(:)=give_qd_vector(timestep,molecule_type_index,molecule_index)/&
+    &molecule_list(molecule_type_index)%realcharge
+   ENDIF
+  END FUNCTION give_center_of_charge
 
   SUBROUTINE print_dipole_statistics()
   IMPLICIT NONE
@@ -5754,7 +5768,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
   LOGICAL,OPTIONAL :: addhead,geometric_center
   CHARACTER(LEN=*),OPTIONAL :: custom_header
   TYPE :: atom
-   CHARACTER (LEN=1) :: atom_type='X'
+   CHARACTER (LEN=2) :: atom_type='X'
    REAL(KIND=WORKING_PRECISION) :: atom_position(3)
    REAL(KIND=WORKING_PRECISION) :: mass
   END TYPE atom
@@ -11744,6 +11758,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  INTEGER,PARAMETER :: bin_count_default=100
  LOGICAL,PARAMETER :: subtract_uniform_default=.FALSE.
  LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
+ LOGICAL,PARAMETER :: use_COM_default=.FALSE.
  LOGICAL,PARAMETER :: normalise_CLM_default=.FALSE.
  REAL,PARAMETER :: maxdist_default=10.0
  !variables
@@ -11756,6 +11771,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  REAL :: foolsproof_ratio!for the cdf, consider rare sampling of corners.
  LOGICAL :: subtract_uniform=subtract_uniform_default!subtract the uniform density
  LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
+ LOGICAL :: use_COM=use_COM_default!use centre of charge
  LOGICAL :: normalise_CLM=normalise_CLM_default!divide charge arm by product of mass and radius of gyration squared.
  INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
  REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
@@ -12031,6 +12047,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
    subtract_uniform=subtract_uniform_default
    weigh_charge=weigh_charge_default
    maxdist=maxdist_default
+   use_COM=use_COM_default
   END SUBROUTINE set_defaults
 
   !initialises the distribution module by reading the specified input file.
@@ -12309,6 +12326,20 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        ELSE
         WRITE(*,*) "The charge lever moment normalisation is only available for charge_arm analysis."
        ENDIF
+      CASE ("use_com","use_COM","center_of_charge","centre_of_charge")
+       IF (TRIM(operation_mode)=="charge_arm") THEN
+        WRITE(*,*) "center_of_charge not available for charge_arm analysis."
+       ELSE
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,use_COM
+        IF (ios/=0) THEN
+         CALL report_error(100,exit_status=ios)
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'use_com' to default (=",use_COM_default,")"
+         use_COM=use_COM_default
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_com' to ",use_COM
+        ENDIF
+       ENDIF
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_DISTRIBUTION_INPUT)
        EXIT
@@ -12493,9 +12524,15 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        &translation=link_vector(:))
        IF (current_distance_squared<maxdist_squared) THEN
         !molecule pair is close enough.
-        link_vector(:)=link_vector(:)+&
-        &give_center_of_mass(timestep_in,observed_type,molecule_index_obs)-&
-        &give_center_of_mass(timestep_in,molecule_type_index_ref,molecule_index_ref)
+        IF (use_COM) THEN
+         link_vector(:)=link_vector(:)+&
+         &give_center_of_charge(timestep_in,observed_type,molecule_index_obs)-&
+         &give_center_of_charge(timestep_in,molecule_type_index_ref,molecule_index_ref)
+        ELSE
+         link_vector(:)=link_vector(:)+&
+         &give_center_of_mass(timestep_in,observed_type,molecule_index_obs)-&
+         &give_center_of_mass(timestep_in,molecule_type_index_ref,molecule_index_ref)
+        ENDIF
         !Calculate bin limits.
         SELECT CASE (TRIM(operation_mode))
         CASE ("cdf")
@@ -14230,7 +14267,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 18_Feb_2021"
+ PRINT *, "   Date of Release: 31_Mar_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -15004,6 +15041,9 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Only available for the polar distribution function."
    PRINT *," - 'weigh_charge'"
    PRINT *,"    The charges of observed molecules are added to the distribution histogram, rather than unity."
+   PRINT *," - 'center_of_charge'"
+   PRINT *,"    Uses centres of charge instead of centre of mass. Needs atomic charges to be specified."
+   PRINT *,"    For molecules with a total charge of zero, the dipole moment will be used, which might yield unexpected results."
    PRINT *," - 'normalise_CLM'"
    PRINT *,"    The charge arm is divided by (M*Rgy**2) (charge lever moment correction)."
    PRINT *,"    Here, M is the mass of the molecule, and Rgy is the radius of gyration."
@@ -16912,11 +16952,11 @@ INTEGER :: ios,n
       inputinteger2=1 !molecule index (reference)
       inputinteger4=2 !number of neighbours
       IF (give_number_of_molecule_types()==2) THEN
-       WRITE(*,'(A,I0,A,I0,A)') " Dumping neighbour trajectories, i.e. closest molecules of type ",&
-       &inputinteger3," around ",inputinteger," (and vice versa) for all timesteps."
        WRITE(*,'(" The first molecule is always the reference, and 2 neighbours will be written.")')
        inputinteger=1 !molecule type index 1(reference)
        inputinteger3=2 !molecule type index 2 (the observed one)
+       WRITE(*,'(A,I0,A,I0,A)') " Dumping neighbour trajectories, i.e. closest molecules of type ",&
+       &inputinteger3," around ",inputinteger," (and vice versa) for all timesteps."
        CALL dump_neighbour_traj(.FALSE.,startstep,endstep,&
        &inputinteger,inputinteger2,inputinteger3,inputinteger4)
        inputinteger=2 !molecule type index 1(reference)

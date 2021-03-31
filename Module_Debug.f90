@@ -597,7 +597,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		LOGICAL,OPTIONAL :: addhead,geometric_center
 		CHARACTER(LEN=*),OPTIONAL :: custom_header
 		TYPE :: atom
-			CHARACTER (LEN=1) :: atom_type='X'
+			CHARACTER (LEN=2) :: atom_type='X'
 			REAL(KIND=WORKING_PRECISION) :: atom_position(3)
 			REAL(KIND=WORKING_PRECISION) :: mass
 		END TYPE atom
