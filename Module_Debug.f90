@@ -1037,14 +1037,20 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CLOSE(UNIT=3)
 		END SUBROUTINE dump_split
 
-		SUBROUTINE convert(writemolecularinputfile,output_format)
+		SUBROUTINE convert(writemolecularinputfile,output_format,useCOC_in)
 		IMPLICIT NONE
 		CHARACTER(LEN=3),INTENT(IN) :: output_format
-		INTEGER :: molecule_type_index,stepcounter,moleculecounter,output(3),ncentres
+		INTEGER :: molecule_type_index,stepcounter,moleculecounter,output(3),ncentres,valid_COC
 		LOGICAL,INTENT(IN) :: writemolecularinputfile
-		LOGICAL :: connected
+		LOGICAL,INTENT(IN),OPTIONAL :: useCOC_in
+		LOGICAL :: connected,useCOC
 		CHARACTER(LEN=1024) :: fstring
 		CHARACTER(LEN=1) :: element
+			IF (PRESENT(useCOC_in)) THEN
+				useCOC=useCOC_in
+			ELSE
+				useCOC=.FALSE.
+			ENDIF
 			IF (DEVELOPERS_VERSION) THEN
 				PRINT *," ! CAREFUL: 'PARALLELISED' CONVERTER USED"
 				CALL convert_parallel()
@@ -1052,12 +1058,29 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ELSE
 				!first, get the number of lines that will be added.
 				ncentres=0
-				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-					ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-				ENDDO
+				valid_COC=0
+				IF (useCOC) THEN
+					!count only those molecules with nonzero charge
+					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+						IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+							valid_COC=valid_COC+1
+							ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+						ENDIF
+					ENDDO
+				ELSE
+					!count everything
+					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+						ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+					ENDDO
+				ENDIF
+				IF (ncentres==0) CALL report_error(143)
 				INQUIRE(UNIT=3,OPENED=connected)
 				IF (connected) CALL report_error(27,exit_status=3)
-				WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+				IF (useCOC) THEN
+					WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
+				ELSE
+					WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+				ENDIF
 				OPEN(UNIT=3,FILE=TRIM(fstring))
 				IF (VERBOSE_OUTPUT) THEN
 					WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
@@ -1069,11 +1092,22 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
 					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
 						element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
-						DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
-							!Sort of high accuracy should be kept here because of the way I use this routine.
-							!reduced to 16.8 from 18.10
-							WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
-						ENDDO
+						IF (useCOC) THEN
+							!use the centre of charge - but only for charged molecules.
+							IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+								DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+									!Sort of high accuracy should be kept here because of the way I use this routine.
+									!reduced to 16.8 from 18.10
+									WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
+								ENDDO
+							ENDIF
+						ELSE
+							DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+								!Sort of high accuracy should be kept here because of the way I use this routine.
+								!reduced to 16.8 from 18.10
+								WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+							ENDDO
+						ENDIF
 					ENDDO
 					CALL print_progress()
 				ENDDO
@@ -1089,7 +1123,11 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (writemolecularinputfile) THEN
 				INQUIRE(UNIT=3,OPENED=connected)
 				IF (connected) CALL report_error(27,exit_status=3)
-				WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+				IF (useCOC) THEN
+					WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COC_molecular.inp"
+				ELSE
+					WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+				ENDIF
 				OPEN(UNIT=3,FILE=TRIM(fstring))
 				WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
 				WRITE(3,'(I0," ### number of timesteps")') give_number_of_timesteps()
@@ -1098,9 +1136,18 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
 					output(1)=give_charge_of_molecule(molecule_type_index)
 					output(3)=give_number_of_molecules_per_step(molecule_type_index)
-					WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
-					WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,", given as centre of mass.")')& !write the comments
-					& output(3),output(1)
+					IF (useCOC) THEN
+						!use the centre of charge - but only for charged molecules.
+						IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+							WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
+							WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2," (",F0.3,SS,"), given as centre of charge.")')& !write the comments
+							& output(3),output(1),give_realcharge_of_molecule(molecule_type_index)
+						ENDIF
+					ELSE
+						WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
+						WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,", given as centre of mass.")')& !write the comments
+						& output(3),output(1)
+					ENDIF
 				ENDDO
 				!write the custom masses section.
 				WRITE(3,'("masses ",I0," ### The following lines contain the masses of every molecule type.")')&

@@ -240,6 +240,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!140 distance module: swapped "wildcard -> specific" to "specific -> wildcard"
 	!141 not enough molecules (molecule_index)
 	!142 problem when streaming distance input.
+	!143 no charged particles - centre of charge trajectory will be empty.
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -759,6 +760,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (142)
 					WRITE(*,*) " #  ERROR 142: problem streaming '",TRIM(FILENAME_DISTANCE_INPUT),"'"
 					WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISTANCE_INPUT),"'!"
+				CASE (143)
+					WRITE(*,*) " #  WARNING 143: No charged particles - centre of charge trajectory will be empty."
+					WRITE(*,*) "--> Please specify both atomic (real) and molecular (integer) charges."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

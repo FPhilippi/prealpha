@@ -153,7 +153,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
-	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge
+	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -1817,6 +1817,12 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER,INTENT(IN) :: molecule_type_index
 			give_charge_of_molecule=molecule_list(molecule_type_index)%charge
 		END FUNCTION give_charge_of_molecule
+
+		REAL FUNCTION give_realcharge_of_molecule(molecule_type_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index
+			give_realcharge_of_molecule=molecule_list(molecule_type_index)%realcharge
+		END FUNCTION give_realcharge_of_molecule
 
 		INTEGER FUNCTION give_number_of_atoms_per_step()
 		IMPLICIT NONE

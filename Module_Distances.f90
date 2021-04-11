@@ -391,12 +391,12 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							READ(3,IOSTAT=ios,FMT=*) inputstring,distance_exponent
 							IF (ios/=0) THEN
 								CALL report_error(142,exit_status=ios)
-								IF (VERBOSE_OUTPUT) WRITE(*,'(A)') "setting 'exponent' to default (k=1 in exp(-kr))"
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A)') "  setting 'exponent' to default (k=1 in exp(-kr))"
 								distance_exponent=1.0
 							ELSE
 								IF (VERBOSE_OUTPUT) THEN
-									WRITE(*,'(A,E10.3)') " setting 'exponent' to k=",distance_exponent
-									IF (.NOT.(calculate_exponential)) WRITE(*,'(" (exponentially weighed averages are not turned on yet)")')
+									WRITE(*,'(A,E10.3)') "   setting 'exponent' to k=",distance_exponent
+									IF (.NOT.(calculate_exponential)) WRITE(*,'("   (exponentially weighed averages are not turned on yet)")')
 								ENDIF
 							ENDIF
 						CASE ("exponential_weight","weigh_exponential","calculate_exponential","average_exponential")
@@ -406,13 +406,13 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								CALL report_error(142,exit_status=ios)
 								calculate_exponential=calculate_exponential_default
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-								&" setting 'calculate_exponential' to default (",calculate_exponential,")"
+								&"   setting 'calculate_exponential' to default (",calculate_exponential,")"
 							ELSE
 								IF (calculate_exponential) THEN
-									WRITE(*,'(" Turned on averaged distances with exponential weights exp(-k*r)")')
-									WRITE(*,*)"(r=distance, k can be set with 'exponent')"
+									WRITE(*,'("   Turned on averaged distances with exponential weights exp(-k*r)")')
+									WRITE(*,*)"  (r=distance, k can be set with 'exponent')"
 								ELSE
-									WRITE(*,'(" Turned off averaged distances with exponential weights.")')
+									WRITE(*,'("   Turned off averaged distances with exponential weights.")')
 								ENDIF
 							ENDIF
 						CASE ("stdev","standard_deviation","standarddev")
@@ -422,12 +422,12 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								CALL report_error(142,exit_status=ios)
 								calculate_stdev=calculate_stdev_default
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-								&" setting 'calculate_stdev' to default (",calculate_stdev,")"
+								&"   setting 'calculate_stdev' to default (",calculate_stdev,")"
 							ELSE
 								IF (calculate_stdev) THEN
-									WRITE(*,'(" Also calculate standard deviations, where applicable.")')
+									WRITE(*,'("   Also calculate standard deviations, where applicable.")')
 								ELSE
-									WRITE(*,'(" Turned off calculation of standard deviation.")')
+									WRITE(*,'("   Turned off calculation of standard deviation.")')
 								ENDIF
 							ENDIF
 						CASE ("ffc_weight","weigh_ffc","calculate_ffc","average_ffc","ffc","dhh","rhh")
@@ -437,17 +437,17 @@ MODULE DISTANCE ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								CALL report_error(142,exit_status=ios)
 								calculate_ffc=calculate_ffc_default
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-								&" setting 'calculate_ffc' to default (",calculate_ffc,")"
+								&"   setting 'calculate_ffc' to default (",calculate_ffc,")"
 							ELSE
 								IF (calculate_ffc) THEN
 									IF (TRIM(operation_mode)=="intra") THEN
-										WRITE(*,'(" Will calculate intramolecular distances rHH as described in:")')
+										WRITE(*,'("   Will calculate intramolecular distances rHH as described in:")')
 									ELSE
-										WRITE(*,'(" Will calculate intermolecular distances dHH as described in:")')
+										WRITE(*,'("   Will calculate intermolecular distances dHH as described in:")')
 									ENDIF
-									WRITE(*,'(" J. Phys. Chem. Lett., 2020, 11, 2165–2170. DOI 10.1021/acs.jpclett.0c00087")')
+									WRITE(*,'("   J. Phys. Chem. Lett., 2020, 11, 2165–2170. DOI 10.1021/acs.jpclett.0c00087")')
 								ELSE
-									WRITE(*,*) "Turned off calculation of intra- or intermolecular distances for FFC/NMR"
+									WRITE(*,*) "  Turned off calculation of intra- or intermolecular distances for FFC/NMR"
 								ENDIF
 							ENDIF
 						CASE ("nsteps")

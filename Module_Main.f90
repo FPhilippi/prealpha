@@ -585,6 +585,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    converts the given trajectory to a centre-of-mass trajectory (per specified molecule type)."
 			PRINT *,"    i.e. only the centres of mass for the molecules are printed instead of the atoms."
 			PRINT *,"    This keyword expects a logical. If (T), then a new, modified molecular input file is written as well."
+			PRINT *," - 'convert_coc':"
+			PRINT *,"    converts the given trajectory to a centre-of-charge trajectory (per specified molecule type)."
+			PRINT *,"    i.e. only the centres of charge for the molecules are printed instead of the atoms."
+			PRINT *,"    This keyword expects a logical. If (T), then a new, modified molecular input file is written as well."
+			PRINT *,"    Required specification of atomic charges!"
 			PRINT *," - 'temperature': (simple mode available)"
 			PRINT *,"    Computes the instantaneous temperature of a particular molecule type."
 			PRINT *,"    This keyword expects exactly three integers:"
@@ -1307,7 +1312,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 14 - Electrical conductivity via CACF / components thereof."
 				PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
 				PRINT *," 16 - Write trajectory only with drude particles (minus velocity of their cores)"
-				SELECT CASE (user_input_integer(0,16))
+				PRINT *," 17 - Reduce the trajectory to centres of charge."
+				SELECT CASE (user_input_integer(0,17))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!compute VACFs...
@@ -1579,6 +1585,20 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
 					&TRIM(fstring),startstep,endstep
 					CALL append_string(fstring)
+				CASE (17)!convert to centre of charge
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					smalltask=.FALSE.
+					PRINT *,"Would you also like to write the appropriately adjusted molecular input file? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("convert_coc T ### reduce trajectory to centre of charge, write new molecular.inp")
+					ELSE
+						CALL append_string("convert_coc F ### reduce trajectory to centre of charge, don't write new molecular.inp")
+					ENDIF
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -1652,7 +1672,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 26 - Calculate dipole moment statistics from first timestep."
 				PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
 				PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
-				SELECT CASE (user_input_integer(0,28))
+				PRINT *," 29 - Reduce the trajectory to centre of charge."
+				SELECT CASE (user_input_integer(0,29))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2213,6 +2234,22 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 						!enough information for the analysis.
 						SKIP_ANALYSIS=.FALSE.
 					ENDIF
+				CASE (29)!converts to centre of charge
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					smalltask=.FALSE.
+					PRINT *,"Would you also like to produce an adjusted molecular input file? (y/n)"
+					IF (user_input_logical()) THEN
+						WRITE(fstring,'("convert_coc T ### produce centre of charge trajectory and molecular input file")')
+					ELSE
+						WRITE(fstring,'("convert_coc F ### produce centre of charge trajectory, but no molecular input file")')
+					ENDIF
+					CALL append_string(fstring)
+					PRINT *,"The corresponding section has been added to the input file."
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -2780,7 +2817,7 @@ INTEGER :: ios,n
 					ENDIF
 				CASE ("cubic_box_edge_simple")
 					CALL report_error(113)
-				CASE ("convert") !Module DEBUG
+				CASE ("convert","convert_com","convert_COM") !Module DEBUG
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
 					IF (ios/=0) THEN
@@ -2791,6 +2828,17 @@ INTEGER :: ios,n
 					IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 					CALL convert(inputlogical,TRAJECTORY_TYPE)
+				CASE ("convert_coc","convert_COC") !Module DEBUG
+					BACKSPACE 7
+					READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
+					IF (ios/=0) THEN
+						CALL report_error(19,exit_status=ios)
+						EXIT
+					ENDIF
+					WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
+					IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+					CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
 				CASE ("convert_simple") !Module DEBUG
 					WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
 					WRITE(*,*) "An adjusted molecular input file will be written, too."

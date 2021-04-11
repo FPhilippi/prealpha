@@ -1,4 +1,4 @@
-! RELEASED ON 31_Mar_2021 AT 15:43
+! RELEASED ON 11_Apr_2021 AT 22:36
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -241,6 +241,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !140 distance module: swapped "wildcard -> specific" to "specific -> wildcard"
  !141 not enough molecules (molecule_index)
  !142 problem when streaming distance input.
+ !143 no charged particles - centre of charge trajectory will be empty.
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -760,6 +761,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (142)
      WRITE(*,*) " #  ERROR 142: problem streaming '",TRIM(FILENAME_DISTANCE_INPUT),"'"
      WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISTANCE_INPUT),"'!"
+    CASE (143)
+     WRITE(*,*) " #  WARNING 143: No charged particles - centre of charge trajectory will be empty."
+     WRITE(*,*) "--> Please specify both atomic (real) and molecular (integer) charges."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1484,7 +1488,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
- PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge
+ PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -3148,6 +3152,12 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
   INTEGER,INTENT(IN) :: molecule_type_index
    give_charge_of_molecule=molecule_list(molecule_type_index)%charge
   END FUNCTION give_charge_of_molecule
+
+  REAL FUNCTION give_realcharge_of_molecule(molecule_type_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index
+   give_realcharge_of_molecule=molecule_list(molecule_type_index)%realcharge
+  END FUNCTION give_realcharge_of_molecule
 
   INTEGER FUNCTION give_number_of_atoms_per_step()
   IMPLICIT NONE
@@ -6208,14 +6218,20 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    CLOSE(UNIT=3)
   END SUBROUTINE dump_split
 
-  SUBROUTINE convert(writemolecularinputfile,output_format)
+  SUBROUTINE convert(writemolecularinputfile,output_format,useCOC_in)
   IMPLICIT NONE
   CHARACTER(LEN=3),INTENT(IN) :: output_format
-  INTEGER :: molecule_type_index,stepcounter,moleculecounter,output(3),ncentres
+  INTEGER :: molecule_type_index,stepcounter,moleculecounter,output(3),ncentres,valid_COC
   LOGICAL,INTENT(IN) :: writemolecularinputfile
-  LOGICAL :: connected
+  LOGICAL,INTENT(IN),OPTIONAL :: useCOC_in
+  LOGICAL :: connected,useCOC
   CHARACTER(LEN=1024) :: fstring
   CHARACTER(LEN=1) :: element
+   IF (PRESENT(useCOC_in)) THEN
+    useCOC=useCOC_in
+   ELSE
+    useCOC=.FALSE.
+   ENDIF
    IF (DEVELOPERS_VERSION) THEN
     PRINT *," ! CAREFUL: 'PARALLELISED' CONVERTER USED"
     CALL convert_parallel()
@@ -6223,12 +6239,29 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    ELSE
     !first, get the number of lines that will be added.
     ncentres=0
-    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-     ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-    ENDDO
+    valid_COC=0
+    IF (useCOC) THEN
+     !count only those molecules with nonzero charge
+     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+      IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+       valid_COC=valid_COC+1
+       ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+      ENDIF
+     ENDDO
+    ELSE
+     !count everything
+     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+      ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+     ENDDO
+    ENDIF
+    IF (ncentres==0) CALL report_error(143)
     INQUIRE(UNIT=3,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=3)
-    WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+    IF (useCOC) THEN
+     WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
+    ELSE
+     WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+    ENDIF
     OPEN(UNIT=3,FILE=TRIM(fstring))
     IF (VERBOSE_OUTPUT) THEN
      WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
@@ -6240,11 +6273,22 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
      CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
      DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
       element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
-      DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
-       !Sort of high accuracy should be kept here because of the way I use this routine.
-       !reduced to 16.8 from 18.10
-       WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
-      ENDDO
+      IF (useCOC) THEN
+       !use the centre of charge - but only for charged molecules.
+       IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+        DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+         !Sort of high accuracy should be kept here because of the way I use this routine.
+         !reduced to 16.8 from 18.10
+         WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
+        ENDDO
+       ENDIF
+      ELSE
+       DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+        !Sort of high accuracy should be kept here because of the way I use this routine.
+        !reduced to 16.8 from 18.10
+        WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+       ENDDO
+      ENDIF
      ENDDO
      CALL print_progress()
     ENDDO
@@ -6260,7 +6304,11 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    IF (writemolecularinputfile) THEN
     INQUIRE(UNIT=3,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=3)
-    WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+    IF (useCOC) THEN
+     WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COC_molecular.inp"
+    ELSE
+     WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_molecular.inp"
+    ENDIF
     OPEN(UNIT=3,FILE=TRIM(fstring))
     WRITE(*,ADVANCE="NO",FMT='(" Writing new molecular input file in ",A,"...")') "'"//TRIM(fstring)//"'"
     WRITE(3,'(I0," ### number of timesteps")') give_number_of_timesteps()
@@ -6269,9 +6317,18 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
      output(1)=give_charge_of_molecule(molecule_type_index)
      output(3)=give_number_of_molecules_per_step(molecule_type_index)
-     WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
-     WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,", given as centre of mass.")')& !write the comments
-     & output(3),output(1)
+     IF (useCOC) THEN
+      !use the centre of charge - but only for charged molecules.
+      IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+       WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
+       WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2," (",F0.3,SS,"), given as centre of charge.")')& !write the comments
+       & output(3),output(1),give_realcharge_of_molecule(molecule_type_index)
+      ENDIF
+     ELSE
+      WRITE(3,ADVANCE="NO",FMT='(SP,I2,SS," ",I0," ",I0," ### ")') output(:) !write the crucial part
+      WRITE(3,'("There are ",I0," molecules per step with charge ",SP,I2,SS,", given as centre of mass.")')& !write the comments
+      & output(3),output(1)
+     ENDIF
     ENDDO
     !write the custom masses section.
     WRITE(3,'("masses ",I0," ### The following lines contain the masses of every molecule type.")')&
@@ -11758,7 +11815,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  INTEGER,PARAMETER :: bin_count_default=100
  LOGICAL,PARAMETER :: subtract_uniform_default=.FALSE.
  LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
- LOGICAL,PARAMETER :: use_COM_default=.FALSE.
+ LOGICAL,PARAMETER :: use_COC_default=.FALSE.
  LOGICAL,PARAMETER :: normalise_CLM_default=.FALSE.
  REAL,PARAMETER :: maxdist_default=10.0
  !variables
@@ -11771,7 +11828,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  REAL :: foolsproof_ratio!for the cdf, consider rare sampling of corners.
  LOGICAL :: subtract_uniform=subtract_uniform_default!subtract the uniform density
  LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
- LOGICAL :: use_COM=use_COM_default!use centre of charge
+ LOGICAL :: use_COC=use_COC_default!use centre of charge
  LOGICAL :: normalise_CLM=normalise_CLM_default!divide charge arm by product of mass and radius of gyration squared.
  INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
  REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
@@ -11963,12 +12020,19 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
     optimize_distance=.TRUE.
     CALL set_defaults()
    ENDIF
-   IF (.NOT.(TRIM(operation_mode)=="charge_arm")) THEN
+   IF (TRIM(operation_mode)=="charge_arm") THEN
+    PRINT *,"Would you like to normalise the charge arm, using the charge lever moment instead?"
+    PRINT *,"(i.e. dividing the charge arm by M*Rgy**2 - see  J. Chem. Phys., 2008, 129, 124507)"
+    PRINT *,"(Here, M is the molar mass of the molecule, and Rgy is the radius of gyration)"
+    normalise_CLM=user_input_logical()
+    weigh_charge=.FALSE.
+   ELSE
     PRINT *,"Should the entries for the histogram be weighed by their charge?"
     PRINT *,"(Useful only in combination with 'all surrounding molecules')"
     weigh_charge=user_input_logical()
-   ELSE
-    weigh_charge=.FALSE.
+    PRINT *,"Would you like to use the centres of charge instead of centres of mass?"
+    PRINT *,"(Makes only sense if you have ions AND if you have specified atomic charges)"
+    use_COC=user_input_logical()
    ENDIF
    WRITE(*,FMT='(A)',ADVANCE="NO") " writing distribution input file..."
    INQUIRE(UNIT=8,OPENED=connected)
@@ -12014,11 +12078,22 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
    ELSE
     WRITE(8,'(" subtract_uniform F ### do not subtract anisotropic density.")')
    ENDIF
-   IF (.NOT.(TRIM(operation_mode)=="charge_arm")) THEN
+   IF (TRIM(operation_mode)=="charge_arm") THEN
+    IF (normalise_CLM) THEN
+     WRITE(8,'(" normalise_CLM T ### use charge lever moment")')
+    ELSE
+     WRITE(8,'(" normalise_CLM F ### use charge arm, no charge lever moment correction")')
+    ENDIF
+   ELSE
     IF (weigh_charge) THEN
      WRITE(8,'(" weigh_charge T ### weigh with charge - only sensible when *all* molecules are used!")')
     ELSE
      WRITE(8,'(" weigh_charge F ### no charge weighing")')
+    ENDIF
+    IF (use_COC) THEN
+     WRITE(8,'(" center_of_charge T ### use centres of charge - remember to specify atomic charges!")')
+    ELSE
+     WRITE(8,'(" center_of_charge F ### use centre of mass, as usual")')
     ENDIF
    ENDIF
    WRITE(8,'(" sampling_interval ",I0," ### sample every ",I0," timesteps.")') sampling_interval,sampling_interval
@@ -12047,7 +12122,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
    subtract_uniform=subtract_uniform_default
    weigh_charge=weigh_charge_default
    maxdist=maxdist_default
-   use_COM=use_COM_default
+   use_COC=use_COC_default
   END SUBROUTINE set_defaults
 
   !initialises the distribution module by reading the specified input file.
@@ -12326,18 +12401,18 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        ELSE
         WRITE(*,*) "The charge lever moment normalisation is only available for charge_arm analysis."
        ENDIF
-      CASE ("use_com","use_COM","center_of_charge","centre_of_charge")
+      CASE ("use_coc","use_COC","center_of_charge","centre_of_charge")
        IF (TRIM(operation_mode)=="charge_arm") THEN
         WRITE(*,*) "center_of_charge not available for charge_arm analysis."
        ELSE
         BACKSPACE 3
-        READ(3,IOSTAT=ios,FMT=*) inputstring,use_COM
+        READ(3,IOSTAT=ios,FMT=*) inputstring,use_COC
         IF (ios/=0) THEN
          CALL report_error(100,exit_status=ios)
-         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'use_com' to default (=",use_COM_default,")"
-         use_COM=use_COM_default
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') "   setting 'use_COC' to default (=",use_COC_default,")"
+         use_COC=use_COC_default
         ELSE
-         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_com' to ",use_COM
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_COC' to ",use_COC
         ENDIF
        ENDIF
       CASE ("quit")
@@ -12524,7 +12599,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        &translation=link_vector(:))
        IF (current_distance_squared<maxdist_squared) THEN
         !molecule pair is close enough.
-        IF (use_COM) THEN
+        IF (use_COC) THEN
          link_vector(:)=link_vector(:)+&
          &give_center_of_charge(timestep_in,observed_type,molecule_index_obs)-&
          &give_center_of_charge(timestep_in,molecule_type_index_ref,molecule_index_ref)
@@ -13363,12 +13438,12 @@ MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
        READ(3,IOSTAT=ios,FMT=*) inputstring,distance_exponent
        IF (ios/=0) THEN
         CALL report_error(142,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A)') "setting 'exponent' to default (k=1 in exp(-kr))"
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A)') "  setting 'exponent' to default (k=1 in exp(-kr))"
         distance_exponent=1.0
        ELSE
         IF (VERBOSE_OUTPUT) THEN
-         WRITE(*,'(A,E10.3)') " setting 'exponent' to k=",distance_exponent
-         IF (.NOT.(calculate_exponential)) WRITE(*,'(" (exponentially weighed averages are not turned on yet)")')
+         WRITE(*,'(A,E10.3)') "   setting 'exponent' to k=",distance_exponent
+         IF (.NOT.(calculate_exponential)) WRITE(*,'("   (exponentially weighed averages are not turned on yet)")')
         ENDIF
        ENDIF
       CASE ("exponential_weight","weigh_exponential","calculate_exponential","average_exponential")
@@ -13378,13 +13453,13 @@ MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
         CALL report_error(142,exit_status=ios)
         calculate_exponential=calculate_exponential_default
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &" setting 'calculate_exponential' to default (",calculate_exponential,")"
+        &"   setting 'calculate_exponential' to default (",calculate_exponential,")"
        ELSE
         IF (calculate_exponential) THEN
-         WRITE(*,'(" Turned on averaged distances with exponential weights exp(-k*r)")')
-         WRITE(*,*)"(r=distance, k can be set with 'exponent')"
+         WRITE(*,'("   Turned on averaged distances with exponential weights exp(-k*r)")')
+         WRITE(*,*)"  (r=distance, k can be set with 'exponent')"
         ELSE
-         WRITE(*,'(" Turned off averaged distances with exponential weights.")')
+         WRITE(*,'("   Turned off averaged distances with exponential weights.")')
         ENDIF
        ENDIF
       CASE ("stdev","standard_deviation","standarddev")
@@ -13394,12 +13469,12 @@ MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
         CALL report_error(142,exit_status=ios)
         calculate_stdev=calculate_stdev_default
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &" setting 'calculate_stdev' to default (",calculate_stdev,")"
+        &"   setting 'calculate_stdev' to default (",calculate_stdev,")"
        ELSE
         IF (calculate_stdev) THEN
-         WRITE(*,'(" Also calculate standard deviations, where applicable.")')
+         WRITE(*,'("   Also calculate standard deviations, where applicable.")')
         ELSE
-         WRITE(*,'(" Turned off calculation of standard deviation.")')
+         WRITE(*,'("   Turned off calculation of standard deviation.")')
         ENDIF
        ENDIF
       CASE ("ffc_weight","weigh_ffc","calculate_ffc","average_ffc","ffc","dhh","rhh")
@@ -13409,17 +13484,17 @@ MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
         CALL report_error(142,exit_status=ios)
         calculate_ffc=calculate_ffc_default
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &" setting 'calculate_ffc' to default (",calculate_ffc,")"
+        &"   setting 'calculate_ffc' to default (",calculate_ffc,")"
        ELSE
         IF (calculate_ffc) THEN
          IF (TRIM(operation_mode)=="intra") THEN
-          WRITE(*,'(" Will calculate intramolecular distances rHH as described in:")')
+          WRITE(*,'("   Will calculate intramolecular distances rHH as described in:")')
          ELSE
-          WRITE(*,'(" Will calculate intermolecular distances dHH as described in:")')
+          WRITE(*,'("   Will calculate intermolecular distances dHH as described in:")')
          ENDIF
-         WRITE(*,'(" J. Phys. Chem. Lett., 2020, 11, 2165–2170. DOI 10.1021/acs.jpclett.0c00087")')
+         WRITE(*,'("   J. Phys. Chem. Lett., 2020, 11, 2165–2170. DOI 10.1021/acs.jpclett.0c00087")')
         ELSE
-         WRITE(*,*) "Turned off calculation of intra- or intermolecular distances for FFC/NMR"
+         WRITE(*,*) "  Turned off calculation of intra- or intermolecular distances for FFC/NMR"
         ENDIF
        ENDIF
       CASE ("nsteps")
@@ -14267,7 +14342,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 31_Mar_2021"
+ PRINT *, "   Date of Release: 11_Apr_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -14800,6 +14875,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    converts the given trajectory to a centre-of-mass trajectory (per specified molecule type)."
    PRINT *,"    i.e. only the centres of mass for the molecules are printed instead of the atoms."
    PRINT *,"    This keyword expects a logical. If (T), then a new, modified molecular input file is written as well."
+   PRINT *," - 'convert_coc':"
+   PRINT *,"    converts the given trajectory to a centre-of-charge trajectory (per specified molecule type)."
+   PRINT *,"    i.e. only the centres of charge for the molecules are printed instead of the atoms."
+   PRINT *,"    This keyword expects a logical. If (T), then a new, modified molecular input file is written as well."
+   PRINT *,"    Required specification of atomic charges!"
    PRINT *," - 'temperature': (simple mode available)"
    PRINT *,"    Computes the instantaneous temperature of a particular molecule type."
    PRINT *,"    This keyword expects exactly three integers:"
@@ -15522,7 +15602,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 14 - Electrical conductivity via CACF / components thereof."
     PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
     PRINT *," 16 - Write trajectory only with drude particles (minus velocity of their cores)"
-    SELECT CASE (user_input_integer(0,16))
+    PRINT *," 17 - Reduce the trajectory to centres of charge."
+    SELECT CASE (user_input_integer(0,17))
     CASE (0)!done here.
      EXIT
     CASE (1)!compute VACFs...
@@ -15794,6 +15875,20 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      WRITE(fstring,'(A," ### subtract cores, write drude particles for timesteps ",I0,"-",I0)')&
      &TRIM(fstring),startstep,endstep
      CALL append_string(fstring)
+    CASE (17)!convert to centre of charge
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     smalltask=.FALSE.
+     PRINT *,"Would you also like to write the appropriately adjusted molecular input file? (y/n)"
+     IF (user_input_logical()) THEN
+      CALL append_string("convert_coc T ### reduce trajectory to centre of charge, write new molecular.inp")
+     ELSE
+      CALL append_string("convert_coc F ### reduce trajectory to centre of charge, don't write new molecular.inp")
+     ENDIF
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -15867,7 +15962,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 26 - Calculate dipole moment statistics from first timestep."
     PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
     PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
-    SELECT CASE (user_input_integer(0,28))
+    PRINT *," 29 - Reduce the trajectory to centre of charge."
+    SELECT CASE (user_input_integer(0,29))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -16428,6 +16524,22 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       !enough information for the analysis.
       SKIP_ANALYSIS=.FALSE.
      ENDIF
+    CASE (29)!converts to centre of charge
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     smalltask=.FALSE.
+     PRINT *,"Would you also like to produce an adjusted molecular input file? (y/n)"
+     IF (user_input_logical()) THEN
+      WRITE(fstring,'("convert_coc T ### produce centre of charge trajectory and molecular input file")')
+     ELSE
+      WRITE(fstring,'("convert_coc F ### produce centre of charge trajectory, but no molecular input file")')
+     ENDIF
+     CALL append_string(fstring)
+     PRINT *,"The corresponding section has been added to the input file."
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -16995,7 +17107,7 @@ INTEGER :: ios,n
      ENDIF
     CASE ("cubic_box_edge_simple")
      CALL report_error(113)
-    CASE ("convert") !Module DEBUG
+    CASE ("convert","convert_com","convert_COM") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
      IF (ios/=0) THEN
@@ -17006,6 +17118,17 @@ INTEGER :: ios,n
      IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(inputlogical,TRAJECTORY_TYPE)
+    CASE ("convert_coc","convert_COC") !Module DEBUG
+     BACKSPACE 7
+     READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
+     IF (ios/=0) THEN
+      CALL report_error(19,exit_status=ios)
+      EXIT
+     ENDIF
+     WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
+     IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
+     CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
     CASE ("convert_simple") !Module DEBUG
      WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
      WRITE(*,*) "An adjusted molecular input file will be written, too."
