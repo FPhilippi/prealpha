@@ -728,6 +728,8 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!$ 	WRITE(*,'(A,I0,A)') "   ### Parallel execution on ",OMP_get_num_threads()," threads (distribution function)"
 					!$ 	CALL timing_parallel_sections(.TRUE.)
 					!$ ENDIF
+					IF (VERBOSE_OUTPUT) CALL print_progress&
+					&(MAX((give_number_of_timesteps()-1+sampling_interval)/sampling_interval,0))
 					!$OMP END SINGLE
 					distribution_histogram_local(:,:)=0
 					observed_type=molecule_type_index_obs
@@ -759,12 +761,17 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								out_of_bounds=out_of_bounds+out_of_bounds_local
 							ENDIF
 						ENDIF
+						!$OMP CRITICAL
+						IF (VERBOSE_OUTPUT) CALL print_progress()
+						!$OMP END CRITICAL
 					ENDDO
 					!$OMP END DO
 					!$OMP CRITICAL
 					distribution_histogram(:,:)=distribution_histogram(:,:)+distribution_histogram_local(:,:)
 					!$OMP END CRITICAL
 					!$OMP END PARALLEL
+					IF (((MAX((give_number_of_timesteps()-1+sampling_interval)/sampling_interval,0))>100)&
+					&.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 				 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 				 !$ 	WRITE(*,ADVANCE="NO",FMT='("   ### End of parallelised section, took ")')
 				 !$ 	CALL timing_parallel_sections(.FALSE.)

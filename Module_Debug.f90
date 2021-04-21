@@ -11,7 +11,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	!PRIVATE/PUBLIC declarations
 	PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
 	PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
-	PUBLIC dump_neighbour_traj,remove_cores
+	PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties
 	PRIVATE test_dihedrals
 	CONTAINS
 
@@ -328,12 +328,15 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CALL report_error(97)
 				RETURN
 			ENDIF
+			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
 			CALL initialise_neighbourtraj()
 			DO stepcounter=startstep_in,endstep_in,1
 				IF (update_com) current_centre(:)=give_center_of_mass(stepcounter,molecule_type_index_1,molecule_index_1)
 				CALL make_neighbour_list()
 				CALL write_neighbours()
+				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
+			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			CALL finalise_neighbourtraj()
 
 		CONTAINS
@@ -441,6 +444,40 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			END SUBROUTINE write_neighbours
 
 		END SUBROUTINE dump_neighbour_traj
+
+		!This SUBROUTINE writes atomic charges and masses to two separate files.
+		SUBROUTINE dump_atomic_properties()
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index,atom_index
+		CHARACTER(LEN=1024) :: fstring
+		LOGICAL :: connected
+			!First, do the fools-proof check
+			INQUIRE(UNIT=4,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=4)
+			WRITE(*,'(" Writing atomic properties to files:")')
+			WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"atomic_charges.dat"
+			WRITE(*,*) TRIM(fstring)
+			OPEN(UNIT=4,FILE=TRIM(fstring))
+			DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+				DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+					DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+						WRITE(4,*) give_charge_of_atom(molecule_type_index,atom_index)
+					ENDDO
+				ENDDO
+			ENDDO
+			CLOSE(UNIT=4)
+			WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"atomic_masses.dat"
+			WRITE(*,*) TRIM(fstring)
+			OPEN(UNIT=4,FILE=TRIM(fstring))
+			DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+				DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+					DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+						WRITE(4,*) give_mass_of_atom(molecule_type_index,atom_index)
+					ENDDO
+				ENDDO
+			ENDDO
+			CLOSE(UNIT=4)
+		END SUBROUTINE dump_atomic_properties
 
 		!This SUBROUTINE writes the dimers for a given timestep_in, i.e.
 		!all closest molecules of type molecule_type_index_2 around all molecules of type molecule_type_index_1.
@@ -859,6 +896,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			REWIND 4
 			!find suitable origin
 			origin(:)=give_center_of_mass(startstep_in,molecule_type_index,molecule_index)
+			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
 			!iterate over the specified timesteps
 			DO stepcounter=startstep_in,endstep_in,1
 				!First, add the reference molecule to the xyz file.
@@ -871,12 +909,14 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				!Write the string to pass as custom header later
 				WRITE(fstring,'("Timestep nr. ",I0," with cutoff ",F0.2)') stepcounter,cutoff
 				CALL transfer_to_output()
+				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
 			WRITE(4,*)
 			WRITE(4,*)
 			ENDFILE 4
 			CLOSE(UNIT=4)
 			CLOSE(UNIT=10)
+			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			CONTAINS
 
 				!This SUBROUTINE writes the trajectory including neighbours into unit 4. It also wraps and centers, if necessary.
@@ -934,6 +974,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(fstring,'(2A,I0,A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
 			&"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in,".xyz"
 			OPEN(UNIT=4,FILE=TRIM(fstring))
+			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
 			!iterate over the specified timesteps
 			DO stepcounter=startstep_in,endstep_in,1
 				!Write the string to pass as custom header later
@@ -945,7 +986,9 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ELSE
 					CALL write_molecule(4,stepcounter,molecule_type_index,molecule_index,include_header=.TRUE.,custom_header=TRIM(fstring))
 				ENDIF
+				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
+			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			WRITE(4,*)
 			WRITE(4,*)
 			ENDFILE 4
@@ -1022,7 +1065,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDDO
 					!Here, all the molecules for the current timestep have been appended. Thus, transfer to output:
 					CALL center_xyz(3,addhead=.FALSE.,outputunit=4)
-					CALL print_progress()
+					IF (VERBOSE_OUTPUT) CALL print_progress()
 				ENDDO
 				ENDFILE 4
 				CLOSE(UNIT=4)
@@ -1109,7 +1152,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ENDDO
 						ENDIF
 					ENDDO
-					CALL print_progress()
+					IF (VERBOSE_OUTPUT) CALL print_progress()
 				ENDDO
 				IF (VERBOSE_OUTPUT) THEN
 					IF ((give_number_of_timesteps())>100) THEN
@@ -1360,7 +1403,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						CALL write_molecule_merged_drudes(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
 					ENDDO
 				ENDDO
-				CALL print_progress()
+				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
 			IF (VERBOSE_OUTPUT) THEN
 				IF ((endstep_in-startstep_in)>100) THEN
@@ -1409,7 +1452,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						CALL write_only_drudes_relative_to_core(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
 					ENDDO
 				ENDDO
-				CALL print_progress()
+				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
 			IF (VERBOSE_OUTPUT) THEN
 				IF ((endstep_in-startstep_in)>100) THEN

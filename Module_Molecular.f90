@@ -97,6 +97,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		TYPE(drude_pair),DIMENSION(:),ALLOCATABLE :: list_of_drude_pairs ! list of pairs of drude particles / drude cores / drudes
 		REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_masses !corresponding masses for the atoms
 		REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_charges !corresponding charges for the atoms
+		CHARACTER(LEN=5) :: residue_name !The residue name adhering to GROMACS specifications
 		LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_mass_specified !any elements that are .TRUE. will not be initialised from the trajectory!
 		LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_charge_specified !any elements that are .TRUE. will not be initialised from the trajectory!
 		TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot !like trajectory, but for one timestep only. Required for READ_SEQUENTIAL.
@@ -153,7 +154,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
-	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule
+	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
+	PUBLIC :: give_charge_of_atom,give_mass_of_atom
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -1227,6 +1229,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		 !$ CALL timing_parallel_sections(.TRUE.)
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION))&
 		 !$ &WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (wrapping)"
+			IF (VERBOSE_OUTPUT) CALL print_progress(number_of_steps)
 			!$OMP END SINGLE
 			!$OMP DO SCHEDULE(STATIC,1)
 			DO stepcounter=1,number_of_steps,1
@@ -1260,9 +1263,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDDO
 					ENDDO
 				ENDDO
+				!$OMP CRITICAL
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+				!$OMP END CRITICAL
 			ENDDO
 			!$OMP END DO
 			!$OMP END PARALLEL
+			IF ((number_of_steps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 		 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 		 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -1824,6 +1831,18 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			give_realcharge_of_molecule=molecule_list(molecule_type_index)%realcharge
 		END FUNCTION give_realcharge_of_molecule
 
+		REAL FUNCTION give_charge_of_atom(molecule_type_index,atom_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index,atom_index
+			give_charge_of_atom=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+		END FUNCTION give_charge_of_atom
+
+		REAL FUNCTION give_mass_of_atom(molecule_type_index,atom_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index,atom_index
+			give_mass_of_atom=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+		END FUNCTION give_mass_of_atom
+
 		INTEGER FUNCTION give_number_of_atoms_per_step()
 		IMPLICIT NONE
 			give_number_of_atoms_per_step=total_number_of_atoms
@@ -2352,6 +2371,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		 !$ 	WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (remove barycentre)"
 		 !$ 	CALL timing_parallel_sections(.TRUE.)
 		 !$ ENDIF
+			IF (VERBOSE_OUTPUT) CALL print_progress(number_of_steps)
 			!$OMP END SINGLE
 			!$OMP DO SCHEDULE(STATIC,1)
 			DO stepcounter=1,number_of_steps,1
@@ -2364,9 +2384,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDDO
 					ENDDO
 				ENDDO
+				!$OMP CRITICAL
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+				!$OMP END CRITICAL
 			ENDDO
 			!$OMP END DO
 			!$OMP END PARALLEL
+			IF ((number_of_steps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 		 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 		 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -2445,6 +2469,69 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 			ENDDO
 		END SUBROUTINE write_molecule
+
+		!Writes the trajectory to some format.
+		SUBROUTINE write_trajectory(startstep_in,endstep_in,output_format)
+		IMPLICIT NONE
+		INTEGER :: startstep,endstep
+		INTEGER :: stepcounter
+		INTEGER,INTENT(IN) :: startstep_in,endstep_in
+		LOGICAL :: connected
+		CHARACTER(LEN=1024) :: fstring
+		CHARACTER(LEN=3),INTENT(IN) :: output_format
+			!First, do the fools-proof checks
+			startstep=startstep_in
+			endstep=endstep_in
+			IF (startstep<1) THEN
+				CALL report_error(57,exit_status=startstep)
+				startstep=1
+			ENDIF
+			IF (endstep>give_number_of_timesteps()) THEN
+				CALL report_error(57,exit_status=endstep)
+				endstep=give_number_of_timesteps()
+			ENDIF
+			IF (endstep<startstep) THEN
+				CALL report_error(57,exit_status=endstep)
+				endstep=startstep
+			ENDIF
+			SELECT CASE (output_format)
+			CASE ("lmp")
+				WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in LAMMPS format (.",A,")...")') TRIM(ADJUSTL(output_format))
+			CASE ("gro")
+				CALL report_error(145)
+				WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in GROMACS format (.",A,")...")') TRIM(ADJUSTL(output_format))
+			CASE ("xyz")
+				WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in xyz format (.",A,")...")') TRIM(ADJUSTL(output_format))
+			CASE DEFAULT
+				CALL report_error(144)!unknown trajectory output format, which should never be passed to this subroutine.
+				RETURN
+			END SELECT
+			WRITE(fstring,'(A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"traj."//TRIM(ADJUSTL(output_format))
+			INQUIRE(UNIT=4,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=4)
+			OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((endstep-startstep)>100) WRITE(*,*)
+				CALL print_progress(endstep-startstep)
+			ENDIF
+			DO stepcounter=startstep,endstep,1
+				!First, write header
+				CALL write_header(4,stepcounter,give_number_of_atoms_per_step(),output_format)
+				CALL write_body(4,stepcounter,output_format)
+				CALL print_progress()
+			ENDDO
+			ENDFILE 4
+			CLOSE(UNIT=4)
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((endstep-startstep)>100) THEN
+					WRITE(*,*)
+					WRITE(*,FMT='(" ")',ADVANCE="NO")
+				ENDIF
+			ENDIF
+			WRITE(*,'("done.")')
+			CLOSE(UNIT=3)
+
+		END SUBROUTINE write_trajectory
 
 		!writes the specified molecule in xyz format into the specified unit, merging drudes into cores.
 		!no blanks are added. header is included only if include_header is set to .TRUE. - the default is that no header is added here!
@@ -2604,6 +2691,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 				SUBROUTINE read_molecular_input_file_header()
 				IMPLICIT NONE
+				INTEGER :: nanions,ncations,nneutrals
 					headerlines_molecular=2
 					READ(3,IOSTAT=ios,FMT=*) number_of_steps
 					IF (ios/=0) CALL report_error(7,exit_status=ios)
@@ -2615,6 +2703,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ALLOCATE(molecule_list(number_of_molecule_types),STAT=allocstatus)
 					IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
 					headerlines_molecular=headerlines_molecular+number_of_molecule_types
+					nanions=0
+					ncations=0
+					nneutrals=0
 					!Iterate over all the molecule types - n is the molecule index here.
 					DO n=1,number_of_molecule_types,1
 						READ(3,IOSTAT=ios,FMT=*) a,b,c
@@ -2627,6 +2718,19 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						IF (c<1) CALL report_error(119,exit_status=c)
 						total_number_of_atoms=total_number_of_atoms+b*c
 						totalcharge=totalcharge+a*c
+						!assign generic GROMACS residue name
+						IF (a<0) THEN
+							nanions=nanions+1
+							WRITE(molecule_list(n)%residue_name,'("ANI",I0)') nanions
+						ELSE
+							IF (a>0) THEN
+								ncations=ncations+1
+								WRITE(molecule_list(n)%residue_name,'("CAT",I0)') ncations
+							ELSE
+								nneutrals=nneutrals+1
+								WRITE(molecule_list(n)%residue_name,'("MOL",I0)') nneutrals
+							ENDIF
+						ENDIF
 						ALLOCATE(molecule_list(n)%list_of_elements(b),STAT=allocstatus)
 						IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
 						ALLOCATE(molecule_list(n)%list_of_atom_masses(b),STAT=allocstatus)
@@ -3747,16 +3851,71 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CASE("UNK")
 					WRITE(unit_number,'("!Unknown content!")')
 				CASE("VEL")
-					WRITE(unit_number,'("Center-of-Mass velocities:")')
+					WRITE(unit_number,'("Velocities:")')
 				CASE("POS")
-					WRITE(unit_number,'("Center-of-Mass positions:")')
+					WRITE(unit_number,'("Positions:")')
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
+			CASE ("gro")
+				WRITE(unit_number,'("converted from prealpha - check units. t= ",I0,".0")') TIME_SCALING_FACTOR*step_number
+				WRITE(unit_number,'(I0)') natoms
 			CASE DEFAULT
 				CALL report_error(0)!unknown trajectory output format, which should never be passed to this subroutine.
 			END SELECT
 		END SUBROUTINE write_header
+
+		SUBROUTINE write_body(unit_number,step_number,output_format)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: unit_number,step_number
+		CHARACTER(LEN=3),INTENT(IN) :: output_format
+		CHARACTER(LEN=5) :: atom_name !The atom name adhering to GROMACS specifications
+		INTEGER :: molecule_type_index,molecule_index,atom_index,atom_number,natoms
+			!Write body, depending on which type the trajectory has...
+			atom_number=0
+			DO molecule_type_index=1,number_of_molecule_types,1
+				natoms=molecule_list(molecule_type_index)%number_of_atoms
+				SELECT CASE (output_format)
+				CASE ("lmp","xyz")
+					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+						DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+							WRITE(unit_number,FMT='(A)',ADVANCE="NO")&
+							&TRIM(molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1))//" "
+							IF (READ_SEQUENTIAL) THEN
+								WRITE(unit_number,*) SNGL(molecule_list(molecule_type_index)%&
+								&snapshot(atom_index,molecule_index)%coordinates(:))
+							ELSE
+								WRITE(unit_number,*) SNGL(molecule_list(molecule_type_index)%&
+								&trajectory(atom_index,molecule_index,step_number)%coordinates(:))
+							ENDIF
+						ENDDO
+					ENDDO
+				CASE ("gro")
+					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+						DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+							!First we write the columns before the coordinates. Thank you GROMACS.
+							WRITE(atom_name,'(A,I0)')&
+							&TRIM(molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1)),&
+							&atom_index
+							atom_number=atom_number+1
+							WRITE(unit_number,FMT='(I5,2A5,I5)',ADVANCE="NO")&
+							&molecule_index,molecule_list(molecule_type_index)%residue_name,atom_name,atom_number
+							!Then the coordinates.
+							IF (READ_SEQUENTIAL) THEN
+								WRITE(unit_number,FMT='(3F8.3)') SNGL(molecule_list(molecule_type_index)%&
+								&snapshot(atom_index,molecule_index)%coordinates(:)/10.0)
+							ELSE
+								WRITE(unit_number,FMT='(3F8.3)') SNGL(molecule_list(molecule_type_index)%&
+								&trajectory(atom_index,molecule_index,step_number)%coordinates(:)/10.0)
+							ENDIF
+						ENDDO
+					ENDDO
+				CASE DEFAULT
+					CALL report_error(0)!unknown trajectory output format, which should never be passed to this subroutine.
+				END SELECT
+			ENDDO
+			IF (output_format=="gro") WRITE(unit_number,*) box_size(:)/10.0
+		END SUBROUTINE write_body
 
 		REAL(KIND=SP) FUNCTION atomic_weight(element_name) !this function returns the atomic weight for a given element.
 		IMPLICIT NONE

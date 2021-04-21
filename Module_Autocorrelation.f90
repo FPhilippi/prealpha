@@ -1522,6 +1522,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				 !$ 	WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (autocorrelation)"
 				 !$ 	CALL timing_parallel_sections(.TRUE.)
 				 !$ ENDIF
+					IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
 					!$OMP END SINGLE
 					!allocate memory for temporary functions (used for parallelisation)
 					ALLOCATE(temp_function(tmax+1,2),STAT=allocstatus)
@@ -1548,6 +1549,9 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDDO
 						CALL iterate_timesteps_self_contributions(&
 						&startstep,temp_function,initial_velocities_a,initial_velocities_b,x_num_temp)
+						!$OMP CRITICAL
+						IF (VERBOSE_OUTPUT) CALL print_progress()
+						!$OMP END CRITICAL
 					ENDDO
 					!$OMP END DO
 					!CRITICAL directive to properly update the autocorrelation_function
@@ -1569,6 +1573,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					DEALLOCATE(initial_velocities_b,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 					!$OMP END PARALLEL
+					IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 				 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 				 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 				 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -1947,6 +1952,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				 !$ 	WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (time correlation function)"
 				 !$ 	CALL timing_parallel_sections(.TRUE.)
 				 !$ ENDIF
+					IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
 					!$OMP END SINGLE
 					!allocate memory for temporary functions (used for parallelisation)
 					ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -1974,6 +1980,9 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							CALL normalize3D(initial_orientation(molecule_counter,:))
 						ENDDO
 						CALL iterate_timesteps_tcf(startstep,temp_function,initial_orientation,x_num_temp)
+						!$OMP CRITICAL
+						IF (VERBOSE_OUTPUT) CALL print_progress()
+						!$OMP END CRITICAL
 					ENDDO
 					!$OMP END DO
 					!CRITICAL directive to properly update the time_correlation_function
@@ -1993,6 +2002,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					DEALLOCATE(initial_orientation,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 					!$OMP END PARALLEL
+					IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 				 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 				 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 				 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -2554,6 +2564,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		 !$ 	WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (intermittent autocorrelation function)"
 		 !$ 	CALL timing_parallel_sections(.TRUE.)
 		 !$ ENDIF
+			IF (VERBOSE_OUTPUT) CALL print_progress(give_number_of_molecules_per_step(molecule_type_index))
 			!$OMP END SINGLE
 			!allocate memory and initialise temp_function for every member of the team.
 			ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -2563,6 +2574,9 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!$OMP DO SCHEDULE(STATIC,1)
 			DO n=1,give_number_of_molecules_per_step(molecule_type_index),1
 				temp_function(:)=temp_function(:)+iterate_timesteps(autocorr_array(:,n))
+				!$OMP CRITICAL
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+				!$OMP END CRITICAL
 			ENDDO
 			!$OMP END DO
 			!CRITICAL directive to properly update the autocorrelation_function
@@ -2572,6 +2586,8 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			DEALLOCATE(temp_function,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			!$OMP END PARALLEL
+			IF (((give_number_of_molecules_per_step(molecule_type_index))>100)&
+			&.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 		 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 		 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -2755,6 +2771,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				 !$ 	WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (overall ecaf for conductivity)"
 				 !$ 	CALL timing_parallel_sections(.TRUE.)
 				 !$ ENDIF
+					IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
 					!$OMP END SINGLE
 					!allocate memory for temporary functions (used for parallelisation)
 					ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -2764,6 +2781,9 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!$OMP DO SCHEDULE(STATIC,1)
 					DO startstep=1,nsteps,sampling
 						CALL iterate_timesteps_microscopic_charge_current_tacf(startstep,temp_function)
+						!$OMP CRITICAL
+						IF (VERBOSE_OUTPUT) CALL print_progress()
+						!$OMP END CRITICAL
 					ENDDO
 					!$OMP END DO
 					!CRITICAL directive to properly update the correlation_function
@@ -2774,6 +2794,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					DEALLOCATE(temp_function,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 					!$OMP END PARALLEL
+					IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 				 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 				 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 				 !$ 	CALL timing_parallel_sections(.FALSE.)
@@ -3078,6 +3099,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				 !$ 	WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (velocity correlation function)"
 				 !$ 	CALL timing_parallel_sections(.TRUE.)
 				 !$ ENDIF
+					IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
 					!$OMP END SINGLE
 					!allocate memory for temporary functions (used for parallelisation)
 					ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -3108,12 +3130,16 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							correlation_function(:,component_counter)=correlation_function(:,component_counter)+temp_function(:)
 							!$OMP END CRITICAL
 						ENDDO
+						!$OMP CRITICAL
+						IF (VERBOSE_OUTPUT) CALL print_progress()
+						!$OMP END CRITICAL
 					ENDDO
 					!$OMP END DO
 					!deallocate private memory used for parallelisation
 					DEALLOCATE(temp_function,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 					!$OMP END PARALLEL
+					IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 				 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 				 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 				 !$ 	CALL timing_parallel_sections(.FALSE.)

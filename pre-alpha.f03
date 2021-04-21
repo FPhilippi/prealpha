@@ -1,4 +1,4 @@
-! RELEASED ON 11_Apr_2021 AT 22:36
+! RELEASED ON 21_Apr_2021 AT 11:12
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -242,6 +242,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !141 not enough molecules (molecule_index)
  !142 problem when streaming distance input.
  !143 no charged particles - centre of charge trajectory will be empty.
+ !144 the specified trajectory output or input format is not supported (.gro, .xyz, .lmp)
+ !145 print notice about nm convention in gromacs
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -764,6 +766,14 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (143)
      WRITE(*,*) " #  WARNING 143: No charged particles - centre of charge trajectory will be empty."
      WRITE(*,*) "--> Please specify both atomic (real) and molecular (integer) charges."
+    CASE (144)
+     WRITE(*,*) " #  ERROR 144: The requested trajectory format is not supported."
+     WRITE(*,*) "--> Use 'gro' for GROMACS, 'lmp' for LAMMPS, 'xyz' for xyz format."
+     WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
+    CASE (145)
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 145: GROMACS assumes nm, prealpha assumes Angström."
+     WRITE(*,*) "--> Coordinates will be divided by 10 for '.gro' output."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1114,6 +1124,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   END FUNCTION logical_to_yesno
 
   !prints the progress, is initialised by passing the number of total iterations.
+  !Thus, the calling structure should be the following:
+  ! IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-start+sampling)/sampling,0))
+  ! DO something=start,nsteps,sampling
+  !  IF (VERBOSE_OUTPUT) CALL print_progress()
+  ! ENDDO
+  ! IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
   SUBROUTINE print_progress(total_iterations_in)
   IMPLICIT NONE
   INTEGER,INTENT(IN),OPTIONAL :: total_iterations_in
@@ -1432,6 +1448,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
   TYPE(drude_pair),DIMENSION(:),ALLOCATABLE :: list_of_drude_pairs ! list of pairs of drude particles / drude cores / drudes
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_masses !corresponding masses for the atoms
   REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: list_of_atom_charges !corresponding charges for the atoms
+  CHARACTER(LEN=5) :: residue_name !The residue name adhering to GROMACS specifications
   LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_mass_specified !any elements that are .TRUE. will not be initialised from the trajectory!
   LOGICAL,DIMENSION(:),ALLOCATABLE :: manual_atom_charge_specified !any elements that are .TRUE. will not be initialised from the trajectory!
   TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot !like trajectory, but for one timestep only. Required for READ_SEQUENTIAL.
@@ -1488,7 +1505,8 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
  PUBLIC :: print_atomic_masses,give_comboost,switch_to_barycenter,print_atomic_charges,set_default_charges,charge_arm,check_charges
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
- PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule
+ PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
+ PUBLIC :: give_charge_of_atom,give_mass_of_atom
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -2562,6 +2580,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    !$ CALL timing_parallel_sections(.TRUE.)
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION))&
    !$ &WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (wrapping)"
+   IF (VERBOSE_OUTPUT) CALL print_progress(number_of_steps)
    !$OMP END SINGLE
    !$OMP DO SCHEDULE(STATIC,1)
    DO stepcounter=1,number_of_steps,1
@@ -2595,9 +2614,13 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
       ENDDO
      ENDDO
     ENDDO
+    !$OMP CRITICAL
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL
    ENDDO
    !$OMP END DO
    !$OMP END PARALLEL
+   IF ((number_of_steps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
    !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
    !$  CALL timing_parallel_sections(.FALSE.)
@@ -3159,6 +3182,18 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    give_realcharge_of_molecule=molecule_list(molecule_type_index)%realcharge
   END FUNCTION give_realcharge_of_molecule
 
+  REAL FUNCTION give_charge_of_atom(molecule_type_index,atom_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index,atom_index
+   give_charge_of_atom=molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+  END FUNCTION give_charge_of_atom
+
+  REAL FUNCTION give_mass_of_atom(molecule_type_index,atom_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: molecule_type_index,atom_index
+   give_mass_of_atom=molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+  END FUNCTION give_mass_of_atom
+
   INTEGER FUNCTION give_number_of_atoms_per_step()
   IMPLICIT NONE
    give_number_of_atoms_per_step=total_number_of_atoms
@@ -3687,6 +3722,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (remove barycentre)"
    !$  CALL timing_parallel_sections(.TRUE.)
    !$ ENDIF
+   IF (VERBOSE_OUTPUT) CALL print_progress(number_of_steps)
    !$OMP END SINGLE
    !$OMP DO SCHEDULE(STATIC,1)
    DO stepcounter=1,number_of_steps,1
@@ -3699,9 +3735,13 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
       ENDDO
      ENDDO
     ENDDO
+    !$OMP CRITICAL
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL
    ENDDO
    !$OMP END DO
    !$OMP END PARALLEL
+   IF ((number_of_steps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
    !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
    !$  CALL timing_parallel_sections(.FALSE.)
@@ -3780,6 +3820,69 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     ENDIF
    ENDDO
   END SUBROUTINE write_molecule
+
+  !Writes the trajectory to some format.
+  SUBROUTINE write_trajectory(startstep_in,endstep_in,output_format)
+  IMPLICIT NONE
+  INTEGER :: startstep,endstep
+  INTEGER :: stepcounter
+  INTEGER,INTENT(IN) :: startstep_in,endstep_in
+  LOGICAL :: connected
+  CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
+   !First, do the fools-proof checks
+   startstep=startstep_in
+   endstep=endstep_in
+   IF (startstep<1) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=1
+   ENDIF
+   IF (endstep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=give_number_of_timesteps()
+   ENDIF
+   IF (endstep<startstep) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=startstep
+   ENDIF
+   SELECT CASE (output_format)
+   CASE ("lmp")
+    WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in LAMMPS format (.",A,")...")') TRIM(ADJUSTL(output_format))
+   CASE ("gro")
+    CALL report_error(145)
+    WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in GROMACS format (.",A,")...")') TRIM(ADJUSTL(output_format))
+   CASE ("xyz")
+    WRITE(*,ADVANCE="NO",FMT='(" Writing trajectory in xyz format (.",A,")...")') TRIM(ADJUSTL(output_format))
+   CASE DEFAULT
+    CALL report_error(144)!unknown trajectory output format, which should never be passed to this subroutine.
+    RETURN
+   END SELECT
+   WRITE(fstring,'(A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//"traj."//TRIM(ADJUSTL(output_format))
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((endstep-startstep)>100) WRITE(*,*)
+    CALL print_progress(endstep-startstep)
+   ENDIF
+   DO stepcounter=startstep,endstep,1
+    !First, write header
+    CALL write_header(4,stepcounter,give_number_of_atoms_per_step(),output_format)
+    CALL write_body(4,stepcounter,output_format)
+    CALL print_progress()
+   ENDDO
+   ENDFILE 4
+   CLOSE(UNIT=4)
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((endstep-startstep)>100) THEN
+     WRITE(*,*)
+     WRITE(*,FMT='(" ")',ADVANCE="NO")
+    ENDIF
+   ENDIF
+   WRITE(*,'("done.")')
+   CLOSE(UNIT=3)
+
+  END SUBROUTINE write_trajectory
 
   !writes the specified molecule in xyz format into the specified unit, merging drudes into cores.
   !no blanks are added. header is included only if include_header is set to .TRUE. - the default is that no header is added here!
@@ -3939,6 +4042,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
 
     SUBROUTINE read_molecular_input_file_header()
     IMPLICIT NONE
+    INTEGER :: nanions,ncations,nneutrals
      headerlines_molecular=2
      READ(3,IOSTAT=ios,FMT=*) number_of_steps
      IF (ios/=0) CALL report_error(7,exit_status=ios)
@@ -3950,6 +4054,9 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
      ALLOCATE(molecule_list(number_of_molecule_types),STAT=allocstatus)
      IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
      headerlines_molecular=headerlines_molecular+number_of_molecule_types
+     nanions=0
+     ncations=0
+     nneutrals=0
      !Iterate over all the molecule types - n is the molecule index here.
      DO n=1,number_of_molecule_types,1
       READ(3,IOSTAT=ios,FMT=*) a,b,c
@@ -3962,6 +4069,19 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
       IF (c<1) CALL report_error(119,exit_status=c)
       total_number_of_atoms=total_number_of_atoms+b*c
       totalcharge=totalcharge+a*c
+      !assign generic GROMACS residue name
+      IF (a<0) THEN
+       nanions=nanions+1
+       WRITE(molecule_list(n)%residue_name,'("ANI",I0)') nanions
+      ELSE
+       IF (a>0) THEN
+        ncations=ncations+1
+        WRITE(molecule_list(n)%residue_name,'("CAT",I0)') ncations
+       ELSE
+        nneutrals=nneutrals+1
+        WRITE(molecule_list(n)%residue_name,'("MOL",I0)') nneutrals
+       ENDIF
+      ENDIF
       ALLOCATE(molecule_list(n)%list_of_elements(b),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
       ALLOCATE(molecule_list(n)%list_of_atom_masses(b),STAT=allocstatus)
@@ -5082,16 +5202,71 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     CASE("UNK")
      WRITE(unit_number,'("!Unknown content!")')
     CASE("VEL")
-     WRITE(unit_number,'("Center-of-Mass velocities:")')
+     WRITE(unit_number,'("Velocities:")')
     CASE("POS")
-     WRITE(unit_number,'("Center-of-Mass positions:")')
+     WRITE(unit_number,'("Positions:")')
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
+   CASE ("gro")
+    WRITE(unit_number,'("converted from prealpha - check units. t= ",I0,".0")') TIME_SCALING_FACTOR*step_number
+    WRITE(unit_number,'(I0)') natoms
    CASE DEFAULT
     CALL report_error(0)!unknown trajectory output format, which should never be passed to this subroutine.
    END SELECT
   END SUBROUTINE write_header
+
+  SUBROUTINE write_body(unit_number,step_number,output_format)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: unit_number,step_number
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
+  CHARACTER(LEN=5) :: atom_name !The atom name adhering to GROMACS specifications
+  INTEGER :: molecule_type_index,molecule_index,atom_index,atom_number,natoms
+   !Write body, depending on which type the trajectory has...
+   atom_number=0
+   DO molecule_type_index=1,number_of_molecule_types,1
+    natoms=molecule_list(molecule_type_index)%number_of_atoms
+    SELECT CASE (output_format)
+    CASE ("lmp","xyz")
+     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+       WRITE(unit_number,FMT='(A)',ADVANCE="NO")&
+       &TRIM(molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1))//" "
+       IF (READ_SEQUENTIAL) THEN
+        WRITE(unit_number,*) SNGL(molecule_list(molecule_type_index)%&
+        &snapshot(atom_index,molecule_index)%coordinates(:))
+       ELSE
+        WRITE(unit_number,*) SNGL(molecule_list(molecule_type_index)%&
+        &trajectory(atom_index,molecule_index,step_number)%coordinates(:))
+       ENDIF
+      ENDDO
+     ENDDO
+    CASE ("gro")
+     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+       !First we write the columns before the coordinates. Thank you GROMACS.
+       WRITE(atom_name,'(A,I0)')&
+       &TRIM(molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1)),&
+       &atom_index
+       atom_number=atom_number+1
+       WRITE(unit_number,FMT='(I5,2A5,I5)',ADVANCE="NO")&
+       &molecule_index,molecule_list(molecule_type_index)%residue_name,atom_name,atom_number
+       !Then the coordinates.
+       IF (READ_SEQUENTIAL) THEN
+        WRITE(unit_number,FMT='(3F8.3)') SNGL(molecule_list(molecule_type_index)%&
+        &snapshot(atom_index,molecule_index)%coordinates(:)/10.0)
+       ELSE
+        WRITE(unit_number,FMT='(3F8.3)') SNGL(molecule_list(molecule_type_index)%&
+        &trajectory(atom_index,molecule_index,step_number)%coordinates(:)/10.0)
+       ENDIF
+      ENDDO
+     ENDDO
+    CASE DEFAULT
+     CALL report_error(0)!unknown trajectory output format, which should never be passed to this subroutine.
+    END SELECT
+   ENDDO
+   IF (output_format=="gro") WRITE(unit_number,*) box_size(:)/10.0
+  END SUBROUTINE write_body
 
   REAL(KIND=SP) FUNCTION atomic_weight(element_name) !this function returns the atomic weight for a given element.
   IMPLICIT NONE
@@ -5192,7 +5367,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
  PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
- PUBLIC dump_neighbour_traj,remove_cores
+ PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties
  PRIVATE test_dihedrals
  CONTAINS
 
@@ -5509,12 +5684,15 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     CALL report_error(97)
     RETURN
    ENDIF
+   IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
    CALL initialise_neighbourtraj()
    DO stepcounter=startstep_in,endstep_in,1
     IF (update_com) current_centre(:)=give_center_of_mass(stepcounter,molecule_type_index_1,molecule_index_1)
     CALL make_neighbour_list()
     CALL write_neighbours()
+    IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
+   IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    CALL finalise_neighbourtraj()
 
   CONTAINS
@@ -5622,6 +5800,40 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    END SUBROUTINE write_neighbours
 
   END SUBROUTINE dump_neighbour_traj
+
+  !This SUBROUTINE writes atomic charges and masses to two separate files.
+  SUBROUTINE dump_atomic_properties()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index,atom_index
+  CHARACTER(LEN=1024) :: fstring
+  LOGICAL :: connected
+   !First, do the fools-proof check
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   WRITE(*,'(" Writing atomic properties to files:")')
+   WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"atomic_charges.dat"
+   WRITE(*,*) TRIM(fstring)
+   OPEN(UNIT=4,FILE=TRIM(fstring))
+   DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+    DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+     DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+      WRITE(4,*) give_charge_of_atom(molecule_type_index,atom_index)
+     ENDDO
+    ENDDO
+   ENDDO
+   CLOSE(UNIT=4)
+   WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"atomic_masses.dat"
+   WRITE(*,*) TRIM(fstring)
+   OPEN(UNIT=4,FILE=TRIM(fstring))
+   DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+    DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index),1
+     DO atom_index=1,give_number_of_atoms_per_molecule(molecule_type_index),1
+      WRITE(4,*) give_mass_of_atom(molecule_type_index,atom_index)
+     ENDDO
+    ENDDO
+   ENDDO
+   CLOSE(UNIT=4)
+  END SUBROUTINE dump_atomic_properties
 
   !This SUBROUTINE writes the dimers for a given timestep_in, i.e.
   !all closest molecules of type molecule_type_index_2 around all molecules of type molecule_type_index_1.
@@ -6040,6 +6252,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    REWIND 4
    !find suitable origin
    origin(:)=give_center_of_mass(startstep_in,molecule_type_index,molecule_index)
+   IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
    !iterate over the specified timesteps
    DO stepcounter=startstep_in,endstep_in,1
     !First, add the reference molecule to the xyz file.
@@ -6052,12 +6265,14 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     !Write the string to pass as custom header later
     WRITE(fstring,'("Timestep nr. ",I0," with cutoff ",F0.2)') stepcounter,cutoff
     CALL transfer_to_output()
+    IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
    WRITE(4,*)
    WRITE(4,*)
    ENDFILE 4
    CLOSE(UNIT=4)
    CLOSE(UNIT=10)
+   IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    CONTAINS
 
     !This SUBROUTINE writes the trajectory including neighbours into unit 4. It also wraps and centers, if necessary.
@@ -6115,6 +6330,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    WRITE(fstring,'(2A,I0,A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
    &"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in,".xyz"
    OPEN(UNIT=4,FILE=TRIM(fstring))
+   IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
    !iterate over the specified timesteps
    DO stepcounter=startstep_in,endstep_in,1
     !Write the string to pass as custom header later
@@ -6126,7 +6342,9 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     ELSE
      CALL write_molecule(4,stepcounter,molecule_type_index,molecule_index,include_header=.TRUE.,custom_header=TRIM(fstring))
     ENDIF
+    IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
+   IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    WRITE(4,*)
    WRITE(4,*)
    ENDFILE 4
@@ -6203,7 +6421,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
      ENDDO
      !Here, all the molecules for the current timestep have been appended. Thus, transfer to output:
      CALL center_xyz(3,addhead=.FALSE.,outputunit=4)
-     CALL print_progress()
+     IF (VERBOSE_OUTPUT) CALL print_progress()
     ENDDO
     ENDFILE 4
     CLOSE(UNIT=4)
@@ -6290,7 +6508,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
        ENDDO
       ENDIF
      ENDDO
-     CALL print_progress()
+     IF (VERBOSE_OUTPUT) CALL print_progress()
     ENDDO
     IF (VERBOSE_OUTPUT) THEN
      IF ((give_number_of_timesteps())>100) THEN
@@ -6541,7 +6759,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
       CALL write_molecule_merged_drudes(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
      ENDDO
     ENDDO
-    CALL print_progress()
+    IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
    IF (VERBOSE_OUTPUT) THEN
     IF ((endstep_in-startstep_in)>100) THEN
@@ -6590,7 +6808,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
       CALL write_only_drudes_relative_to_core(4,stepcounter,molecule_type_index,molecule_index,include_header=.FALSE.)
      ENDDO
     ENDDO
-    CALL print_progress()
+    IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
    IF (VERBOSE_OUTPUT) THEN
     IF ((endstep_in-startstep_in)>100) THEN
@@ -8380,6 +8598,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (autocorrelation)"
      !$  CALL timing_parallel_sections(.TRUE.)
      !$ ENDIF
+     IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
      !$OMP END SINGLE
      !allocate memory for temporary functions (used for parallelisation)
      ALLOCATE(temp_function(tmax+1,2),STAT=allocstatus)
@@ -8406,6 +8625,9 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
       ENDDO
       CALL iterate_timesteps_self_contributions(&
       &startstep,temp_function,initial_velocities_a,initial_velocities_b,x_num_temp)
+      !$OMP CRITICAL
+      IF (VERBOSE_OUTPUT) CALL print_progress()
+      !$OMP END CRITICAL
      ENDDO
      !$OMP END DO
      !CRITICAL directive to properly update the autocorrelation_function
@@ -8427,6 +8649,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      DEALLOCATE(initial_velocities_b,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
      !$OMP END PARALLEL
+     IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
      !$  CALL timing_parallel_sections(.FALSE.)
@@ -8805,6 +9028,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (time correlation function)"
      !$  CALL timing_parallel_sections(.TRUE.)
      !$ ENDIF
+     IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
      !$OMP END SINGLE
      !allocate memory for temporary functions (used for parallelisation)
      ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -8832,6 +9056,9 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        CALL normalize3D(initial_orientation(molecule_counter,:))
       ENDDO
       CALL iterate_timesteps_tcf(startstep,temp_function,initial_orientation,x_num_temp)
+      !$OMP CRITICAL
+      IF (VERBOSE_OUTPUT) CALL print_progress()
+      !$OMP END CRITICAL
      ENDDO
      !$OMP END DO
      !CRITICAL directive to properly update the time_correlation_function
@@ -8851,6 +9078,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      DEALLOCATE(initial_orientation,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
      !$OMP END PARALLEL
+     IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
      !$  CALL timing_parallel_sections(.FALSE.)
@@ -9412,6 +9640,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
    !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (intermittent autocorrelation function)"
    !$  CALL timing_parallel_sections(.TRUE.)
    !$ ENDIF
+   IF (VERBOSE_OUTPUT) CALL print_progress(give_number_of_molecules_per_step(molecule_type_index))
    !$OMP END SINGLE
    !allocate memory and initialise temp_function for every member of the team.
    ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -9421,6 +9650,9 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
    !$OMP DO SCHEDULE(STATIC,1)
    DO n=1,give_number_of_molecules_per_step(molecule_type_index),1
     temp_function(:)=temp_function(:)+iterate_timesteps(autocorr_array(:,n))
+    !$OMP CRITICAL
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL
    ENDDO
    !$OMP END DO
    !CRITICAL directive to properly update the autocorrelation_function
@@ -9430,6 +9662,8 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
    DEALLOCATE(temp_function,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    !$OMP END PARALLEL
+   IF (((give_number_of_molecules_per_step(molecule_type_index))>100)&
+   &.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
    !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
    !$  CALL timing_parallel_sections(.FALSE.)
@@ -9613,6 +9847,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (overall ecaf for conductivity)"
      !$  CALL timing_parallel_sections(.TRUE.)
      !$ ENDIF
+     IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
      !$OMP END SINGLE
      !allocate memory for temporary functions (used for parallelisation)
      ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -9622,6 +9857,9 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      !$OMP DO SCHEDULE(STATIC,1)
      DO startstep=1,nsteps,sampling
       CALL iterate_timesteps_microscopic_charge_current_tacf(startstep,temp_function)
+      !$OMP CRITICAL
+      IF (VERBOSE_OUTPUT) CALL print_progress()
+      !$OMP END CRITICAL
      ENDDO
      !$OMP END DO
      !CRITICAL directive to properly update the correlation_function
@@ -9632,6 +9870,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      DEALLOCATE(temp_function,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
      !$OMP END PARALLEL
+     IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
      !$  CALL timing_parallel_sections(.FALSE.)
@@ -9936,6 +10175,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      !$  WRITE (*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (velocity correlation function)"
      !$  CALL timing_parallel_sections(.TRUE.)
      !$ ENDIF
+     IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling)/sampling,0))
      !$OMP END SINGLE
      !allocate memory for temporary functions (used for parallelisation)
      ALLOCATE(temp_function(tmax+1),STAT=allocstatus)
@@ -9966,12 +10206,16 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        correlation_function(:,component_counter)=correlation_function(:,component_counter)+temp_function(:)
        !$OMP END CRITICAL
       ENDDO
+      !$OMP CRITICAL
+      IF (VERBOSE_OUTPUT) CALL print_progress()
+      !$OMP END CRITICAL
      ENDDO
      !$OMP END DO
      !deallocate private memory used for parallelisation
      DEALLOCATE(temp_function,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
      !$OMP END PARALLEL
+     IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
      !$  CALL timing_parallel_sections(.FALSE.)
@@ -12533,6 +12777,8 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
      !$  WRITE(*,'(A,I0,A)') "   ### Parallel execution on ",OMP_get_num_threads()," threads (distribution function)"
      !$  CALL timing_parallel_sections(.TRUE.)
      !$ ENDIF
+     IF (VERBOSE_OUTPUT) CALL print_progress&
+     &(MAX((give_number_of_timesteps()-1+sampling_interval)/sampling_interval,0))
      !$OMP END SINGLE
      distribution_histogram_local(:,:)=0
      observed_type=molecule_type_index_obs
@@ -12564,12 +12810,17 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
         out_of_bounds=out_of_bounds+out_of_bounds_local
        ENDIF
       ENDIF
+      !$OMP CRITICAL
+      IF (VERBOSE_OUTPUT) CALL print_progress()
+      !$OMP END CRITICAL
      ENDDO
      !$OMP END DO
      !$OMP CRITICAL
      distribution_histogram(:,:)=distribution_histogram(:,:)+distribution_histogram_local(:,:)
      !$OMP END CRITICAL
      !$OMP END PARALLEL
+     IF (((MAX((give_number_of_timesteps()-1+sampling_interval)/sampling_interval,0))>100)&
+     &.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
      !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
      !$  WRITE(*,ADVANCE="NO",FMT='("   ### End of parallelised section, took ")')
      !$  CALL timing_parallel_sections(.FALSE.)
@@ -14342,7 +14593,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 11_Apr_2021"
+ PRINT *, "   Date of Release: 21_Apr_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -17418,16 +17669,12 @@ INTEGER :: ios,n
      CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep,.TRUE.)
     CASE ("DEBUG")
      !Here is some space for testing stuff
-     WRITE(*,*) "################################RIGHT VERSION"
-     !CALL perform_distance_analysis()
+     WRITE(*,*) "################################DEBUG VERSION"
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
-     WRITE(*,*) "Distribution module invoked - debug mode - normalised charge arm:"
-     WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
-     CALL write_simple_charge_arm(normalise=.TRUE.)
-     CALL perform_distribution_analysis()
-     !FILENAME_DISTANCE_INPUT="intra.inp"
-     !CALL perform_distance_analysis()
-     WRITE(*,*) "################################RIGHT VERSION"
+     WRITE(*,*) "testing stuff."
+     CALL dump_atomic_properties()
+     CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+     WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
       IF (VERBOSE_OUTPUT) WRITE(*,'(" (is commented out)")')

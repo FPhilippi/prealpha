@@ -241,6 +241,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!141 not enough molecules (molecule_index)
 	!142 problem when streaming distance input.
 	!143 no charged particles - centre of charge trajectory will be empty.
+	!144 the specified trajectory output or input format is not supported (.gro, .xyz, .lmp)
+	!145 print notice about nm convention in gromacs
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -763,6 +765,14 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (143)
 					WRITE(*,*) " #  WARNING 143: No charged particles - centre of charge trajectory will be empty."
 					WRITE(*,*) "--> Please specify both atomic (real) and molecular (integer) charges."
+				CASE (144)
+					WRITE(*,*) " #  ERROR 144: The requested trajectory format is not supported."
+					WRITE(*,*) "--> Use 'gro' for GROMACS, 'lmp' for LAMMPS, 'xyz' for xyz format."
+					WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
+				CASE (145)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 145: GROMACS assumes nm, prealpha assumes Angström."
+					WRITE(*,*) "--> Coordinates will be divided by 10 for '.gro' output."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
@@ -1113,6 +1123,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		END FUNCTION logical_to_yesno
 
 		!prints the progress, is initialised by passing the number of total iterations.
+		!Thus, the calling structure should be the following:
+		!	IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-start+sampling)/sampling,0))
+		!	DO something=start,nsteps,sampling
+		!		IF (VERBOSE_OUTPUT) CALL print_progress()
+		!	ENDDO
+		!	IF (((MAX((nsteps-1+sampling)/sampling,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 		SUBROUTINE print_progress(total_iterations_in)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN),OPTIONAL :: total_iterations_in
