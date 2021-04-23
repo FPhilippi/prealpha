@@ -2173,11 +2173,15 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		REAL(KIND=WORKING_PRECISION) :: give_center_of_mass(3),weighted_pos(3)!higher precision, because intermediate result.
 		INTEGER :: atom_index
 		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+			IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
 			IF (use_firstatom_as_com) THEN
-				give_center_of_mass(:)=DBLE(molecule_list(molecule_type_index)%trajectory(1,molecule_index,timestep)%coordinates(:))
+				IF (READ_SEQUENTIAL) THEN
+					give_center_of_mass(:)=DBLE(molecule_list(molecule_type_index)%snapshot(1,molecule_index)%coordinates(:))
+				ELSE
+					give_center_of_mass(:)=DBLE(molecule_list(molecule_type_index)%trajectory(1,molecule_index,timestep)%coordinates(:))
+				ENDIF
 				RETURN
 			ENDIF
-			IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
 			give_center_of_mass(:)=0.0d0
 			DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
 				!first, the current atom's position is stored in weighted_pos.
@@ -3870,9 +3874,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER,INTENT(IN) :: unit_number,step_number
 		CHARACTER(LEN=3),INTENT(IN) :: output_format
 		CHARACTER(LEN=5) :: atom_name !The atom name adhering to GROMACS specifications
-		INTEGER :: molecule_type_index,molecule_index,atom_index,atom_number,natoms
+		INTEGER :: molecule_type_index,molecule_index,atom_index,atom_number,natoms,residue_number
+			IF ((READ_SEQUENTIAL).AND.((step_number/=file_position))) CALL goto_timestep(step_number)
 			!Write body, depending on which type the trajectory has...
 			atom_number=0
+			residue_number=0
 			DO molecule_type_index=1,number_of_molecule_types,1
 				natoms=molecule_list(molecule_type_index)%number_of_atoms
 				SELECT CASE (output_format)
@@ -3892,6 +3898,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDDO
 				CASE ("gro")
 					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+						residue_number=residue_number+1
 						DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
 							!First we write the columns before the coordinates. Thank you GROMACS.
 							WRITE(atom_name,'(A,I0)')&
@@ -3899,7 +3906,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							&atom_index
 							atom_number=atom_number+1
 							WRITE(unit_number,FMT='(I5,2A5,I5)',ADVANCE="NO")&
-							&molecule_index,molecule_list(molecule_type_index)%residue_name,atom_name,atom_number
+							&residue_number,molecule_list(molecule_type_index)%residue_name,atom_name,atom_number
 							!Then the coordinates.
 							IF (READ_SEQUENTIAL) THEN
 								WRITE(unit_number,FMT='(3F8.3)') SNGL(molecule_list(molecule_type_index)%&

@@ -546,6 +546,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'dump_split': (simple mode available)"
 			PRINT *,"    Splits the trajectory into separate files for every molecule type (centred to centre of mass!)."
 			PRINT *,"    Expects two integers: the first timestep and the last timestep."
+			PRINT *," - 'dump_full_gro','dump_full_xyz','dump_full_lmp':"
+			PRINT *,"    Writes the whole trajectory to GROMACS, xyz, or LAMMPS format, respectively."
 			PRINT *," - 'dump_single':"
 			PRINT *,"    Writes a trajectory containing just one single molecule."
 			PRINT *,"    This keyword expects a logical, followed by four integers in the same line:"
@@ -1313,7 +1315,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 15 - Print atomic charges (in format suitable for a molecular input file)"
 				PRINT *," 16 - Write trajectory only with drude particles (minus velocity of their cores)"
 				PRINT *," 17 - Reduce the trajectory to centres of charge."
-				SELECT CASE (user_input_integer(0,17))
+				PRINT *," 18 - Write the full trajectory in a specific format."
+				SELECT CASE (user_input_integer(0,18))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!compute VACFs...
@@ -1599,6 +1602,32 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					ELSE
 						CALL append_string("convert_coc F ### reduce trajectory to centre of charge, don't write new molecular.inp")
 					ENDIF
+				CASE (18)!writes the full trajectory
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					PRINT *,"Three formats are available to write the full trajectory:"
+					PRINT *,"LAMMPS (.lmp), GROMACS (.gro) and xyz."
+					PRINT *,"Would you like to write a LAMMPS trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_lmp ### write LAMMPS trajectory.")
+						CYCLE
+					ENDIF
+					PRINT *,"Would you like to write a GROMACS trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_gro ### write GROMACS trajectory.")
+						CYCLE
+					ENDIF
+					PRINT *,"Would you like to write a xyz trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_xyz ### write trajectory with cartesian velocities.")
+						CYCLE
+					ENDIF
+					smalltask=.FALSE.
+					PRINT *,"The corresponding section has been added to the input file."
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -1673,7 +1702,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 27 - Write trajectory only with drude particles (minus position of their cores)"
 				PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
 				PRINT *," 29 - Reduce the trajectory to centre of charge."
-				SELECT CASE (user_input_integer(0,29))
+				PRINT *," 30 - Write the full trajectory in a specific format."
+				SELECT CASE (user_input_integer(0,30))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2249,6 +2279,32 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 						WRITE(fstring,'("convert_coc F ### produce centre of charge trajectory, but no molecular input file")')
 					ENDIF
 					CALL append_string(fstring)
+					PRINT *,"The corresponding section has been added to the input file."
+				CASE (30)!writes the full trajectory
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					PRINT *,"Three formats are available to write the full trajectory:"
+					PRINT *,"LAMMPS (.lmp), GROMACS (.gro) and xyz."
+					PRINT *,"Would you like to write a LAMMPS trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_lmp ### write LAMMPS trajectory.")
+						CYCLE
+					ENDIF
+					PRINT *,"Would you like to write a GROMACS trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_gro ### write GROMACS trajectory.")
+						CYCLE
+					ENDIF
+					PRINT *,"Would you like to write a xyz trajectory? (y/n)"
+					IF (user_input_logical()) THEN
+						CALL append_string("dump_full_xyz ### write trajectory with cartesian coordinates.")
+						CYCLE
+					ENDIF
+					smalltask=.FALSE.
 					PRINT *,"The corresponding section has been added to the input file."
 				CASE DEFAULT
 					CALL report_error(0)
@@ -3126,6 +3182,15 @@ INTEGER :: ios,n
 					CALL check_timesteps(startstep,endstep)
 					WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 					CALL jump_analysis(inputinteger2,100,inputinteger,startstep,endstep,.TRUE.)
+				CASE ("dump_full_gro","write_full_gro")
+					!output is in subroutine
+					CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+				CASE ("dump_full_lmp","write_full_lmp")
+					!output is in subroutine
+					CALL write_trajectory(1,give_number_of_timesteps(),"lmp")
+				CASE ("dump_full_xyz","write_full_xyz")
+					!output is in subroutine
+					CALL write_trajectory(1,give_number_of_timesteps(),"xyz")
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################DEBUG VERSION"
