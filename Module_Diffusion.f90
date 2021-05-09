@@ -647,9 +647,10 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!$OMP PRIVATE(current_distance,array_pos,vector_clip,squared_clip,projektionsvektor)
 			!$OMP SINGLE
 			!$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
-			!$ 	WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (mean squared displacement)"
+			!$ 	WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (Diffusion / displacement)"
 			!$ 	CALL timing_parallel_sections(.TRUE.)
 			!$ ENDIF
+			IF (VERBOSE_OUTPUT) CALL print_progress(number_of_timesteps)
 			!$OMP END SINGLE
 			!Allocate memory to store the initial positions
 			ALLOCATE(initial_positions(nmolecules,3),STAT=allocstatus)
@@ -709,6 +710,9 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!Accumulate the drift at this timestep:
 					x_unsquared_temp(array_pos,:)=x_unsquared_temp(array_pos,:)+vector_clip(:)
 				ENDDO
+				!$OMP CRITICAL
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+				!$OMP END CRITICAL
 			ENDDO
 			!$OMP END DO
 			!update the original functions
@@ -725,6 +729,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			DEALLOCATE(x_unsquared_temp,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			!$OMP END PARALLEL
+			IF ((number_of_timesteps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 		 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 		 !$ 	CALL timing_parallel_sections(.FALSE.)

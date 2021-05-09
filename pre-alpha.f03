@@ -1,4 +1,4 @@
-! RELEASED ON 23_Apr_2021 AT 16:10
+! RELEASED ON 09_May_2021 AT 12:42
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -2173,12 +2173,14 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
 
   !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
-  &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,atom_index_1,atom_index_2)
+  &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,&
+  &molecule_index_1,molecule_index_2,atom_index_1,atom_index_2,translation)
   IMPLICIT NONE
   INTEGER :: a,b,c
   INTEGER,INTENT(IN) :: timestep1,timestep2,molecule_type_index_1,molecule_type_index_2
   INTEGER,INTENT(IN) :: molecule_index_1,molecule_index_2,atom_index_1,atom_index_2
-  REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip
+  REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip,wrapshift(3)
+  REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3)
    IF (READ_SEQUENTIAL) THEN
     CALL goto_timestep(timestep1)
     pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%snapshot(atom_index_1,molecule_index_1)%coordinates(:))
@@ -2190,10 +2192,13 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    ENDIF
    !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
    give_smallest_atom_distance_squared=maximum_distance_squared
-   IF (.NOT.(WRAP_TRAJECTORY)) THEN
-    CALL wrap_vector(pos_1)
-    CALL wrap_vector(pos_2)
-   ENDIF
+   ! The following is always needed, because the trajectory is wrapped molecule-wise.
+   CALL wrap_vector(pos_1,shift(:))
+   CALL wrap_vector(pos_2,wrapshift(:))
+   !"shift" is now the vector to translate the reference atom into the box by wrapping.
+   !"wrapshift" is the same for the second, observed atom.
+   !now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
+   wrapshift(:)=wrapshift(:)-shift(:)
    !Now, check all mirror images
    DO a=-1,1,1! a takes the values (-1, 0, 1)
     DO b=-1,1,1! b takes the values (-1, 0, 1)
@@ -2207,10 +2212,12 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
       IF (distance_clip<give_smallest_atom_distance_squared) THEN
        !a distance has been found that's closer than the current best - amend that.
        give_smallest_atom_distance_squared=distance_clip
+       IF (PRESENT(translation)) translation(:)=shift(:)
       ENDIF
        ENDDO
     ENDDO
    ENDDO
+   IF (PRESENT(translation)) translation(:)=translation(:)+wrapshift(:)
   END FUNCTION give_smallest_atom_distance_squared
 
   !This FUNCTION returns the smallest squared distance of centres of mass considering all PBCs - as well as the corresponding translation vector.
@@ -11095,9 +11102,10 @@ MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
    !$OMP PRIVATE(current_distance,array_pos,vector_clip,squared_clip,projektionsvektor)
    !$OMP SINGLE
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
-   !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (mean squared displacement)"
+   !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (Diffusion / displacement)"
    !$  CALL timing_parallel_sections(.TRUE.)
    !$ ENDIF
+   IF (VERBOSE_OUTPUT) CALL print_progress(number_of_timesteps)
    !$OMP END SINGLE
    !Allocate memory to store the initial positions
    ALLOCATE(initial_positions(nmolecules,3),STAT=allocstatus)
@@ -11157,6 +11165,9 @@ MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
      !Accumulate the drift at this timestep:
      x_unsquared_temp(array_pos,:)=x_unsquared_temp(array_pos,:)+vector_clip(:)
     ENDDO
+    !$OMP CRITICAL
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL
    ENDDO
    !$OMP END DO
    !update the original functions
@@ -11173,6 +11184,7 @@ MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
    DEALLOCATE(x_unsquared_temp,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    !$OMP END PARALLEL
+   IF ((number_of_timesteps>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
    !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
    !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
    !$  CALL timing_parallel_sections(.FALSE.)
@@ -12567,7 +12579,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)') "   setting 'maxdist' to ",maxdist
        ENDIF
-      CASE ("maxdist_optimize")
+      CASE ("maxdist_optimize","maxdist_optimise")
        IF (TRIM(operation_mode)=="charge_arm") THEN
         maxdist=0.0
         DO m=1,number_of_references,1
@@ -14600,7 +14612,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 23_Apr_2021"
+ PRINT *, "   Date of Release: 09_May_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -17670,11 +17682,18 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
-    CASE ("charge_arm_simple")
+    CASE ("charge_arm_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Distribution module invoked - simple mode:"
      WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
      CALL write_simple_charge_arm()
+     CALL perform_distribution_analysis()
+    CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     WRITE(*,*) "Distribution module invoked - simple mode:"
+     WRITE(*,*) "CLM distribution. Requires charges to be initialised."
+     WRITE(*,*) "(charge arm with charge lever moment correction)"
+     CALL write_simple_charge_arm(normalise=.TRUE.)
      CALL perform_distribution_analysis()
     CASE ("conductivity_simple")
      IF (BOX_VOLUME_GIVEN) THEN

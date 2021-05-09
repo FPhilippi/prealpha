@@ -3122,11 +3122,18 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
-				CASE ("charge_arm_simple")
+				CASE ("charge_arm_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Distribution module invoked - simple mode:"
 					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
 					CALL write_simple_charge_arm()
+					CALL perform_distribution_analysis()
+				CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					WRITE(*,*) "Distribution module invoked - simple mode:"
+					WRITE(*,*) "CLM distribution. Requires charges to be initialised."
+					WRITE(*,*) "(charge arm with charge lever moment correction)"
+					CALL write_simple_charge_arm(normalise=.TRUE.)
 					CALL perform_distribution_analysis()
 				CASE ("conductivity_simple")
 					IF (BOX_VOLUME_GIVEN) THEN

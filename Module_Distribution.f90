@@ -511,7 +511,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)') "   setting 'maxdist' to ",maxdist
 							ENDIF
-						CASE ("maxdist_optimize")
+						CASE ("maxdist_optimize","maxdist_optimise")
 							IF (TRIM(operation_mode)=="charge_arm") THEN
 								maxdist=0.0
 								DO m=1,number_of_references,1
