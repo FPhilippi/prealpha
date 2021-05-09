@@ -1,4 +1,4 @@
-! RELEASED ON 09_May_2021 AT 12:42
+! RELEASED ON 09_May_2021 AT 13:21
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -12080,6 +12080,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  LOGICAL,PARAMETER :: weigh_charge_default=.FALSE.
  LOGICAL,PARAMETER :: use_COC_default=.FALSE.
  LOGICAL,PARAMETER :: normalise_CLM_default=.FALSE.
+ LOGICAL,PARAMETER :: maxdist_optimize_default=.FALSE.
  REAL,PARAMETER :: maxdist_default=10.0
  !variables
  CHARACTER (LEN=10) :: operation_mode="NONE"!operation mode of the distribution module.
@@ -12093,6 +12094,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
  LOGICAL :: weigh_charge=weigh_charge_default!weigh the distribution functions by charges.
  LOGICAL :: use_COC=use_COC_default!use centre of charge
  LOGICAL :: normalise_CLM=normalise_CLM_default!divide charge arm by product of mass and radius of gyration squared.
+ LOGICAL :: maxdist_optimize=maxdist_optimize_default !IF TRUE, THEN optimise for every reference!
  INTEGER,DIMENSION(:,:),ALLOCATABLE :: references ! (x y z molecule_type_index_ref molecule_type_index_obs)=1st dim, (nreference)=2nd dim
  REAL,DIMENSION(:,:),ALLOCATABLE :: distribution_function
  REAL :: step_a,step_b !step sizes in angströms or radians
@@ -12386,6 +12388,8 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
    weigh_charge=weigh_charge_default
    maxdist=maxdist_default
    use_COC=use_COC_default
+   maxdist_optimize=maxdist_optimize_default
+   normalise_CLM=normalise_CLM_default
   END SUBROUTINE set_defaults
 
   !initialises the distribution module by reading the specified input file.
@@ -12448,6 +12452,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
      CALL allocate_memory()
      !step sizes in angströms or radians, depending on bin counts and boundary values:
      ! a is the real space distance between the molecules in the considered pair
+     !step_a will need updating later, if the maxdist changes for charge arm analyses.
      step_a=(maxdist)/FLOAT(bin_count_a)
      ! b is the polar angle in radians.
      step_b=(pi)/FLOAT(bin_count_b)
@@ -12462,10 +12467,8 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
 
     SUBROUTINE read_references()!This subroutine is responsible for reading the body of the distribution input file, connected as unit 3.
     IMPLICIT NONE
-    INTEGER :: n,inputbin,molecule_index,m
+    INTEGER :: n,inputbin,m
     CHARACTER(LEN=32) :: inputstring
-    REAL :: chargearm
-    REAL(KIND=WORKING_PRECISION) :: rgy_sq
      IF ((TRIM(operation_mode)=="cdf").OR.(TRIM(operation_mode)=="pdf")) THEN
       !read user-specified references
       BACKSPACE 3
@@ -12569,6 +12572,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'bin_count_b' to ",bin_count_b
        ENDIF
       CASE ("maxdist")
+       maxdist_optimize=.FALSE. !use manual maximum distance
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,maxdist
        IF (ios/=0) THEN
@@ -12581,36 +12585,13 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
        ENDIF
       CASE ("maxdist_optimize","maxdist_optimise")
        IF (TRIM(operation_mode)=="charge_arm") THEN
-        maxdist=0.0
-        DO m=1,number_of_references,1
-         DO molecule_index=1,give_number_of_molecules_per_step(references(4,m)),1
-          chargearm=SQRT(SUM(charge_arm(1,references(4,m),molecule_index)**2))
-          IF (normalise_CLM) THEN
-           CALL compute_squared_radius_of_gyration(1,references(4,m),molecule_index,rgy_sq)
-           chargearm=chargearm/(give_mass_of_molecule(references(4,m))*rgy_sq)
-          ENDIF
-          IF (chargearm>maxdist) maxdist=chargearm
-         ENDDO
-        ENDDO
-        IF (normalise_CLM) THEN
-         maxdist=maxdist*100000.0
-         maxdist=FLOAT(CEILING(maxdist))
-         maxdist=maxdist/100000.0
-        ELSE
-         maxdist=maxdist*10.0
-         maxdist=FLOAT(CEILING(maxdist))
-         maxdist=maxdist/10.0
-        ENDIF
-        IF (maxdist<0.0d0) THEN
-         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
-         &"  setting 'maxdist' to default (=",maxdist_default,")"
-         maxdist=maxdist_default
-        ELSEIF (maxdist<1.0d0) THEN
-         IF (VERBOSE_OUTPUT) WRITE(*,'(A,E10.3,A)') "   setting 'maxdist' to",maxdist," (based on maximum charge arm)"
-        ELSE
-         IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (based on maximum charge arm)"
+        maxdist_optimize=.TRUE.
+        IF (VERBOSE_OUTPUT) THEN
+         WRITE(*,*) "  Charge Arm analysis - toggle maxdist_optimize for bins."
+         WRITE(*,*) "  (Will optimise maximum values separately for every reference)"
         ENDIF
        ELSE
+        maxdist_optimize=.FALSE.
         maxdist=give_box_limit()/2.0
         IF (maxdist<0.0d0) THEN
          IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
@@ -13294,6 +13275,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
         &references(1:3,n),TRIM(give_sum_formula(references(4,n)))
        ENDIF
        IF (.NOT.(check_charges(references(4,n)))) CALL report_error(127)
+       IF (maxdist_optimize) CALL optimise_charge_arm()
       ELSE
        IF (references(5,n)<1) THEN
         name_obs="all"
@@ -13312,6 +13294,48 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
      ERROR_CODE=ERROR_CODE_DEFAULT
     ENDIF
    ENDIF
+
+   CONTAINS
+
+    SUBROUTINE optimise_charge_arm()
+    IMPLICIT NONE
+    REAL :: chargearm
+    REAL(KIND=WORKING_PRECISION) :: rgy_sq
+    INTEGER :: molecule_index
+     !start with a foolsproof check
+     IF (TRIM(operation_mode)=="charge_arm") THEN
+      maxdist=0.0
+      DO molecule_index=1,give_number_of_molecules_per_step(references(4,n)),1
+       chargearm=SQRT(SUM(charge_arm(1,references(4,n),molecule_index)**2))
+       IF (normalise_CLM) THEN
+        CALL compute_squared_radius_of_gyration(1,references(4,n),molecule_index,rgy_sq)
+        chargearm=chargearm/(give_mass_of_molecule(references(4,n))*rgy_sq)
+       ENDIF
+       IF (chargearm>maxdist) maxdist=chargearm
+      ENDDO
+      IF (normalise_CLM) THEN
+       maxdist=maxdist*100000.0
+       maxdist=FLOAT(CEILING(maxdist))
+       maxdist=maxdist/100000.0
+      ELSE
+       maxdist=maxdist*10.0
+       maxdist=FLOAT(CEILING(maxdist))
+       maxdist=maxdist/10.0
+      ENDIF
+      IF (maxdist<0.0d0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3)')&
+       &"  setting 'maxdist' to default (=",maxdist_default,")"
+       maxdist=maxdist_default
+      ELSEIF (maxdist<1.0d0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,E10.3,A)') "   setting 'maxdist' to",maxdist," (based on maximum charge arm)"
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.3,A)') "   setting 'maxdist' to ",maxdist," (based on maximum charge arm)"
+      ENDIF
+     ENDIF
+     !update stepsize
+     step_a=(maxdist)/FLOAT(bin_count_a)
+    END SUBROUTINE optimise_charge_arm
+
   END SUBROUTINE perform_distribution_analysis
 
 END MODULE DISTRIBUTION
