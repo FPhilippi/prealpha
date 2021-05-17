@@ -14,6 +14,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL,PARAMETER :: dump_verbose_default=.FALSE.
 	LOGICAL,PARAMETER :: skip_autocorr_default=.FALSE.
 	LOGICAL,PARAMETER :: export_dihedral_default=.FALSE.
+	LOGICAL,PARAMETER :: export_angle_default=.FALSE.
 	LOGICAL,PARAMETER :: jump_analysis_dihedral_default=.FALSE.
 	LOGICAL,PARAMETER :: use_dipole_moment_default=.FALSE.
 	INTEGER,PARAMETER :: sampling_interval_default=1
@@ -39,6 +40,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL :: fold=fold_default !when true, then on top of the values a,b,... specified in the dihedral_list, (360-b),(360-a)... will be considered, too.
 	LOGICAL :: dump_verbose=dump_verbose_default!controls if additional information is dumped into separate files for not.
 	LOGICAL :: export_dihedral=export_dihedral_default!Controls whether dihedrals are to be exported.
+	LOGICAL :: export_angle=export_angle_default!Controls whether angles are to be exported.
 	LOGICAL :: skip_autocorr=skip_autocorr_default!skips the actual autocorrelation. The preparation is still done, which is useful when only PES subsets or dihedral shares are required.
 	LOGICAL :: jump_analysis_dihedral=jump_analysis_dihedral_default !Jump analysis has been requested.
 	INTEGER :: molecule_type_index_b!molecule_type_indices for the second molecule, 'b'
@@ -428,7 +430,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		CHARACTER (LEN=*) :: filename_reorient
 		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
 		INTEGER,INTENT(IN) :: number_of_molecules,nsteps
-		INTEGER :: maxmol,ios,allocstatus,deallocstatus,n,number_of_tip_atoms,number_of_base_atoms
+		INTEGER :: maxmol,ios,allocstatus,deallocstatus,n,number_of_tip_atoms,number_of_base_atoms,inputinteger
 		LOGICAL :: connected
 		INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
 		INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
@@ -487,16 +489,50 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDIF
 				ENDDO
 			ENDIF
-			PRINT *,"Every how many steps would you like to use for the time correlation function?"
-			WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
-			sampling_interval=user_input_integer(1,nsteps)
-			!parallelisation is possible, because autocorrelation.
-			parallelisation_possible=.TRUE.
-			IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
-				PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
-				IF (user_input_logical()) parallelisation_requested=.TRUE.
+			PRINT *,"Would you like to print the orientation evolution of a particular molecule? (y/n)"
+			PRINT *,"(Written into a file containing timestep, unit vector, vector length, angle and Pl[u(0)u(t)])"
+			export_angle=user_input_logical()
+			skip_autocorr=.FALSE.
+			IF (export_angle) THEN
+				IF (number_of_molecules==1) THEN
+					PRINT *,"Just one molecule, which will be exported."
+					export_total_number=1
+				ELSE
+					PRINT *,"Of how many molecules would you like to export the orientation evolution?"
+					export_total_number=user_input_integer(1,maxmol)
+				ENDIF
+				!I mean, I have that variable. Might as well use it.
+				ALLOCATE(export_list(export_total_number),STAT=allocstatus)
+				IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+				WRITE(*,'(A,I0,A)') "You have to enter the indices of the molecules (of type ",molecule_type_index,") now."
+				DO n=1,export_total_number,1
+					WRITE(*,'(A,I0,A,I0,A)') "Please enter molecule index ",n," out of ",export_total_number," you would like to export."
+					inputinteger=user_input_integer(1,maxmol)
+					!check if sensible, i.e. no double specifications. Otherwise, complain.
+					IF (n>1) THEN
+						IF (ANY(export_list(1:n-1)==inputinteger)) THEN
+							WRITE(*,'(A,I0,A)') "The molecule with index ",n," has already been specified."
+							CYCLE
+						ENDIF
+					ENDIF
+					export_list(n)=inputinteger
+				ENDDO
+				PRINT *,"Do you want to skip the autocorrelation? (y/n)"
+				skip_autocorr=user_input_logical()
 			ENDIF
-			WRITE(*,FMT='(A)',ADVANCE="NO") " writing input file for reorientational time correlation function..."
+			IF (.NOT.(skip_autocorr)) THEN
+				PRINT *,"Every how many steps would you like to use for the time correlation function?"
+				WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+				sampling_interval=user_input_integer(1,nsteps)
+				!parallelisation is possible, because autocorrelation.
+				parallelisation_possible=.TRUE.
+				IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
+					PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+					IF (user_input_logical()) parallelisation_requested=.TRUE.
+				ENDIF
+			ENDIF
+			!sufficient information collected
+			WRITE(*,FMT='(A)',ADVANCE="NO") " writing input file for orientation analysis..."
 			INQUIRE(UNIT=8,OPENED=connected)
 			IF (connected) CALL report_error(27,exit_status=8)
 			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_reorient),IOSTAT=ios)!input path is added for the reorientational tcf file!
@@ -507,6 +543,24 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(8,'(" tmax ",I0," ### maximum time shift of the time correlation function")') tmax
 			WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used for the tcf")') sampling_interval
 			WRITE(8,'(" legendre ",I0," ### use legendre polynomial of order ",I0)') legendre_order,legendre_order
+			IF (export_angle) THEN
+				DO n=1,export_total_number,1
+					WRITE(8,'(" export ",I0," ### print orientation evolution for molecule index ",I0," into separate file.")')&
+					& export_list(n),export_list(n)
+				ENDDO
+				!DEALLOCATE memory again
+				DEALLOCATE(export_list,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+				!reset variables to avoid interference
+				export_angle=.FALSE.
+				export_total_number=0
+				WRITE(8,FMT='(" skip_autocorrelation ",L1)',ADVANCE="NO") skip_autocorr
+				IF (skip_autocorr) THEN
+					WRITE(8,*) " ### no autocorrelation, just orientation evolution."
+				ELSE
+					WRITE(8,*) " ### compute the autocorrelation function."
+				ENDIF
+			ENDIF
 			IF (use_dipole_moment) THEN
 				WRITE(8,*) "charge_arm ### use charge arm (or dipole moment for neutral molecules)"
 			ELSE
@@ -825,7 +879,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
 							ENDIF
-						CASE ("skip_autocorrelation")
+						CASE ("skip_autocorrelation","skip_autocorr")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
 							IF (ios/=0) THEN
@@ -856,18 +910,23 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					jump_analysis_dihedral=jump_analysis_dihedral_default
 					jump_length_total_number=0
 					use_dipole_moment=use_dipole_moment_default
+					export_angle=export_angle_default
+					export_dihedral=export_dihedral_default
 				END SUBROUTINE set_defaults
 
 				SUBROUTINE read_input_for_reorientation()
 				IMPLICIT NONE
 				LOGICAL :: tip_read,base_read
-				INTEGER :: number_of_tip_atoms,number_of_base_atoms,counter,allocstatus,deallocstatus,n
+				INTEGER :: number_of_tip_atoms,number_of_base_atoms,counter,allocstatus,deallocstatus,n,inputinteger
 				INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
 				INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
 				CHARACTER(LEN=1024) :: inputstring
 					tip_read=.FALSE.
 					base_read=.FALSE.
 					legendre_order=legendre_order_default
+					!initialise variables for angle export.
+					export_total_number=0
+					export_angle=.FALSE.
 					DO n=1,MAXITERATIONS,1
 						READ(3,IOSTAT=ios,FMT=*) inputstring
 						IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "End-of-file condition in ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
@@ -876,6 +935,66 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							EXIT
 						ENDIF
 						SELECT CASE (TRIM(inputstring))
+						CASE ("skip_autocorrelation","skip_autocorr")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
+							IF (ios/=0) THEN
+								CALL report_error(24,exit_status=ios)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') " setting 'skip_autocorr' to default (=",skip_autocorr_default,")"
+								skip_autocorr=skip_autocorr_default
+							ELSE
+								IF (VERBOSE_OUTPUT) WRITE(*,*) "setting 'skip_autocorr' to ",skip_autocorr
+							ENDIF
+						CASE ("export")
+							!prepare the list of molecule indices whose angles are to be exported in a separate file.
+							!molecule_type_index is initialised elsewhere.
+							IF (export_angle) THEN !export_angle is already active.
+								!another one has been requested. Check if total number is exceeded...
+								IF (export_total_number>=give_number_of_molecules_per_step(molecule_type_index)) THEN
+									!too many molecules to export
+									CALL report_error(75)
+								ELSE
+									BACKSPACE 3
+									READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+									IF (ios/=0) THEN
+										CALL report_error(24,exit_status=ios)
+										inputinteger=1
+									ENDIF
+									!Check if input is sensible
+									IF ((inputinteger<1).OR.(inputinteger>give_number_of_molecules_per_step(molecule_type_index))) THEN
+										CALL report_error(69) !unavailable molecule_index - abort.
+									ELSE
+										IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
+										&" Angle information for molecule number '",inputinteger,"' of type '",&
+										&molecule_type_index,"' will also be exported."
+										export_total_number=export_total_number+1
+										!add molecule_index to list
+										export_list(export_total_number)=inputinteger
+									ENDIF
+								ENDIF
+							ELSE !first molecule_index in list!
+								BACKSPACE 3
+								READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+								IF (ios/=0) THEN
+									CALL report_error(24,exit_status=ios)
+									inputinteger=1
+								ENDIF
+								!Check if input is sensible
+								IF ((inputinteger<1).OR.(inputinteger>give_number_of_molecules_per_step(molecule_type_index))) THEN
+									CALL report_error(69) !unavailable molecule_index - abort.
+								ELSE
+									IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
+									&" Angle information for molecule number '",inputinteger,"' of type '",&
+									&molecule_type_index,"' will be exported."
+									export_total_number=1
+									export_angle=.TRUE.
+									!first occurrence of "export". Allocate memory for list.
+									ALLOCATE(export_list(give_number_of_molecules_per_step(molecule_type_index)),STAT=allocstatus)
+									IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+									!add molecule_index to list
+									export_list(export_total_number)=inputinteger
+								ENDIF
+							ENDIF
 						CASE ("tmax")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
@@ -999,6 +1118,15 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
 						END SELECT
 					ENDDO
+					!If necessary, check for issues with export_list
+					IF (export_angle) THEN
+						DO n=1,export_total_number-1,1
+							IF (ANY(export_list((n+1):(export_total_number))==export_list(n))) THEN
+								CALL report_error(76)
+								EXIT
+							ENDIF
+						ENDDO
+					ENDIF
 					IF ((base_read).AND.(tip_read)) THEN
 						!both fragment lists should be filled now, call the initialisation in MODULE MOLECULAR
 						CALL initialise_fragments(fragment_list_tip,fragment_list_base,number_of_tip_atoms,number_of_base_atoms,molecule_type_index)
@@ -1071,7 +1199,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
 							ENDIF
-						CASE ("skip_autocorrelation")
+						CASE ("skip_autocorrelation","skip_autocorr")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
 							IF (ios/=0) THEN
@@ -1119,7 +1247,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						READ(3,IOSTAT=ios,FMT=*) dihedral_member_indices(n,:),boundaries(n,:)
 						WRITE(inputstring,'(I0,"-",I0,"-",I0,"-",I0)') dihedral_member_indices(n,:)
 						formatted_dihedral_names(n)=TRIM(ADJUSTL(inputstring))
-						WRITE(*,'(" ",A,2F6.1)') TRIM(inputstring),boundaries(n,:)
+						WRITE(*,'("   ",A,2F6.1)') TRIM(inputstring),boundaries(n,:)
 						IF (ios/=0) CALL report_error(14,exit_status=ios)
 					ENDDO
 					CALL initialise_dihedrals(dihedral_member_indices,molecule_type_index,number_of_dihedral_conditions)
@@ -1166,7 +1294,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 										CALL report_error(69) !unavailable molecule_index - abort.
 									ELSE
 										IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
-										&" Dihedrals for molecule number '",inputinteger,"' of type '",molecule_type_index,"' will be exported."
+										&" Dihedrals for molecule number '",inputinteger,"' of type '",molecule_type_index,"' will also be exported."
 										export_total_number=export_total_number+1
 										!add molecule_index to list
 										export_list(export_total_number)=inputinteger
@@ -1217,7 +1345,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						CASE ("quit")
 							IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
 							EXIT
-						CASE ("skip_autocorrelation")
+						CASE ("skip_autocorrelation","skip_autocorr")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
 							IF (ios/=0) THEN
@@ -1327,6 +1455,11 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
 					jump_analysis_dihedral=.FALSE.
 				ENDIF
+			ENDIF
+			IF (export_angle) THEN
+				DEALLOCATE(export_list,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+				export_angle=.FALSE.
 			ENDIF
 			IF (ALLOCATED(vc_components)) THEN
 				DEALLOCATE(vc_components,STAT=deallocstatus)
@@ -1915,16 +2048,86 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CALL give_fragment_information(tip_fragment=.FALSE.)
 				CALL give_fragment_information(tip_fragment=.TRUE.)
 			ENDIF
-			!Main part: compute the tcf
-			CALL compute_reorientational_tcf_parallel(sampling_interval)
-			!Report the tcf
-			CALL report_time_correlation_function()
-			!Deallocate memory for tcf and average counter
+			IF (export_angle) CALL export_angles()
+			IF (skip_autocorr) THEN
+				IF (VERBOSE_OUTPUT) WRITE(*,*) "skip time correlation function."
+			ELSE
+				!Main part: compute the tcf
+				CALL compute_reorientational_tcf_parallel(sampling_interval)
+				!Report the tcf
+				CALL report_time_correlation_function()
+				!Deallocate memory for tcf and average counter
+			ENDIF
 			DEALLOCATE(time_correlation_function,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			DEALLOCATE(x_num,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			CONTAINS
+
+				!This subroutine merely writes the angle information.
+				SUBROUTINE export_angles()
+				IMPLICIT NONE
+				INTEGER :: unit_number,export_counter,stepcounter,ios
+				CHARACTER(LEN=1024) :: filename_export
+				CHARACTER(LEN=15) :: Pl_name
+				LOGICAL :: connected
+				REAL(WORKING_PRECISION) :: orientation(3),initial_orientation(3),length,u0ut_dotproduct
+					IF (.NOT.(export_angle)) CALL report_error(0)
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "Orientation evolution is written to separate files..."
+					IF (VERBOSE_OUTPUT) CALL print_progress(MAX(nsteps*export_total_number,0))
+					!open files for angle export.
+					!Files will be opened in unit 10,11,12,...
+					DO export_counter=1,export_total_number,1
+						unit_number=export_counter+9
+						INQUIRE(UNIT=unit_number,OPENED=connected)
+						IF (connected) CALL report_error(27,exit_status=unit_number)
+						WRITE(filename_export,'("orientation_export",I0,"_",I0)') export_counter,export_list(export_counter)
+						OPEN(UNIT=unit_number,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//filename_export,IOSTAT=ios)
+						IF (ios/=0) CALL report_error(26,exit_status=ios)
+						WRITE(unit_number,'(A,I0,A,I0)') "This file contains orientational information for the molecule number "&
+						&,export_list(export_counter)," of type ",molecule_type_index
+						IF (use_dipole_moment) THEN
+							WRITE(unit_number,*) "'Vector' is the dipole moment (or charge arm for charged species)."
+						ELSE
+							WRITE(unit_number,*) "'Vector' connects base point to tip point."
+						ENDIF
+						WRITE(Pl_name,'("P",I0,"[u(t)u(0)]")') legendre_order
+						WRITE(unit_number,FMT='(7A17)') "step","unit_vector_x","unit_vector_y","unit_vector_z",&
+						&"vector_length","angle/degrees",TRIM(Pl_name)
+						IF (use_dipole_moment) THEN
+							initial_orientation(:)=charge_arm(1,molecule_type_index,export_list(export_counter))
+						ELSE
+							initial_orientation(:)=&
+							&give_tip_fragment(1,export_list(export_counter))-give_base_fragment(1,export_list(export_counter))
+						ENDIF
+						CALL normalize3D(initial_orientation(:))
+						DO stepcounter=1,nsteps,1
+							WRITE(unit_number,ADVANCE="NO",FMT='(I17)') stepcounter
+							IF (use_dipole_moment) THEN
+								!orientation = dipole moment or "charge arm" vector
+								orientation(:)=charge_arm(stepcounter,molecule_type_index,export_list(export_counter))
+							ELSE
+								!orientation = normalised vector from 'base atom' to 'tip atom' at the initial timestep
+								orientation(:)=&
+								&give_tip_fragment(stepcounter,export_list(export_counter))-&
+								&give_base_fragment(stepcounter,export_list(export_counter))
+							ENDIF
+							length=SQRT(SUM(orientation(:)**2))
+							IF (length==0.0_WORKING_PRECISION) CALL report_error(1)
+							orientation=(orientation/length)
+							!the dot product is equal to the cosine of the angle between the two vectors
+							u0ut_dotproduct=DOT_PRODUCT(orientation(:),initial_orientation(:))
+							WRITE(unit_number,*) SNGL(orientation),SNGL(length),&
+							&SNGL(ACOS(u0ut_dotproduct)*degrees),& 
+							&SNGL(legendre_polynomial(u0ut_dotproduct,legendre_order))!take the two normalised values and compute the legendre polynomial of the dot product.
+							IF (VERBOSE_OUTPUT) CALL print_progress()
+						ENDDO
+						ENDFILE unit_number
+						CLOSE(UNIT=unit_number)
+					ENDDO
+					IF (((MAX(nsteps*export_total_number,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "...done."
+				END SUBROUTINE export_angles
 
 				!This subroutine computes eq (11.11.1) from "THEORY OF SIMPLE LIQUIDS" (Hansen / McDonald)
 				!'sampling' is the sampling interval.

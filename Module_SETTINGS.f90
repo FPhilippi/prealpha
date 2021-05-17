@@ -54,6 +54,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	INTEGER,PARAMETER :: ERROR_CODE_DEFAULT=-1
 	INTEGER,PARAMETER :: TIME_SCALING_FACTOR_DEFAULT=1
 	LOGICAL,PARAMETER :: WRAP_TRAJECTORY_DEFAULT=.FALSE.
+	LOGICAL,PARAMETER :: EXTRA_VELOCITY_DEFAULT=.FALSE.
 	INTEGER,PARAMETER :: HEADER_LINES_DEFAULT=5
 	INTEGER,PARAMETER :: MAXITERATIONS=500
 	INTEGER,PARAMETER :: GLOBAL_ITERATIONS_DEFAULT=1
@@ -74,6 +75,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	LOGICAL :: READ_SEQUENTIAL=READ_SEQUENTIAL_DEFAULT!reading the trajectory in a serial way rather than everything at once.
 	LOGICAL :: BOX_VOLUME_GIVEN=BOX_VOLUME_GIVEN_DEFAULT!is there a box volume available?
 	LOGICAL :: WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT!Wrap the trajectory?
+	LOGICAL :: EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT!are there extra 3 columns to read? (i.e. "E vx vy vz xu yu zu", or vice versa)
 	LOGICAL :: SKIP_ANALYSIS!don't do the actual analysis...
 	LOGICAL :: USER_INPUT=.FALSE.!Turns on as soon as user input started...
 	LOGICAL :: DISCONNECTED=.FALSE. !If true, then the standard output is redirected into 'output.dat' (or REDIRECTED_OUTPUT)
@@ -542,7 +544,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  ERROR 74: unphysical number of constraints."
 					WRITE(*,*) " #  Temperature values don't include the constraints correction!"
 				CASE (75)
-					WRITE(*,*) " #  ERROR 75: specified molecules to export dihedrals exceed total number."
+					WRITE(*,*) " #  ERROR 75: specified molecules for export exceeds total number."
 					WRITE(*,*) " #  Ignoring keyword 'export' for this molecule!"
 				CASE (76)
 					WRITE(*,*) " #  WARNING 76: redundant molecule indices specified by 'export'."

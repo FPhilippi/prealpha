@@ -626,12 +626,14 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!SUBROUTINE to center the molecule provided in the specified unit in xyz format.
 		!If addhead is .TRUE. THEN a line with the number of atoms and a blank line are added. note that 'addhead' defaults to .FALSE.!
 		!If the outputunit is present, THEN it is opened with "append"!
-		SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header,geometric_center)
+		!If the centre of charge is passed as well, then some nice extra information is printed at the end
+		SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header,geometric_center,COC,dipole)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN),OPTIONAL :: outputunit
 		INTEGER,INTENT(IN) :: unit_number
 		INTEGER :: number_of_atoms,ios
 		LOGICAL,OPTIONAL :: addhead,geometric_center
+		REAL(KIND=WORKING_PRECISION),OPTIONAL :: COC(3),dipole(3)
 		CHARACTER(LEN=*),OPTIONAL :: custom_header
 		TYPE :: atom
 			CHARACTER (LEN=2) :: atom_type='X'
@@ -749,6 +751,19 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					IF (.NOT.(PRESENT(outputunit))) THEN
 						WRITE(unit_number,*)
 						WRITE(unit_number,*)
+						!Add extra information - don't forget to subtract the origin as above!
+						IF (PRESENT(COC)) THEN
+							IF (MAXVAL(ABS(COC(:)))>0.001) THEN
+								WRITE(unit_number,FMT='("center of charge: (not charge arm!)")')
+								WRITE(unit_number,*) SNGL(COC-center_of_mass%atom_position(:))
+							ENDIF
+						ENDIF
+						IF (PRESENT(dipole)) THEN
+							IF (MAXVAL(ABS(dipole(:)))>0.001) THEN
+								WRITE(unit_number,FMT='("dipole moment:")')
+								WRITE(unit_number,*) SNGL(dipole-center_of_mass%atom_position(:))
+							ENDIF
+						ENDIF
 						ENDFILE unit_number
 						REWIND unit_number
 					ENDIF
@@ -1009,7 +1024,11 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (connected) CALL report_error(27,exit_status=4)
 				OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
 				CALL write_molecule(4,-1,molecule_type_index,1,include_header=.TRUE.)
-				CALL center_xyz(4,addhead=.TRUE.)
+				IF (give_charge_of_molecule(molecule_type_index)==0) THEN
+					CALL center_xyz(4,addhead=.TRUE.,dipole=give_center_of_charge(1,molecule_type_index,1))
+				ELSE
+					CALL center_xyz(4,addhead=.TRUE.,COC=give_center_of_charge(1,molecule_type_index,1))
+				ENDIF
 				CLOSE(UNIT=4)
 			ENDDO
 		END SUBROUTINE dump_example

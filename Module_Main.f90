@@ -33,6 +33,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 	TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT
 	INFORMATION_IN_TRAJECTORY="UNK"
 	WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
+	EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
 	number_of_molecules=-1
 	nsteps=1000000000!expect the worst.
 	smalltask=.TRUE.
@@ -230,8 +231,40 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					ENDIF
 				ENDIF
 			ENDDO
-			!error report 73 also sets WRAP_TRAJECTORY to .FALSE.
-			IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(WRAP_TRAJECTORY)) CALL report_error(73)
+			REWIND 7
+			!search for an 'extra columns' statement
+			EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
+			inputstring=""
+			DO n=1,MAXITERATIONS,1
+				READ(7,IOSTAT=ios,FMT=*) inputstring
+				IF (ios<0) THEN
+					!end of file encountered
+					EXIT
+				ENDIF
+				IF (ios==0) THEN
+					!Synonyms
+					IF (TRIM(inputstring)=="extra_columns") inputstring="extra_velocity"
+					IF (TRIM(inputstring)=="extra_velocity") THEN
+						!"trajectory_type found in input file."
+						WRITE(*,'(A45,I0)') " found an 'extra_velocity' statement in line ",n
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,input_condition
+						IF (ios/=0) THEN
+							IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting extra_velocity to default."
+							EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT!setting to default
+						ELSE
+							IF (TRIM(inputstring)=="extra_velocity") THEN
+								EXTRA_VELOCITY=input_condition
+							ELSE
+								CALL report_error(0)
+							ENDIF
+						ENDIF
+						EXIT
+					ELSEIF (TRIM(inputstring)=="quit") THEN
+						EXIT
+					ENDIF
+				ENDIF
+			ENDDO
 		END SUBROUTINE read_general_input_header
 
 		!This function checks if an input file is available and whether the user wants to overwrite it.
@@ -907,6 +940,14 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'sampling_interval':"
 			PRINT *,"    Expects an integer. Every so many steps will be used as starting point for the tcf."
 			PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory."
+			PRINT *," - 'export':"
+			PRINT *,"    Requires one integer (the index of the molecule) as input."
+			PRINT *,"    The orientation evolution for this particular molecule will be exported in an output file."
+			PRINT *,"    (containing timestep, unit vector, vector length, angle and Pl[u(0)u(t)])"
+			PRINT *,"    Note that 'export' can be specified more than once!"
+			PRINT *," - 'skip_autocorrelation':"
+			PRINT *,"    If true (T), then the actual autocorrelation analysis is skipped."
+			PRINT *,"    This is useful if only 'export' is required."
 			PRINT *," - 'quit'"
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
 			PRINT *
@@ -3233,6 +3274,7 @@ INTEGER :: ios,n
 			WRITE(*,15) "BOX_VOLUME_GIVEN    ",TRIM(logical_to_yesno(BOX_VOLUME_GIVEN))
 			WRITE(*,15) "WRAP_TRAJECTORY     ",TRIM(logical_to_yesno(WRAP_TRAJECTORY))
 			WRITE(*,15) "DISCONNECTED        ",TRIM(logical_to_yesno(DISCONNECTED))
+			WRITE(*,15) "EXTRA_VELOCITY      ",TRIM(logical_to_yesno(EXTRA_VELOCITY))
 			WRITE(*,16) "GLOBAL_ITERATIONS   ",GLOBAL_ITERATIONS
 			WRITE(*,16) "TIME_SCALING_FACTOR ",TIME_SCALING_FACTOR
 			WRITE(*,16) "HEADER_LINES_GINPUT ",HEADER_LINES

@@ -106,6 +106,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!first dimension: Atom index in molecule
 		!second dimension: index of the molecule (not to be confused with molecule_type_index)
 		!third dimension: timestep
+		TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
+		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
 	END TYPE molecule
 	REAL(KIND=STORAGE_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
@@ -155,7 +157,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
 	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
-	PUBLIC :: give_charge_of_atom,give_mass_of_atom
+	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -1546,6 +1548,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				required_storage=required_storage_manual
 			ELSE
 				required_storage=DFLOAT(total_number_of_atoms)*DFLOAT(number_of_steps)*(12.0/1024.0d0)!That's Kibibytes KiB (just KB because whatever)
+				IF (EXTRA_VELOCITY) required_storage=required_storage*2.0
 			ENDIF
 			IF (required_storage<1000.0) THEN
 				memory_suffix="KB"
@@ -1570,8 +1573,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (PRESENT(required_storage_manual)) THEN
 				WRITE(*,ADVANCE="NO",FMT='(F6.1,A2)') required_storage,memory_suffix
 			ELSE
-				WRITE(*,'(" 3*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
-				&total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+				IF (EXTRA_VELOCITY) THEN
+					WRITE(*,'(" 6*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
+					&total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+				ELSE
+					WRITE(*,'(" 3*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
+					&total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+				ENDIF
 			ENDIF
 		END SUBROUTINE print_memory_requirement
 
@@ -1591,7 +1599,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				DO counter=1,lines_to_skip*(timestep-file_position-1),1!DO loop is not executed if the 'next step' is to be read!
 					READ(9,*)
 				ENDDO
-				CALL read_snapshot_body()
+				IF (EXTRA_VELOCITY) THEN
+					CALL read_snapshot_body_posvel()
+				ELSE
+					CALL read_snapshot_body()
+				ENDIF
 			ELSE!timestep MUST be smaller than the file position - have to go back!
 				!How far back is that new, requested timestep?
 				IF (timestep>(file_position/2)) THEN
@@ -1600,7 +1612,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					DO counter=-1,lines_to_skip*(timestep-file_position-1),-1!
 						BACKSPACE 9
 					ENDDO
-					CALL read_snapshot_body()
+					IF (EXTRA_VELOCITY) THEN
+						CALL read_snapshot_body_posvel()
+					ELSE
+						CALL read_snapshot_body()
+					ENDIF
 				ELSE
 					!complete REWIND is advisable.
 					REWIND 9
@@ -1610,7 +1626,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					DO counter=1,lines_to_skip*(timestep-1),1!'file_position' is zero here due to REWIND
 						READ(9,*)
 					ENDDO
-					CALL read_snapshot_body()
+					IF (EXTRA_VELOCITY) THEN
+						CALL read_snapshot_body_posvel()
+					ELSE
+						CALL read_snapshot_body()
+					ENDIF
 				ENDIF
 			ENDIF
 			!set flag to new position.
@@ -1650,6 +1670,37 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ENDDO
 					!And now, the file is positioned just after the timestep that has been read.
 				END SUBROUTINE read_snapshot_body
+
+				SUBROUTINE read_snapshot_body_posvel()
+				IMPLICIT NONE
+				INTEGER :: ios
+					!Read the required part, skipping only over the headerlines_to_skip
+					DO counter=1,headerlines_to_skip,1
+						READ(9,IOSTAT=ios,FMT=*)
+						IF (ios/=0) THEN
+							IF (VERBOSE_OUTPUT) WRITE(*,'("stopped at step ",I0,", Headerline ",I0,".")') timestep,counter
+							!This is a severe error - stop execution.
+							CALL report_error(85,exit_status=ios)
+						ENDIF
+					ENDDO
+					!THEN, read one molecule type after the other:
+					DO molecule_type_index=1,number_of_molecule_types,1
+						!For each molecule type, read the corresponding number of molecules:
+						DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of snapshot (would be "2" for trajectory)
+							!Finally, iterate over the atoms in that particular molecule:
+							DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of snapshot (would be "1" for trajectory)
+								!LOOP VARIABLES:
+								!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+								!molecule_index: current explicit molecule, e.g. molecule number 231
+								!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+								READ(9,*) dummystring,&
+								&molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates,&
+								&molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates
+							ENDDO
+						ENDDO	
+					ENDDO
+					!And now, the file is positioned just after the timestep that has been read.
+				END SUBROUTINE read_snapshot_body_posvel
 
 		END SUBROUTINE goto_timestep
 
@@ -2206,6 +2257,39 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!finally, the center of mass has to be normalised by the total mass.
 			give_center_of_mass(:)=give_center_of_mass(:)/DBLE(molecule_list(molecule_type_index)%mass)
 		END FUNCTION give_center_of_mass
+		!Alternative version using the extra velocity
+		FUNCTION give_center_of_mass_2(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		REAL(KIND=WORKING_PRECISION) :: give_center_of_mass_2(3),weighted_pos(3)!higher precision, because intermediate result.
+		INTEGER :: atom_index
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+			IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+			IF (use_firstatom_as_com) THEN
+				IF (READ_SEQUENTIAL) THEN
+					give_center_of_mass_2(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(1,molecule_index)%coordinates(:))
+				ELSE
+					give_center_of_mass_2(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(1,molecule_index,timestep)%coordinates(:))
+				ENDIF
+				RETURN
+			ENDIF
+			give_center_of_mass_2(:)=0.0d0
+			DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+				!first, the current atom's position is stored in weighted_pos.
+				!added support for sequential read.
+				IF (READ_SEQUENTIAL) THEN
+					weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates(:))
+				ELSE
+					weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,timestep)%coordinates(:))
+				ENDIF
+				!then, this position is weighted with the atom's mass
+				weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+				!this weighted position is now added to the center of mass.
+				give_center_of_mass_2(:)=give_center_of_mass_2(:)+weighted_pos(:)
+			ENDDO
+			!finally, the center of mass has to be normalised by the total mass.
+			give_center_of_mass_2(:)=give_center_of_mass_2(:)/DBLE(molecule_list(molecule_type_index)%mass)
+		END FUNCTION give_center_of_mass_2
+
 
 		!The following function gives what would be the dipole moment of a neutral molecule
 		FUNCTION give_qd_vector(timestep,molecule_type_index,molecule_index)
@@ -2230,6 +2314,29 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDDO
 			!for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
 		END FUNCTION give_qd_vector
+		!Alternative version using the extra velocity
+		FUNCTION give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		REAL(KIND=WORKING_PRECISION) :: give_qd_vector_2(3),weighted_pos(3)!higher precision, because intermediate result.
+		INTEGER :: atom_index
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+			IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+			give_qd_vector_2(:)=0.0d0
+			DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+				!first, the current atom's position is stored in weighted_pos.
+				!added support for sequential read.
+				IF (READ_SEQUENTIAL) THEN
+					weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates(:))
+				ELSE
+					weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,timestep)%coordinates(:))
+				ENDIF
+				!then, this position is weighted with the atom's charge
+				weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+				!this weighted position is now added to the center of mass.
+				give_qd_vector_2(:)=give_qd_vector_2(:)+weighted_pos(:)
+			ENDDO
+			!for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
+		END FUNCTION give_qd_vector_2
 
 		!charge arm |Q*lq| as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
 		FUNCTION charge_arm_length(timestep,molecule_type_index,molecule_index)
@@ -2253,6 +2360,19 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				&(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
 			ENDIF
 		END FUNCTION charge_arm
+		!Alternative version using the extra velocity
+		FUNCTION charge_arm_2(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+		REAL(KIND=WORKING_PRECISION) :: charge_arm_2(3)
+			IF (molecule_list(molecule_type_index)%charge==0) THEN
+				charge_arm_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+			ELSE
+				charge_arm_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)/molecule_list(molecule_type_index)%realcharge
+				charge_arm_2(:)=molecule_list(molecule_type_index)%realcharge*&
+				&(charge_arm_2(:)-give_center_of_mass_2(timestep,molecule_type_index,molecule_index))
+			ENDIF
+		END FUNCTION charge_arm_2
 
 		!gives back the center of charge.
 		!if he molecule is not charged, then the dipole moment is given.
@@ -2267,6 +2387,18 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				&molecule_list(molecule_type_index)%realcharge
 			ENDIF
 		END FUNCTION give_center_of_charge
+		!Alternative version using the extra velocity
+		FUNCTION give_center_of_charge_2(timestep,molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+		REAL(KIND=WORKING_PRECISION) :: give_center_of_charge_2(3)
+			IF (molecule_list(molecule_type_index)%charge==0) THEN
+				give_center_of_charge_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+			ELSE
+				give_center_of_charge_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)/&
+				&molecule_list(molecule_type_index)%realcharge
+			ENDIF
+		END FUNCTION give_center_of_charge_2
 
 		SUBROUTINE print_dipole_statistics()
 		IMPLICIT NONE
@@ -2755,9 +2887,17 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						IF (READ_SEQUENTIAL) THEN
 							ALLOCATE(molecule_list(n)%snapshot(b,c),STAT=allocstatus)
 							IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+							IF (EXTRA_VELOCITY) THEN
+								ALLOCATE(molecule_list(n)%snapshot_2(b,c),STAT=allocstatus)
+								IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+							ENDIF
 						ELSE
 							ALLOCATE(molecule_list(n)%trajectory(b,c,number_of_steps),STAT=allocstatus)
 							IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+							IF (EXTRA_VELOCITY) THEN
+								ALLOCATE(molecule_list(n)%trajectory_2(b,c,number_of_steps),STAT=allocstatus)
+								IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+							ENDIF
 						ENDIF
 						!at this point, the list_of_elements and mass are not specified. This information will be read from the lammps trajectory.
 					ENDDO
@@ -3439,10 +3579,19 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (READ_SEQUENTIAL) THEN
 					DEALLOCATE(molecule_list(n)%snapshot,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+					IF (EXTRA_VELOCITY) THEN
+						DEALLOCATE(molecule_list(n)%snapshot_2,STAT=deallocstatus)
+						IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+					ENDIF
 				ELSE
 					DEALLOCATE(molecule_list(n)%trajectory,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+					IF (EXTRA_VELOCITY) THEN
+						DEALLOCATE(molecule_list(n)%trajectory_2,STAT=deallocstatus)
+						IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+					ENDIF
 				ENDIF
+				
 			ENDDO
 			drudes_assigned=.FALSE.
 			drudes_allocated=.FALSE.
@@ -3576,6 +3725,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				!Here starts the part where the trajectory is actually read in. The rest is error handling etc.
 				!first, read the header of the trajectory file to get box sizes.
 				CALL load_trajectory_header_information()
+				!WRAP_TRAJECTORY check here
+				!error report 73 also sets WRAP_TRAJECTORY to .FALSE.
+				IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(WRAP_TRAJECTORY)) CALL report_error(73)
 				IF (READ_SEQUENTIAL) THEN
 					CLOSE(UNIT=3)
 					IF ((WRAP_TRAJECTORY).AND.(VERBOSE_OUTPUT)) THEN
@@ -3782,22 +3934,42 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								RETURN
 							ENDIF
 						ENDDO
-						!THEN, read one molecule type after the other:
-						DO molecule_type_index=1,number_of_molecule_types,1
-							!For each molecule type, read the corresponding number of molecules:
-							DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
-								!Finally, iterate over the atoms in that particular molecule:
-								DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
-									!LOOP VARIABLES:
-									!stepcounter: current timestep, e.g. 1234
-									!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-									!molecule_index: current explicit molecule, e.g. molecule number 231
-									!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-									READ(3,*) element_name,&
-									&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates
-								ENDDO
-							ENDDO	
-						ENDDO
+						IF (EXTRA_VELOCITY) THEN
+							!THEN, read one molecule type after the other:
+							DO molecule_type_index=1,number_of_molecule_types,1
+								!For each molecule type, read the corresponding number of molecules:
+								DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+									!Finally, iterate over the atoms in that particular molecule:
+									DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
+										!LOOP VARIABLES:
+										!stepcounter: current timestep, e.g. 1234
+										!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+										!molecule_index: current explicit molecule, e.g. molecule number 231
+										!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+										READ(3,*) element_name,&
+										&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates,&
+										&molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,stepcounter)%coordinates
+									ENDDO
+								ENDDO	
+							ENDDO
+						ELSE
+							!THEN, read one molecule type after the other:
+							DO molecule_type_index=1,number_of_molecule_types,1
+								!For each molecule type, read the corresponding number of molecules:
+								DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+									!Finally, iterate over the atoms in that particular molecule:
+									DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
+										!LOOP VARIABLES:
+										!stepcounter: current timestep, e.g. 1234
+										!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+										!molecule_index: current explicit molecule, e.g. molecule number 231
+										!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+										READ(3,*) element_name,&
+										&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates
+									ENDDO
+								ENDDO	
+							ENDDO
+						ENDIF
 						!Show progress
 						CALL print_progress()
 					ENDDO

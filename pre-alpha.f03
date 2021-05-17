@@ -1,4 +1,4 @@
-! RELEASED ON 09_May_2021 AT 13:21
+! RELEASED ON 17_May_2021 AT 22:22
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -55,6 +55,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  INTEGER,PARAMETER :: ERROR_CODE_DEFAULT=-1
  INTEGER,PARAMETER :: TIME_SCALING_FACTOR_DEFAULT=1
  LOGICAL,PARAMETER :: WRAP_TRAJECTORY_DEFAULT=.FALSE.
+ LOGICAL,PARAMETER :: EXTRA_VELOCITY_DEFAULT=.FALSE.
  INTEGER,PARAMETER :: HEADER_LINES_DEFAULT=5
  INTEGER,PARAMETER :: MAXITERATIONS=500
  INTEGER,PARAMETER :: GLOBAL_ITERATIONS_DEFAULT=1
@@ -75,6 +76,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  LOGICAL :: READ_SEQUENTIAL=READ_SEQUENTIAL_DEFAULT!reading the trajectory in a serial way rather than everything at once.
  LOGICAL :: BOX_VOLUME_GIVEN=BOX_VOLUME_GIVEN_DEFAULT!is there a box volume available?
  LOGICAL :: WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT!Wrap the trajectory?
+ LOGICAL :: EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT!are there extra 3 columns to read? (i.e. "E vx vy vz xu yu zu", or vice versa)
  LOGICAL :: SKIP_ANALYSIS!don't do the actual analysis...
  LOGICAL :: USER_INPUT=.FALSE.!Turns on as soon as user input started...
  LOGICAL :: DISCONNECTED=.FALSE. !If true, then the standard output is redirected into 'output.dat' (or REDIRECTED_OUTPUT)
@@ -543,7 +545,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  ERROR 74: unphysical number of constraints."
      WRITE(*,*) " #  Temperature values don't include the constraints correction!"
     CASE (75)
-     WRITE(*,*) " #  ERROR 75: specified molecules to export dihedrals exceed total number."
+     WRITE(*,*) " #  ERROR 75: specified molecules for export exceeds total number."
      WRITE(*,*) " #  Ignoring keyword 'export' for this molecule!"
     CASE (76)
      WRITE(*,*) " #  WARNING 76: redundant molecule indices specified by 'export'."
@@ -1457,6 +1459,8 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
   !first dimension: Atom index in molecule
   !second dimension: index of the molecule (not to be confused with molecule_type_index)
   !third dimension: timestep
+  TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
+  TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
   TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
  END TYPE molecule
  REAL(KIND=STORAGE_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
@@ -1506,7 +1510,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
  PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
- PUBLIC :: give_charge_of_atom,give_mass_of_atom
+ PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -2897,6 +2901,7 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     required_storage=required_storage_manual
    ELSE
     required_storage=DFLOAT(total_number_of_atoms)*DFLOAT(number_of_steps)*(12.0/1024.0d0)!That's Kibibytes KiB (just KB because whatever)
+    IF (EXTRA_VELOCITY) required_storage=required_storage*2.0
    ENDIF
    IF (required_storage<1000.0) THEN
     memory_suffix="KB"
@@ -2921,8 +2926,13 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    IF (PRESENT(required_storage_manual)) THEN
     WRITE(*,ADVANCE="NO",FMT='(F6.1,A2)') required_storage,memory_suffix
    ELSE
-    WRITE(*,'(" 3*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
-    &total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+    IF (EXTRA_VELOCITY) THEN
+     WRITE(*,'(" 6*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
+     &total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+    ELSE
+     WRITE(*,'(" 3*",I0,"*",I0,"*4Byte =",F6.1,A2," (single precision)")')& !printing memory requirement
+     &total_number_of_atoms,number_of_steps,required_storage,memory_suffix
+    ENDIF
    ENDIF
   END SUBROUTINE print_memory_requirement
 
@@ -2942,7 +2952,11 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     DO counter=1,lines_to_skip*(timestep-file_position-1),1!DO loop is not executed if the 'next step' is to be read!
      READ(9,*)
     ENDDO
-    CALL read_snapshot_body()
+    IF (EXTRA_VELOCITY) THEN
+     CALL read_snapshot_body_posvel()
+    ELSE
+     CALL read_snapshot_body()
+    ENDIF
    ELSE!timestep MUST be smaller than the file position - have to go back!
     !How far back is that new, requested timestep?
     IF (timestep>(file_position/2)) THEN
@@ -2951,7 +2965,11 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
      DO counter=-1,lines_to_skip*(timestep-file_position-1),-1!
       BACKSPACE 9
      ENDDO
-     CALL read_snapshot_body()
+     IF (EXTRA_VELOCITY) THEN
+      CALL read_snapshot_body_posvel()
+     ELSE
+      CALL read_snapshot_body()
+     ENDIF
     ELSE
      !complete REWIND is advisable.
      REWIND 9
@@ -2961,7 +2979,11 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
      DO counter=1,lines_to_skip*(timestep-1),1!'file_position' is zero here due to REWIND
       READ(9,*)
      ENDDO
-     CALL read_snapshot_body()
+     IF (EXTRA_VELOCITY) THEN
+      CALL read_snapshot_body_posvel()
+     ELSE
+      CALL read_snapshot_body()
+     ENDIF
     ENDIF
    ENDIF
    !set flag to new position.
@@ -3001,6 +3023,37 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
      ENDDO
      !And now, the file is positioned just after the timestep that has been read.
     END SUBROUTINE read_snapshot_body
+
+    SUBROUTINE read_snapshot_body_posvel()
+    IMPLICIT NONE
+    INTEGER :: ios
+     !Read the required part, skipping only over the headerlines_to_skip
+     DO counter=1,headerlines_to_skip,1
+      READ(9,IOSTAT=ios,FMT=*)
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) WRITE(*,'("stopped at step ",I0,", Headerline ",I0,".")') timestep,counter
+       !This is a severe error - stop execution.
+       CALL report_error(85,exit_status=ios)
+      ENDIF
+     ENDDO
+     !THEN, read one molecule type after the other:
+     DO molecule_type_index=1,number_of_molecule_types,1
+      !For each molecule type, read the corresponding number of molecules:
+      DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of snapshot (would be "2" for trajectory)
+       !Finally, iterate over the atoms in that particular molecule:
+       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of snapshot (would be "1" for trajectory)
+        !LOOP VARIABLES:
+        !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+        !molecule_index: current explicit molecule, e.g. molecule number 231
+        !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+        READ(9,*) dummystring,&
+        &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates,&
+        &molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates
+       ENDDO
+      ENDDO 
+     ENDDO
+     !And now, the file is positioned just after the timestep that has been read.
+    END SUBROUTINE read_snapshot_body_posvel
 
   END SUBROUTINE goto_timestep
 
@@ -3557,6 +3610,39 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    !finally, the center of mass has to be normalised by the total mass.
    give_center_of_mass(:)=give_center_of_mass(:)/DBLE(molecule_list(molecule_type_index)%mass)
   END FUNCTION give_center_of_mass
+  !Alternative version using the extra velocity
+  FUNCTION give_center_of_mass_2(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  REAL(KIND=WORKING_PRECISION) :: give_center_of_mass_2(3),weighted_pos(3)!higher precision, because intermediate result.
+  INTEGER :: atom_index
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+   IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+   IF (use_firstatom_as_com) THEN
+    IF (READ_SEQUENTIAL) THEN
+     give_center_of_mass_2(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(1,molecule_index)%coordinates(:))
+    ELSE
+     give_center_of_mass_2(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(1,molecule_index,timestep)%coordinates(:))
+    ENDIF
+    RETURN
+   ENDIF
+   give_center_of_mass_2(:)=0.0d0
+   DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+    !first, the current atom's position is stored in weighted_pos.
+    !added support for sequential read.
+    IF (READ_SEQUENTIAL) THEN
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates(:))
+    ELSE
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,timestep)%coordinates(:))
+    ENDIF
+    !then, this position is weighted with the atom's mass
+    weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_masses(atom_index)
+    !this weighted position is now added to the center of mass.
+    give_center_of_mass_2(:)=give_center_of_mass_2(:)+weighted_pos(:)
+   ENDDO
+   !finally, the center of mass has to be normalised by the total mass.
+   give_center_of_mass_2(:)=give_center_of_mass_2(:)/DBLE(molecule_list(molecule_type_index)%mass)
+  END FUNCTION give_center_of_mass_2
+
 
   !The following function gives what would be the dipole moment of a neutral molecule
   FUNCTION give_qd_vector(timestep,molecule_type_index,molecule_index)
@@ -3581,6 +3667,29 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    ENDDO
    !for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
   END FUNCTION give_qd_vector
+  !Alternative version using the extra velocity
+  FUNCTION give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  REAL(KIND=WORKING_PRECISION) :: give_qd_vector_2(3),weighted_pos(3)!higher precision, because intermediate result.
+  INTEGER :: atom_index
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+   IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+   give_qd_vector_2(:)=0.0d0
+   DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+    !first, the current atom's position is stored in weighted_pos.
+    !added support for sequential read.
+    IF (READ_SEQUENTIAL) THEN
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%snapshot_2(atom_index,molecule_index)%coordinates(:))
+    ELSE
+     weighted_pos(:)=DBLE(molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,timestep)%coordinates(:))
+    ENDIF
+    !then, this position is weighted with the atom's charge
+    weighted_pos(:)=weighted_pos(:)*molecule_list(molecule_type_index)%list_of_atom_charges(atom_index)
+    !this weighted position is now added to the center of mass.
+    give_qd_vector_2(:)=give_qd_vector_2(:)+weighted_pos(:)
+   ENDDO
+   !for neutral molecules, the result is already the dipole moment. But for charged ones, we'll need to normalise with charge.
+  END FUNCTION give_qd_vector_2
 
   !charge arm |Q*lq| as defined by kobrak in ECS Proc. Vol., 2004, 2004–24, 417–425.
   FUNCTION charge_arm_length(timestep,molecule_type_index,molecule_index)
@@ -3604,6 +3713,19 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     &(charge_arm(:)-give_center_of_mass(timestep,molecule_type_index,molecule_index))
    ENDIF
   END FUNCTION charge_arm
+  !Alternative version using the extra velocity
+  FUNCTION charge_arm_2(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+  REAL(KIND=WORKING_PRECISION) :: charge_arm_2(3)
+   IF (molecule_list(molecule_type_index)%charge==0) THEN
+    charge_arm_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+   ELSE
+    charge_arm_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)/molecule_list(molecule_type_index)%realcharge
+    charge_arm_2(:)=molecule_list(molecule_type_index)%realcharge*&
+    &(charge_arm_2(:)-give_center_of_mass_2(timestep,molecule_type_index,molecule_index))
+   ENDIF
+  END FUNCTION charge_arm_2
 
   !gives back the center of charge.
   !if he molecule is not charged, then the dipole moment is given.
@@ -3618,6 +3740,18 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     &molecule_list(molecule_type_index)%realcharge
    ENDIF
   END FUNCTION give_center_of_charge
+  !Alternative version using the extra velocity
+  FUNCTION give_center_of_charge_2(timestep,molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index
+  REAL(KIND=WORKING_PRECISION) :: give_center_of_charge_2(3)
+   IF (molecule_list(molecule_type_index)%charge==0) THEN
+    give_center_of_charge_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)
+   ELSE
+    give_center_of_charge_2(:)=give_qd_vector_2(timestep,molecule_type_index,molecule_index)/&
+    &molecule_list(molecule_type_index)%realcharge
+   ENDIF
+  END FUNCTION give_center_of_charge_2
 
   SUBROUTINE print_dipole_statistics()
   IMPLICIT NONE
@@ -4106,9 +4240,17 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
       IF (READ_SEQUENTIAL) THEN
        ALLOCATE(molecule_list(n)%snapshot(b,c),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+       IF (EXTRA_VELOCITY) THEN
+        ALLOCATE(molecule_list(n)%snapshot_2(b,c),STAT=allocstatus)
+        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+       ENDIF
       ELSE
        ALLOCATE(molecule_list(n)%trajectory(b,c,number_of_steps),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+       IF (EXTRA_VELOCITY) THEN
+        ALLOCATE(molecule_list(n)%trajectory_2(b,c,number_of_steps),STAT=allocstatus)
+        IF (allocstatus/=0) CALL report_error(6,exit_status=allocstatus)
+       ENDIF
       ENDIF
       !at this point, the list_of_elements and mass are not specified. This information will be read from the lammps trajectory.
      ENDDO
@@ -4790,10 +4932,19 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     IF (READ_SEQUENTIAL) THEN
      DEALLOCATE(molecule_list(n)%snapshot,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+     IF (EXTRA_VELOCITY) THEN
+      DEALLOCATE(molecule_list(n)%snapshot_2,STAT=deallocstatus)
+      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+     ENDIF
     ELSE
      DEALLOCATE(molecule_list(n)%trajectory,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+     IF (EXTRA_VELOCITY) THEN
+      DEALLOCATE(molecule_list(n)%trajectory_2,STAT=deallocstatus)
+      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+     ENDIF
     ENDIF
+    
    ENDDO
    drudes_assigned=.FALSE.
    drudes_allocated=.FALSE.
@@ -4927,6 +5078,9 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     !Here starts the part where the trajectory is actually read in. The rest is error handling etc.
     !first, read the header of the trajectory file to get box sizes.
     CALL load_trajectory_header_information()
+    !WRAP_TRAJECTORY check here
+    !error report 73 also sets WRAP_TRAJECTORY to .FALSE.
+    IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(WRAP_TRAJECTORY)) CALL report_error(73)
     IF (READ_SEQUENTIAL) THEN
      CLOSE(UNIT=3)
      IF ((WRAP_TRAJECTORY).AND.(VERBOSE_OUTPUT)) THEN
@@ -5133,22 +5287,42 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
         RETURN
        ENDIF
       ENDDO
-      !THEN, read one molecule type after the other:
-      DO molecule_type_index=1,number_of_molecule_types,1
-       !For each molecule type, read the corresponding number of molecules:
-       DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
-        !Finally, iterate over the atoms in that particular molecule:
-        DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
-         !LOOP VARIABLES:
-         !stepcounter: current timestep, e.g. 1234
-         !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-         !molecule_index: current explicit molecule, e.g. molecule number 231
-         !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-         READ(3,*) element_name,&
-         &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates
-        ENDDO
-       ENDDO 
-      ENDDO
+      IF (EXTRA_VELOCITY) THEN
+       !THEN, read one molecule type after the other:
+       DO molecule_type_index=1,number_of_molecule_types,1
+        !For each molecule type, read the corresponding number of molecules:
+        DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+         !Finally, iterate over the atoms in that particular molecule:
+         DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
+          !LOOP VARIABLES:
+          !stepcounter: current timestep, e.g. 1234
+          !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+          !molecule_index: current explicit molecule, e.g. molecule number 231
+          !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+          READ(3,*) element_name,&
+          &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates,&
+          &molecule_list(molecule_type_index)%trajectory_2(atom_index,molecule_index,stepcounter)%coordinates
+         ENDDO
+        ENDDO 
+       ENDDO
+      ELSE
+       !THEN, read one molecule type after the other:
+       DO molecule_type_index=1,number_of_molecule_types,1
+        !For each molecule type, read the corresponding number of molecules:
+        DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of trajectory
+         !Finally, iterate over the atoms in that particular molecule:
+         DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives first dimension of trajectory
+          !LOOP VARIABLES:
+          !stepcounter: current timestep, e.g. 1234
+          !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
+          !molecule_index: current explicit molecule, e.g. molecule number 231
+          !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
+          READ(3,*) element_name,&
+          &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter)%coordinates
+         ENDDO
+        ENDDO 
+       ENDDO
+      ENDIF
       !Show progress
       CALL print_progress()
      ENDDO
@@ -5996,12 +6170,14 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
   !SUBROUTINE to center the molecule provided in the specified unit in xyz format.
   !If addhead is .TRUE. THEN a line with the number of atoms and a blank line are added. note that 'addhead' defaults to .FALSE.!
   !If the outputunit is present, THEN it is opened with "append"!
-  SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header,geometric_center)
+  !If the centre of charge is passed as well, then some nice extra information is printed at the end
+  SUBROUTINE center_xyz(unit_number,addhead,outputunit,custom_header,geometric_center,COC,dipole)
   IMPLICIT NONE
   INTEGER,INTENT(IN),OPTIONAL :: outputunit
   INTEGER,INTENT(IN) :: unit_number
   INTEGER :: number_of_atoms,ios
   LOGICAL,OPTIONAL :: addhead,geometric_center
+  REAL(KIND=WORKING_PRECISION),OPTIONAL :: COC(3),dipole(3)
   CHARACTER(LEN=*),OPTIONAL :: custom_header
   TYPE :: atom
    CHARACTER (LEN=2) :: atom_type='X'
@@ -6119,6 +6295,19 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
      IF (.NOT.(PRESENT(outputunit))) THEN
       WRITE(unit_number,*)
       WRITE(unit_number,*)
+      !Add extra information - don't forget to subtract the origin as above!
+      IF (PRESENT(COC)) THEN
+       IF (MAXVAL(ABS(COC(:)))>0.001) THEN
+        WRITE(unit_number,FMT='("center of charge: (not charge arm!)")')
+        WRITE(unit_number,*) SNGL(COC-center_of_mass%atom_position(:))
+       ENDIF
+      ENDIF
+      IF (PRESENT(dipole)) THEN
+       IF (MAXVAL(ABS(dipole(:)))>0.001) THEN
+        WRITE(unit_number,FMT='("dipole moment:")')
+        WRITE(unit_number,*) SNGL(dipole-center_of_mass%atom_position(:))
+       ENDIF
+      ENDIF
       ENDFILE unit_number
       REWIND unit_number
      ENDIF
@@ -6379,7 +6568,11 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     IF (connected) CALL report_error(27,exit_status=4)
     OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
     CALL write_molecule(4,-1,molecule_type_index,1,include_header=.TRUE.)
-    CALL center_xyz(4,addhead=.TRUE.)
+    IF (give_charge_of_molecule(molecule_type_index)==0) THEN
+     CALL center_xyz(4,addhead=.TRUE.,dipole=give_center_of_charge(1,molecule_type_index,1))
+    ELSE
+     CALL center_xyz(4,addhead=.TRUE.,COC=give_center_of_charge(1,molecule_type_index,1))
+    ENDIF
     CLOSE(UNIT=4)
    ENDDO
   END SUBROUTINE dump_example
@@ -7104,6 +7297,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
  LOGICAL,PARAMETER :: dump_verbose_default=.FALSE.
  LOGICAL,PARAMETER :: skip_autocorr_default=.FALSE.
  LOGICAL,PARAMETER :: export_dihedral_default=.FALSE.
+ LOGICAL,PARAMETER :: export_angle_default=.FALSE.
  LOGICAL,PARAMETER :: jump_analysis_dihedral_default=.FALSE.
  LOGICAL,PARAMETER :: use_dipole_moment_default=.FALSE.
  INTEGER,PARAMETER :: sampling_interval_default=1
@@ -7129,6 +7323,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
  LOGICAL :: fold=fold_default !when true, then on top of the values a,b,... specified in the dihedral_list, (360-b),(360-a)... will be considered, too.
  LOGICAL :: dump_verbose=dump_verbose_default!controls if additional information is dumped into separate files for not.
  LOGICAL :: export_dihedral=export_dihedral_default!Controls whether dihedrals are to be exported.
+ LOGICAL :: export_angle=export_angle_default!Controls whether angles are to be exported.
  LOGICAL :: skip_autocorr=skip_autocorr_default!skips the actual autocorrelation. The preparation is still done, which is useful when only PES subsets or dihedral shares are required.
  LOGICAL :: jump_analysis_dihedral=jump_analysis_dihedral_default !Jump analysis has been requested.
  INTEGER :: molecule_type_index_b!molecule_type_indices for the second molecule, 'b'
@@ -7518,7 +7713,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
   CHARACTER (LEN=*) :: filename_reorient
   LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
   INTEGER,INTENT(IN) :: number_of_molecules,nsteps
-  INTEGER :: maxmol,ios,allocstatus,deallocstatus,n,number_of_tip_atoms,number_of_base_atoms
+  INTEGER :: maxmol,ios,allocstatus,deallocstatus,n,number_of_tip_atoms,number_of_base_atoms,inputinteger
   LOGICAL :: connected
   INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
   INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
@@ -7577,16 +7772,50 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      ENDIF
     ENDDO
    ENDIF
-   PRINT *,"Every how many steps would you like to use for the time correlation function?"
-   WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
-   sampling_interval=user_input_integer(1,nsteps)
-   !parallelisation is possible, because autocorrelation.
-   parallelisation_possible=.TRUE.
-   IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
-    PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
-    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   PRINT *,"Would you like to print the orientation evolution of a particular molecule? (y/n)"
+   PRINT *,"(Written into a file containing timestep, unit vector, vector length, angle and Pl[u(0)u(t)])"
+   export_angle=user_input_logical()
+   skip_autocorr=.FALSE.
+   IF (export_angle) THEN
+    IF (number_of_molecules==1) THEN
+     PRINT *,"Just one molecule, which will be exported."
+     export_total_number=1
+    ELSE
+     PRINT *,"Of how many molecules would you like to export the orientation evolution?"
+     export_total_number=user_input_integer(1,maxmol)
+    ENDIF
+    !I mean, I have that variable. Might as well use it.
+    ALLOCATE(export_list(export_total_number),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    WRITE(*,'(A,I0,A)') "You have to enter the indices of the molecules (of type ",molecule_type_index,") now."
+    DO n=1,export_total_number,1
+     WRITE(*,'(A,I0,A,I0,A)') "Please enter molecule index ",n," out of ",export_total_number," you would like to export."
+     inputinteger=user_input_integer(1,maxmol)
+     !check if sensible, i.e. no double specifications. Otherwise, complain.
+     IF (n>1) THEN
+      IF (ANY(export_list(1:n-1)==inputinteger)) THEN
+       WRITE(*,'(A,I0,A)') "The molecule with index ",n," has already been specified."
+       CYCLE
+      ENDIF
+     ENDIF
+     export_list(n)=inputinteger
+    ENDDO
+    PRINT *,"Do you want to skip the autocorrelation? (y/n)"
+    skip_autocorr=user_input_logical()
    ENDIF
-   WRITE(*,FMT='(A)',ADVANCE="NO") " writing input file for reorientational time correlation function..."
+   IF (.NOT.(skip_autocorr)) THEN
+    PRINT *,"Every how many steps would you like to use for the time correlation function?"
+    WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+    sampling_interval=user_input_integer(1,nsteps)
+    !parallelisation is possible, because autocorrelation.
+    parallelisation_possible=.TRUE.
+    IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
+     PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+     IF (user_input_logical()) parallelisation_requested=.TRUE.
+    ENDIF
+   ENDIF
+   !sufficient information collected
+   WRITE(*,FMT='(A)',ADVANCE="NO") " writing input file for orientation analysis..."
    INQUIRE(UNIT=8,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=8)
    OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_reorient),IOSTAT=ios)!input path is added for the reorientational tcf file!
@@ -7597,6 +7826,24 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
    WRITE(8,'(" tmax ",I0," ### maximum time shift of the time correlation function")') tmax
    WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used for the tcf")') sampling_interval
    WRITE(8,'(" legendre ",I0," ### use legendre polynomial of order ",I0)') legendre_order,legendre_order
+   IF (export_angle) THEN
+    DO n=1,export_total_number,1
+     WRITE(8,'(" export ",I0," ### print orientation evolution for molecule index ",I0," into separate file.")')&
+     & export_list(n),export_list(n)
+    ENDDO
+    !DEALLOCATE memory again
+    DEALLOCATE(export_list,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+    !reset variables to avoid interference
+    export_angle=.FALSE.
+    export_total_number=0
+    WRITE(8,FMT='(" skip_autocorrelation ",L1)',ADVANCE="NO") skip_autocorr
+    IF (skip_autocorr) THEN
+     WRITE(8,*) " ### no autocorrelation, just orientation evolution."
+    ELSE
+     WRITE(8,*) " ### compute the autocorrelation function."
+    ENDIF
+   ENDIF
    IF (use_dipole_moment) THEN
     WRITE(8,*) "charge_arm ### use charge arm (or dipole moment for neutral molecules)"
    ELSE
@@ -7915,7 +8162,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
        ENDIF
-      CASE ("skip_autocorrelation")
+      CASE ("skip_autocorrelation","skip_autocorr")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
        IF (ios/=0) THEN
@@ -7946,18 +8193,23 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      jump_analysis_dihedral=jump_analysis_dihedral_default
      jump_length_total_number=0
      use_dipole_moment=use_dipole_moment_default
+     export_angle=export_angle_default
+     export_dihedral=export_dihedral_default
     END SUBROUTINE set_defaults
 
     SUBROUTINE read_input_for_reorientation()
     IMPLICIT NONE
     LOGICAL :: tip_read,base_read
-    INTEGER :: number_of_tip_atoms,number_of_base_atoms,counter,allocstatus,deallocstatus,n
+    INTEGER :: number_of_tip_atoms,number_of_base_atoms,counter,allocstatus,deallocstatus,n,inputinteger
     INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for base atom
     INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !temporary list of centre-of-mass fragments (defined as atom_indices) for tip atom
     CHARACTER(LEN=1024) :: inputstring
      tip_read=.FALSE.
      base_read=.FALSE.
      legendre_order=legendre_order_default
+     !initialise variables for angle export.
+     export_total_number=0
+     export_angle=.FALSE.
      DO n=1,MAXITERATIONS,1
       READ(3,IOSTAT=ios,FMT=*) inputstring
       IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "End-of-file condition in ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
@@ -7966,6 +8218,66 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        EXIT
       ENDIF
       SELECT CASE (TRIM(inputstring))
+      CASE ("skip_autocorrelation","skip_autocorr")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)') " setting 'skip_autocorr' to default (=",skip_autocorr_default,")"
+        skip_autocorr=skip_autocorr_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,*) "setting 'skip_autocorr' to ",skip_autocorr
+       ENDIF
+      CASE ("export")
+       !prepare the list of molecule indices whose angles are to be exported in a separate file.
+       !molecule_type_index is initialised elsewhere.
+       IF (export_angle) THEN !export_angle is already active.
+        !another one has been requested. Check if total number is exceeded...
+        IF (export_total_number>=give_number_of_molecules_per_step(molecule_type_index)) THEN
+         !too many molecules to export
+         CALL report_error(75)
+        ELSE
+         BACKSPACE 3
+         READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+         IF (ios/=0) THEN
+          CALL report_error(24,exit_status=ios)
+          inputinteger=1
+         ENDIF
+         !Check if input is sensible
+         IF ((inputinteger<1).OR.(inputinteger>give_number_of_molecules_per_step(molecule_type_index))) THEN
+          CALL report_error(69) !unavailable molecule_index - abort.
+         ELSE
+          IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
+          &" Angle information for molecule number '",inputinteger,"' of type '",&
+          &molecule_type_index,"' will also be exported."
+          export_total_number=export_total_number+1
+          !add molecule_index to list
+          export_list(export_total_number)=inputinteger
+         ENDIF
+        ENDIF
+       ELSE !first molecule_index in list!
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+        IF (ios/=0) THEN
+         CALL report_error(24,exit_status=ios)
+         inputinteger=1
+        ENDIF
+        !Check if input is sensible
+        IF ((inputinteger<1).OR.(inputinteger>give_number_of_molecules_per_step(molecule_type_index))) THEN
+         CALL report_error(69) !unavailable molecule_index - abort.
+        ELSE
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
+         &" Angle information for molecule number '",inputinteger,"' of type '",&
+         &molecule_type_index,"' will be exported."
+         export_total_number=1
+         export_angle=.TRUE.
+         !first occurrence of "export". Allocate memory for list.
+         ALLOCATE(export_list(give_number_of_molecules_per_step(molecule_type_index)),STAT=allocstatus)
+         IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+         !add molecule_index to list
+         export_list(export_total_number)=inputinteger
+        ENDIF
+       ENDIF
       CASE ("tmax")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
@@ -8089,6 +8401,15 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        IF (VERBOSE_OUTPUT) WRITE(*,*) "can't interpret line - continue streaming"
       END SELECT
      ENDDO
+     !If necessary, check for issues with export_list
+     IF (export_angle) THEN
+      DO n=1,export_total_number-1,1
+       IF (ANY(export_list((n+1):(export_total_number))==export_list(n))) THEN
+        CALL report_error(76)
+        EXIT
+       ENDIF
+      ENDDO
+     ENDIF
      IF ((base_read).AND.(tip_read)) THEN
       !both fragment lists should be filled now, call the initialisation in MODULE MOLECULAR
       CALL initialise_fragments(fragment_list_tip,fragment_list_base,number_of_tip_atoms,number_of_base_atoms,molecule_type_index)
@@ -8161,7 +8482,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') " setting 'sampling_interval' to ",sampling_interval
        ENDIF
-      CASE ("skip_autocorrelation")
+      CASE ("skip_autocorrelation","skip_autocorr")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
        IF (ios/=0) THEN
@@ -8209,7 +8530,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
       READ(3,IOSTAT=ios,FMT=*) dihedral_member_indices(n,:),boundaries(n,:)
       WRITE(inputstring,'(I0,"-",I0,"-",I0,"-",I0)') dihedral_member_indices(n,:)
       formatted_dihedral_names(n)=TRIM(ADJUSTL(inputstring))
-      WRITE(*,'(" ",A,2F6.1)') TRIM(inputstring),boundaries(n,:)
+      WRITE(*,'("   ",A,2F6.1)') TRIM(inputstring),boundaries(n,:)
       IF (ios/=0) CALL report_error(14,exit_status=ios)
      ENDDO
      CALL initialise_dihedrals(dihedral_member_indices,molecule_type_index,number_of_dihedral_conditions)
@@ -8256,7 +8577,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
           CALL report_error(69) !unavailable molecule_index - abort.
          ELSE
           IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)') &
-          &" Dihedrals for molecule number '",inputinteger,"' of type '",molecule_type_index,"' will be exported."
+          &" Dihedrals for molecule number '",inputinteger,"' of type '",molecule_type_index,"' will also be exported."
           export_total_number=export_total_number+1
           !add molecule_index to list
           export_list(export_total_number)=inputinteger
@@ -8307,7 +8628,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
       CASE ("quit")
        IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_AUTOCORRELATION_INPUT)
        EXIT
-      CASE ("skip_autocorrelation")
+      CASE ("skip_autocorrelation","skip_autocorr")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,skip_autocorr
        IF (ios/=0) THEN
@@ -8417,6 +8738,11 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
      jump_analysis_dihedral=.FALSE.
     ENDIF
+   ENDIF
+   IF (export_angle) THEN
+    DEALLOCATE(export_list,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(15,exit_status=deallocstatus)
+    export_angle=.FALSE.
    ENDIF
    IF (ALLOCATED(vc_components)) THEN
     DEALLOCATE(vc_components,STAT=deallocstatus)
@@ -9005,16 +9331,86 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
     CALL give_fragment_information(tip_fragment=.FALSE.)
     CALL give_fragment_information(tip_fragment=.TRUE.)
    ENDIF
-   !Main part: compute the tcf
-   CALL compute_reorientational_tcf_parallel(sampling_interval)
-   !Report the tcf
-   CALL report_time_correlation_function()
-   !Deallocate memory for tcf and average counter
+   IF (export_angle) CALL export_angles()
+   IF (skip_autocorr) THEN
+    IF (VERBOSE_OUTPUT) WRITE(*,*) "skip time correlation function."
+   ELSE
+    !Main part: compute the tcf
+    CALL compute_reorientational_tcf_parallel(sampling_interval)
+    !Report the tcf
+    CALL report_time_correlation_function()
+    !Deallocate memory for tcf and average counter
+   ENDIF
    DEALLOCATE(time_correlation_function,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    DEALLOCATE(x_num,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    CONTAINS
+
+    !This subroutine merely writes the angle information.
+    SUBROUTINE export_angles()
+    IMPLICIT NONE
+    INTEGER :: unit_number,export_counter,stepcounter,ios
+    CHARACTER(LEN=1024) :: filename_export
+    CHARACTER(LEN=15) :: Pl_name
+    LOGICAL :: connected
+    REAL(WORKING_PRECISION) :: orientation(3),initial_orientation(3),length,u0ut_dotproduct
+     IF (.NOT.(export_angle)) CALL report_error(0)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "Orientation evolution is written to separate files..."
+     IF (VERBOSE_OUTPUT) CALL print_progress(MAX(nsteps*export_total_number,0))
+     !open files for angle export.
+     !Files will be opened in unit 10,11,12,...
+     DO export_counter=1,export_total_number,1
+      unit_number=export_counter+9
+      INQUIRE(UNIT=unit_number,OPENED=connected)
+      IF (connected) CALL report_error(27,exit_status=unit_number)
+      WRITE(filename_export,'("orientation_export",I0,"_",I0)') export_counter,export_list(export_counter)
+      OPEN(UNIT=unit_number,FILE=TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))//filename_export,IOSTAT=ios)
+      IF (ios/=0) CALL report_error(26,exit_status=ios)
+      WRITE(unit_number,'(A,I0,A,I0)') "This file contains orientational information for the molecule number "&
+      &,export_list(export_counter)," of type ",molecule_type_index
+      IF (use_dipole_moment) THEN
+       WRITE(unit_number,*) "'Vector' is the dipole moment (or charge arm for charged species)."
+      ELSE
+       WRITE(unit_number,*) "'Vector' connects base point to tip point."
+      ENDIF
+      WRITE(Pl_name,'("P",I0,"[u(t)u(0)]")') legendre_order
+      WRITE(unit_number,FMT='(7A17)') "step","unit_vector_x","unit_vector_y","unit_vector_z",&
+      &"vector_length","angle/degrees",TRIM(Pl_name)
+      IF (use_dipole_moment) THEN
+       initial_orientation(:)=charge_arm(1,molecule_type_index,export_list(export_counter))
+      ELSE
+       initial_orientation(:)=&
+       &give_tip_fragment(1,export_list(export_counter))-give_base_fragment(1,export_list(export_counter))
+      ENDIF
+      CALL normalize3D(initial_orientation(:))
+      DO stepcounter=1,nsteps,1
+       WRITE(unit_number,ADVANCE="NO",FMT='(I17)') stepcounter
+       IF (use_dipole_moment) THEN
+        !orientation = dipole moment or "charge arm" vector
+        orientation(:)=charge_arm(stepcounter,molecule_type_index,export_list(export_counter))
+       ELSE
+        !orientation = normalised vector from 'base atom' to 'tip atom' at the initial timestep
+        orientation(:)=&
+        &give_tip_fragment(stepcounter,export_list(export_counter))-&
+        &give_base_fragment(stepcounter,export_list(export_counter))
+       ENDIF
+       length=SQRT(SUM(orientation(:)**2))
+       IF (length==0.0_WORKING_PRECISION) CALL report_error(1)
+       orientation=(orientation/length)
+       !the dot product is equal to the cosine of the angle between the two vectors
+       u0ut_dotproduct=DOT_PRODUCT(orientation(:),initial_orientation(:))
+       WRITE(unit_number,*) SNGL(orientation),SNGL(length),&
+       &SNGL(ACOS(u0ut_dotproduct)*degrees),& 
+       &SNGL(legendre_polynomial(u0ut_dotproduct,legendre_order))!take the two normalised values and compute the legendre polynomial of the dot product.
+       IF (VERBOSE_OUTPUT) CALL print_progress()
+      ENDDO
+      ENDFILE unit_number
+      CLOSE(UNIT=unit_number)
+     ENDDO
+     IF (((MAX(nsteps*export_total_number,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "...done."
+    END SUBROUTINE export_angles
 
     !This subroutine computes eq (11.11.1) from "THEORY OF SIMPLE LIQUIDS" (Hansen / McDonald)
     !'sampling' is the sampling interval.
@@ -14617,6 +15013,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT
  INFORMATION_IN_TRAJECTORY="UNK"
  WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
+ EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
  number_of_molecules=-1
  nsteps=1000000000!expect the worst.
  smalltask=.TRUE.
@@ -14636,7 +15033,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 09_May_2021"
+ PRINT *, "   Date of Release: 17_May_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -14814,8 +15211,40 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      ENDIF
     ENDIF
    ENDDO
-   !error report 73 also sets WRAP_TRAJECTORY to .FALSE.
-   IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(WRAP_TRAJECTORY)) CALL report_error(73)
+   REWIND 7
+   !search for an 'extra columns' statement
+   EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
+   inputstring=""
+   DO n=1,MAXITERATIONS,1
+    READ(7,IOSTAT=ios,FMT=*) inputstring
+    IF (ios<0) THEN
+     !end of file encountered
+     EXIT
+    ENDIF
+    IF (ios==0) THEN
+     !Synonyms
+     IF (TRIM(inputstring)=="extra_columns") inputstring="extra_velocity"
+     IF (TRIM(inputstring)=="extra_velocity") THEN
+      !"trajectory_type found in input file."
+      WRITE(*,'(A45,I0)') " found an 'extra_velocity' statement in line ",n
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,input_condition
+      IF (ios/=0) THEN
+       IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting extra_velocity to default."
+       EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT!setting to default
+      ELSE
+       IF (TRIM(inputstring)=="extra_velocity") THEN
+        EXTRA_VELOCITY=input_condition
+       ELSE
+        CALL report_error(0)
+       ENDIF
+      ENDIF
+      EXIT
+     ELSEIF (TRIM(inputstring)=="quit") THEN
+      EXIT
+     ENDIF
+    ENDIF
+   ENDDO
   END SUBROUTINE read_general_input_header
 
   !This function checks if an input file is available and whether the user wants to overwrite it.
@@ -15491,6 +15920,14 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'sampling_interval':"
    PRINT *,"    Expects an integer. Every so many steps will be used as starting point for the tcf."
    PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory."
+   PRINT *," - 'export':"
+   PRINT *,"    Requires one integer (the index of the molecule) as input."
+   PRINT *,"    The orientation evolution for this particular molecule will be exported in an output file."
+   PRINT *,"    (containing timestep, unit vector, vector length, angle and Pl[u(0)u(t)])"
+   PRINT *,"    Note that 'export' can be specified more than once!"
+   PRINT *," - 'skip_autocorrelation':"
+   PRINT *,"    If true (T), then the actual autocorrelation analysis is skipped."
+   PRINT *,"    This is useful if only 'export' is required."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
    PRINT *
@@ -17817,6 +18254,7 @@ INTEGER :: ios,n
    WRITE(*,15) "BOX_VOLUME_GIVEN    ",TRIM(logical_to_yesno(BOX_VOLUME_GIVEN))
    WRITE(*,15) "WRAP_TRAJECTORY     ",TRIM(logical_to_yesno(WRAP_TRAJECTORY))
    WRITE(*,15) "DISCONNECTED        ",TRIM(logical_to_yesno(DISCONNECTED))
+   WRITE(*,15) "EXTRA_VELOCITY      ",TRIM(logical_to_yesno(EXTRA_VELOCITY))
    WRITE(*,16) "GLOBAL_ITERATIONS   ",GLOBAL_ITERATIONS
    WRITE(*,16) "TIME_SCALING_FACTOR ",TIME_SCALING_FACTOR
    WRITE(*,16) "HEADER_LINES_GINPUT ",HEADER_LINES
