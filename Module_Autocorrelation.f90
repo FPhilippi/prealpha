@@ -2320,6 +2320,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					WRITE(unit_number,*)
 				ENDDO
 			ENDIF
+			IF (VERBOSE_OUTPUT) WRITE(*,*) "Filling dihedral array..."
 			CALL fill_dihedral_array
 			!close units
 			IF (export_dihedral) THEN
@@ -2363,6 +2364,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					ALLOCATE(dihedral_list(number_of_dihedral_conditions),STAT=allocstatus)
 					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
 					!There is some potential for parallelisation here. Maybe. Probably not much gained though.
+					IF (VERBOSE_OUTPUT) CALL print_progress(give_number_of_timesteps()-1)
 					DO timestep_counter=1,give_number_of_timesteps(),1
 						!Is there a molecule whose dihedrals are to be exported?
 						IF (export_dihedral) THEN
@@ -2427,7 +2429,9 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							autocorr_array(timestep_counter,molecule_index)=within_boundary
 							IF (within_boundary) global_incidence=global_incidence+1
 						ENDDO
+						IF (VERBOSE_OUTPUT) CALL print_progress()
 					ENDDO
+					IF (((give_number_of_timesteps()-1)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 					DEALLOCATE(dihedral_list,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 				END SUBROUTINE fill_dihedral_array

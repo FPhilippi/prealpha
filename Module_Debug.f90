@@ -328,7 +328,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CALL report_error(97)
 				RETURN
 			ENDIF
-			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
+			IF (VERBOSE_OUTPUT) CALL print_progress(endstep_in-startstep_in+1)
 			CALL initialise_neighbourtraj()
 			DO stepcounter=startstep_in,endstep_in,1
 				IF (update_com) current_centre(:)=give_center_of_mass(stepcounter,molecule_type_index_1,molecule_index_1)
@@ -336,7 +336,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CALL write_neighbours()
 				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
-			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+			IF (((endstep_in-startstep_in+1)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			CALL finalise_neighbourtraj()
 
 		CONTAINS
@@ -911,7 +911,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			REWIND 4
 			!find suitable origin
 			origin(:)=give_center_of_mass(startstep_in,molecule_type_index,molecule_index)
-			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
+			IF (VERBOSE_OUTPUT) CALL print_progress(endstep_in-startstep_in+1)
 			!iterate over the specified timesteps
 			DO stepcounter=startstep_in,endstep_in,1
 				!First, add the reference molecule to the xyz file.
@@ -931,7 +931,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDFILE 4
 			CLOSE(UNIT=4)
 			CLOSE(UNIT=10)
-			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+			IF (((endstep_in-startstep_in+1)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			CONTAINS
 
 				!This SUBROUTINE writes the trajectory including neighbours into unit 4. It also wraps and centers, if necessary.
@@ -989,7 +989,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(fstring,'(2A,I0,A,I0,A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
 			&"molecule_",molecule_index,"_type_",molecule_type_index,"_step_",startstep_in,"-",endstep_in,".xyz"
 			OPEN(UNIT=4,FILE=TRIM(fstring))
-			IF (VERBOSE_OUTPUT) CALL print_progress(startstep_in-endstep_in)
+			IF (VERBOSE_OUTPUT) CALL print_progress(endstep_in-startstep_in+1)
 			!iterate over the specified timesteps
 			DO stepcounter=startstep_in,endstep_in,1
 				!Write the string to pass as custom header later
@@ -1003,7 +1003,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
-			IF (((startstep_in-endstep_in)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+			IF (((endstep_in-startstep_in+1)>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
 			WRITE(4,*)
 			WRITE(4,*)
 			ENDFILE 4
@@ -1409,8 +1409,8 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!iterate over the specified timesteps
 			IF (VERBOSE_OUTPUT) THEN
 				WRITE(*,FMT='(A)',ADVANCE="NO") " writing new trajectory to file '"//TRIM(fstring)//"'..."
-				IF ((endstep_in-startstep_in)>100) WRITE(*,*)
-				CALL print_progress(endstep_in-startstep_in)
+				IF ((endstep_in-startstep_in+1)>100) WRITE(*,*)
+				CALL print_progress(endstep_in-startstep_in+1)
 			ENDIF
 			DO stepcounter=startstep_in,endstep_in,1
 				!Write head, depending on which type the trajectory has...
@@ -1425,7 +1425,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
 			IF (VERBOSE_OUTPUT) THEN
-				IF ((endstep_in-startstep_in)>100) THEN
+				IF ((endstep_in-startstep_in+1)>100) THEN
 					WRITE(*,*)
 					WRITE(*,FMT='(" ")',ADVANCE="NO")
 				ENDIF
@@ -1458,8 +1458,8 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!iterate over the specified timesteps
 			IF (VERBOSE_OUTPUT) THEN
 				WRITE(*,FMT='(A)',ADVANCE="NO") " writing new trajectory to file '"//TRIM(fstring)//"'..."
-				IF ((endstep_in-startstep_in)>100) WRITE(*,*)
-				CALL print_progress(endstep_in-startstep_in)
+				IF ((endstep_in-startstep_in+1)>100) WRITE(*,*)
+				CALL print_progress(endstep_in-startstep_in+1)
 			ENDIF
 			DO stepcounter=startstep_in,endstep_in,1
 				!Write head, depending on which type the trajectory has...
@@ -1474,7 +1474,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (VERBOSE_OUTPUT) CALL print_progress()
 			ENDDO
 			IF (VERBOSE_OUTPUT) THEN
-				IF ((endstep_in-startstep_in)>100) THEN
+				IF ((endstep_in-startstep_in+1)>100) THEN
 					WRITE(*,*)
 					WRITE(*,FMT='(" ")',ADVANCE="NO")
 				ENDIF
