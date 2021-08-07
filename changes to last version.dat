@@ -1,3 +1,91 @@
+07.08.2021:
+	Minor bugfixes, introduced new switch to export slabs
+28.07.2021:
+	Minor bugfixes, cosmetics (progress bars)
+17.05.2021:
+	Added 'export' to the reorientational autocorrelation module.
+	Also added 'skip_autocorrelation'
+	(which now makes sense with the export being available)
+09.05.2021:
+	Added clm_simple keyword - like charge_arm_simple, but normalised
+	considerably improved maxdist_optimise for charge arms
+23.04.2021:
+	Dumping gro/xyz/lmp trajectories
+21.04.2021:
+	Progress report for parallelised sections. Wrote routine to dump gro/xyz/lmp trajectories, but not yet part of the official release
+11.04.2021:
+	Introduced convert_coc (produces centre of charge trajectory), also some bugfixes
+31.03.2021:
+	centre of charge now available for sum rules
+	(without the uncanny workaround)
+18.02.2021:
+	Debugging, minor changes, tests for yongji
+09.02.2021:
+	Debugging and user interface for new distance module.
+08.02.2021:
+	Introduced distance module, to calculate closest, exponentially weighed, and FFC distances.
+22.10.2020:
+	Introduced charge lever moment correction, changed to proper charge arm definition
+06.10.2020:
+	Bug fixes and cosmetics
+01.10.2020:
+	introduced charge arm analysis to reorientational correlation function.
+15.08.2020:
+	new keyword: remove_cores, which writes a trajectory with only the drude particles minus their respective cores.
+14.08.2020:
+	Bug fixes, user input for cross diffusion
+13.08.2020:
+	Added cross diffusion coefficients from Einstein Relation
+11.08.2020:
+	Some bug fixes
+26.07.2020:
+	Added Sodium to list of elements
+16.07.2020:
+	Progress report while writing trajectory
+07.07.2020:
+	Bug fixes
+18.06.2020:
+	Bug fixes
+17.06.2020:
+	Bug fixes
+16.06.2020:
+	Bug fixes
+12.06.2020:
+	Bug fixes
+11.06.2020:
+	Added jump analysis feature to dihedral part of the autocorrelation module
+10.06.2020:
+	introduced charge arm analysis to distribution module.
+09.06.2020:
+	Added the possibility to manually specify charges of distinct atoms.
+08.06.2020:
+	bug fixes, including a bug in the wrapping procedure.
+	Changes to the druded part of the code - fluorine now also bears a drude particle by default.
+14.05.2020:
+	minor bugfixes, added warning exceptions ("NOTICE")
+12.05.2020:
+	User interface for the new features
+11.05.2020:
+	introduced comboost
+	new keyword 'barycentric', which removes the box centre of mass
+	new features of the autocorrelation module: vcf and ecaf components, overall conductivity
+	(no user interface so far.)
+03.05.2020:
+	implemented new keyword: dump_neighbour_traj
+25.04.2020:
+	introduced simple keywords for sum rules and diffusion
+	improved user interface, including the recognition module, which now prints a general input file.
+10.04.2020:
+	bug fixes, cosmetics
+09.04.2020:
+	both default and atomic masses can be changed now
+	switched to column major order for reading trajectories
+	added jump velocity and jump gyradius tool
+	added 'simple' keywords
+	diffusion module: exponent can be freely chosen - useful for alpha2
+25.03.2020:
+	new keyword 'distribution':
+	Computes cylindrical and polar distribution functions.
 05.03.2020:
 	new keyword 'dump_dimers'
 26.02.2020:
