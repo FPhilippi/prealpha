@@ -157,7 +157,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
 	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
-	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2
+	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
+	PUBLIC :: give_box_boundaries
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -1750,6 +1751,19 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			constraints_available=custom_constraints
 		END FUNCTION constraints_available
 
+		!returns lower and upper boundary in the given dimension
+		FUNCTION give_box_boundaries(dimension_in)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: dimension_in
+		REAL(KIND=WORKING_PRECISION) :: give_box_boundaries(2)
+			IF (BOX_VOLUME_GIVEN) THEN
+				give_box_boundaries(:)=box_dimensions(:,dimension_in)!low and high for x,y,z
+			ELSE
+				give_box_boundaries(:)=0.0d0
+				CALL report_error(41)
+			ENDIF
+		END FUNCTION give_box_boundaries
+
 		REAL(KIND=WORKING_PRECISION)  FUNCTION give_box_volume()
 		IMPLICIT NONE
 			IF (BOX_VOLUME_GIVEN) THEN
@@ -2612,6 +2626,83 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 			ENDDO
 		END SUBROUTINE write_molecule
+
+		!writes the specified molecule in xyz format into the specified unit IF it is crossing a slab.
+		!Unit is not overwritten if opened with APPEND!
+		!the blanks are not added!
+		SUBROUTINE write_molecule_in_slab(unit_number,timestep_in,molecule_type_index,molecule_index,&
+		&lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: unit_number,molecule_type_index,molecule_index,timestep_in,slab_dimension
+		INTEGER :: atom_index,natoms,timestep
+		REAL(KIND=WORKING_PRECISION),INTENT(IN) :: lower_boundary,upper_boundary
+		REAL(KIND=WORKING_PRECISION) :: shift(3),atom_position(3)
+		LOGICAL :: morethanlower,lessthanupper
+		LOGICAL,INTENT(OUT) :: molecule_was_on_slab
+			timestep=timestep_in
+			IF (READ_SEQUENTIAL) THEN
+				IF (timestep==-1) THEN
+					!not really required, but included for safety here in case I change something in the procedures' body that requires the timestep.
+					timestep=file_position
+				ELSE
+					CALL goto_timestep(timestep)
+				ENDIF
+			ELSE
+				IF (timestep==-1) timestep=1
+			ENDIF
+			!must be centre-of-mass wise... otherwise it will catch atom-wise wrapped molecules...
+			atom_position(:)=give_center_of_mass(timestep,molecule_type_index,molecule_index)
+			CALL wrap_vector(atom_position(:),shift(:))
+			natoms=molecule_list(molecule_type_index)%number_of_atoms
+			!check if the molecule is actually on the slab
+			morethanlower=.FALSE.
+			lessthanupper=.FALSE.
+			DO atom_index=1,natoms,1
+				IF (READ_SEQUENTIAL) THEN
+					atom_position=&
+					&molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+				ELSE
+					atom_position=&
+					&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+				ENDIF
+				atom_position(:)=atom_position(:)+shift(:)
+				IF (atom_position(slab_dimension)>lower_boundary) THEN
+					!at least one atom is within the lower boundary
+					morethanlower=.TRUE.
+					EXIT
+				ENDIF
+			ENDDO
+			DO atom_index=1,natoms,1
+				IF (READ_SEQUENTIAL) THEN
+					atom_position=&
+					&molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+				ELSE
+					atom_position=&
+					&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+				ENDIF
+				atom_position(:)=atom_position(:)+shift(:)
+				IF (atom_position(slab_dimension)<upper_boundary) THEN
+					!at least one atom is within the upper boundary
+					lessthanupper=.TRUE.
+					EXIT
+				ENDIF
+			ENDDO
+			IF ((morethanlower).AND.(lessthanupper)) THEN
+				molecule_was_on_slab=.TRUE.
+				!Print the molecule!
+				DO atom_index=1,natoms,1
+					IF (READ_SEQUENTIAL) THEN
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:))
+					ELSE
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:))
+					ENDIF
+				ENDDO
+			ELSE
+				molecule_was_on_slab=.FALSE.
+			ENDIF
+		END SUBROUTINE write_molecule_in_slab
 
 		!Writes the trajectory to some format.
 		SUBROUTINE write_trajectory(startstep_in,endstep_in,output_format)

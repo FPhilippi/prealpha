@@ -1,4 +1,4 @@
-! RELEASED ON 28_Jul_2021 AT 09:53
+! RELEASED ON 07_Aug_2021 AT 11:45
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -1510,7 +1510,8 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
  PUBLIC :: print_dipole_statistics,write_molecule_input_file_without_drudes,write_only_drudes_relative_to_core
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
  PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
- PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2
+ PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
+ PUBLIC :: give_box_boundaries
  CONTAINS
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -3103,6 +3104,19 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    constraints_available=custom_constraints
   END FUNCTION constraints_available
 
+  !returns lower and upper boundary in the given dimension
+  FUNCTION give_box_boundaries(dimension_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: dimension_in
+  REAL(KIND=WORKING_PRECISION) :: give_box_boundaries(2)
+   IF (BOX_VOLUME_GIVEN) THEN
+    give_box_boundaries(:)=box_dimensions(:,dimension_in)!low and high for x,y,z
+   ELSE
+    give_box_boundaries(:)=0.0d0
+    CALL report_error(41)
+   ENDIF
+  END FUNCTION give_box_boundaries
+
   REAL(KIND=WORKING_PRECISION)  FUNCTION give_box_volume()
   IMPLICIT NONE
    IF (BOX_VOLUME_GIVEN) THEN
@@ -3965,6 +3979,83 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
     ENDIF
    ENDDO
   END SUBROUTINE write_molecule
+
+  !writes the specified molecule in xyz format into the specified unit IF it is crossing a slab.
+  !Unit is not overwritten if opened with APPEND!
+  !the blanks are not added!
+  SUBROUTINE write_molecule_in_slab(unit_number,timestep_in,molecule_type_index,molecule_index,&
+  &lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: unit_number,molecule_type_index,molecule_index,timestep_in,slab_dimension
+  INTEGER :: atom_index,natoms,timestep
+  REAL(KIND=WORKING_PRECISION),INTENT(IN) :: lower_boundary,upper_boundary
+  REAL(KIND=WORKING_PRECISION) :: shift(3),atom_position(3)
+  LOGICAL :: morethanlower,lessthanupper
+  LOGICAL,INTENT(OUT) :: molecule_was_on_slab
+   timestep=timestep_in
+   IF (READ_SEQUENTIAL) THEN
+    IF (timestep==-1) THEN
+     !not really required, but included for safety here in case I change something in the procedures' body that requires the timestep.
+     timestep=file_position
+    ELSE
+     CALL goto_timestep(timestep)
+    ENDIF
+   ELSE
+    IF (timestep==-1) timestep=1
+   ENDIF
+   !must be centre-of-mass wise... otherwise it will catch atom-wise wrapped molecules...
+   atom_position(:)=give_center_of_mass(timestep,molecule_type_index,molecule_index)
+   CALL wrap_vector(atom_position(:),shift(:))
+   natoms=molecule_list(molecule_type_index)%number_of_atoms
+   !check if the molecule is actually on the slab
+   morethanlower=.FALSE.
+   lessthanupper=.FALSE.
+   DO atom_index=1,natoms,1
+    IF (READ_SEQUENTIAL) THEN
+     atom_position=&
+     &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+    ELSE
+     atom_position=&
+     &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+    ENDIF
+    atom_position(:)=atom_position(:)+shift(:)
+    IF (atom_position(slab_dimension)>lower_boundary) THEN
+     !at least one atom is within the lower boundary
+     morethanlower=.TRUE.
+     EXIT
+    ENDIF
+   ENDDO
+   DO atom_index=1,natoms,1
+    IF (READ_SEQUENTIAL) THEN
+     atom_position=&
+     &molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+    ELSE
+     atom_position=&
+     &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+    ENDIF
+    atom_position(:)=atom_position(:)+shift(:)
+    IF (atom_position(slab_dimension)<upper_boundary) THEN
+     !at least one atom is within the upper boundary
+     lessthanupper=.TRUE.
+     EXIT
+    ENDIF
+   ENDDO
+   IF ((morethanlower).AND.(lessthanupper)) THEN
+    molecule_was_on_slab=.TRUE.
+    !Print the molecule!
+    DO atom_index=1,natoms,1
+     IF (READ_SEQUENTIAL) THEN
+      WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+      &SNGL(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:))
+     ELSE
+      WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+      &SNGL(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:))
+     ENDIF
+    ENDDO
+   ELSE
+    molecule_was_on_slab=.FALSE.
+   ENDIF
+  END SUBROUTINE write_molecule_in_slab
 
   !Writes the trajectory to some format.
   SUBROUTINE write_trajectory(startstep_in,endstep_in,output_format)
@@ -5555,7 +5646,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
  PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
- PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties
+ PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab
  PRIVATE test_dihedrals
  CONTAINS
 
@@ -6176,7 +6267,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
   INTEGER,INTENT(IN),OPTIONAL :: outputunit
   INTEGER,INTENT(IN) :: unit_number
   INTEGER :: number_of_atoms,ios
-  LOGICAL,OPTIONAL :: addhead,geometric_center
+  LOGICAL,OPTIONAL,INTENT(IN) :: addhead,geometric_center
   REAL(KIND=WORKING_PRECISION),OPTIONAL :: COC(3),dipole(3)
   CHARACTER(LEN=*),OPTIONAL :: custom_header
   TYPE :: atom
@@ -6556,6 +6647,101 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     CLOSE(UNIT=3)
    ENDIF
   END SUBROUTINE dump_single
+
+  !dumps a slab in x, y, or z.
+  SUBROUTINE dump_slab(timestep,molecule_type_index_in,slab_dimension,lower_boundary,upper_boundary)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: timestep,molecule_type_index_in,slab_dimension
+  CHARACTER(LEN=1024) :: fstring,moleculestring
+  INTEGER :: molecule_type_index,moleculecounter,on_slab_counter,total_atom_count,atom_counter
+  LOGICAL :: connected,molecule_was_on_slab
+  REAL(KIND=WORKING_PRECISION),INTENT(IN) :: lower_boundary,upper_boundary
+  TYPE :: atom
+   CHARACTER (LEN=2) :: atom_type='X'
+   REAL(KIND=WORKING_PRECISION) :: atom_position(3)
+  END TYPE atom
+  TYPE(atom) :: atom_clipboard
+   !First, do the fools-proof checks
+   IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_in)
+    RETURN
+   ENDIF
+   !open the output file
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   IF (molecule_type_index_in<1) THEN
+    moleculestring="all_molecules_"
+    WRITE(*,ADVANCE="NO",FMT='(" Writing snapshot with any molecules on slab in ")')
+   ELSE
+    WRITE(moleculestring,'("molecule_type_index_",I0,"_")') molecule_type_index_in
+    WRITE(*,ADVANCE="NO",FMT='(" Writing snapshot with molecules of type ",I0," on slab in ")')&
+    &molecule_type_index_in
+   ENDIF
+   SELECT CASE (slab_dimension)
+   CASE (1)
+    WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+    &TRIM(moleculestring),"in_x-slab_step_",timestep,".xyz"
+    WRITE(*,'("X direction.")')
+   CASE (2)
+    WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+    &TRIM(moleculestring),"in_y-slab_step_",timestep,".xyz"
+    WRITE(*,'("Y direction.")')
+   CASE (3)
+    WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+    &TRIM(moleculestring),"in_z-slab_step_",timestep,".xyz"
+    WRITE(*,'("Z direction.")')
+   CASE DEFAULT
+    CALL report_error(0)!unknown slab dimension, which should never be passed to this subroutine.
+    RETURN
+   END SELECT
+   OPEN(UNIT=4,FILE=TRIM(fstring))
+   INQUIRE(UNIT=3,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=3)
+   OPEN(UNIT=3,STATUS="SCRATCH")
+   total_atom_count=0
+   IF (molecule_type_index_in<1) THEN
+    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+     on_slab_counter=0
+     DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+      CALL write_molecule_in_slab(3,timestep,molecule_type_index,moleculecounter,&
+      &lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+      IF (molecule_was_on_slab) THEN
+       on_slab_counter=on_slab_counter+1
+       total_atom_count=total_atom_count+give_number_of_atoms_per_molecule(molecule_type_index)
+      ENDIF
+     ENDDO
+     IF (VERBOSE_OUTPUT) WRITE(*,'("   Molecule type ",I0,": ",I0," were on the slab.")')&
+     &molecule_type_index,on_slab_counter
+    ENDDO
+   ELSE
+    on_slab_counter=0
+    DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index_in),1
+     CALL write_molecule_in_slab(3,timestep,molecule_type_index_in,moleculecounter,&
+     &lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+     IF (molecule_was_on_slab) THEN
+      on_slab_counter=on_slab_counter+1
+      total_atom_count=total_atom_count+give_number_of_atoms_per_molecule(molecule_type_index_in)
+     ENDIF
+    ENDDO
+    IF (VERBOSE_OUTPUT) WRITE(*,'("   ",I0," out of ",I0," were on the slab.")')&
+    &on_slab_counter,give_number_of_molecules_per_step(molecule_type_index_in)
+   ENDIF
+   WRITE(*,*) "  Lower slab boundary: ",SNGL(lower_boundary)
+   WRITE(*,*) "  Upper slab boundary: ",SNGL(upper_boundary)
+   REWIND 3
+   REWIND 4
+   WRITE(4,'(I0)') total_atom_count
+   WRITE(4,*) "Slab with boundaries: ",SNGL(lower_boundary),SNGL(upper_boundary)
+   DO atom_counter=1,total_atom_count,1
+    READ(3,*) atom_clipboard
+    WRITE(4,*) atom_clipboard
+   ENDDO
+   WRITE(4,*)
+   WRITE(4,*)
+   ENDFILE 4
+   CLOSE(UNIT=3)
+   CLOSE(UNIT=4)
+  END SUBROUTINE dump_slab
 
   SUBROUTINE dump_example()
   IMPLICIT NONE
@@ -15018,6 +15204,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  INFORMATION_IN_TRAJECTORY="UNK"
  WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
  EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
+ OUTPUT_PREFIX=""
  number_of_molecules=-1
  nsteps=1000000000!expect the worst.
  smalltask=.TRUE.
@@ -15037,7 +15224,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 28_Jul_2021"
+ PRINT *, "   Date of Release: 07_Aug_2021"
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
@@ -15565,6 +15752,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Expects two integers: the first timestep and the last timestep."
    PRINT *," - 'dump_full_gro','dump_full_xyz','dump_full_lmp':"
    PRINT *,"    Writes the whole trajectory to GROMACS, xyz, or LAMMPS format, respectively."
+   PRINT *,"   'slab_x', 'slab_y', 'slab_z':"
+   PRINT *,"    Writes an xyz file with a slab in the middle of the box."
+   PRINT *,"    The x, y, or z direction are used as the normal directions of the slab plane."
+   PRINT *,"    Wrapping is automatically performed molecule wise!"
+   PRINT *,"    This switch requires two integers:"
+   PRINT *,"    First the timestep to export, and second the molecule type index."
+   PRINT *,"    The molecule type index can also be -1, in which case all molecule types are considered."
    PRINT *," - 'dump_single':"
    PRINT *,"    Writes a trajectory containing just one single molecule."
    PRINT *,"    This keyword expects a logical, followed by four integers in the same line:"
@@ -18223,13 +18417,59 @@ INTEGER :: ios,n
     CASE ("dump_full_xyz","write_full_xyz")
      !output is in subroutine
      CALL write_trajectory(1,give_number_of_timesteps(),"xyz")
+    CASE ("dump_slab_x","dump_x_slab","x_slab","slab_x") !Module DEBUG
+     IF (BOX_VOLUME_GIVEN) THEN
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ELSE
+       inputreal=SUM(give_box_boundaries(1))/2.00d0
+       CALL check_timestep(inputinteger)
+       CALL dump_slab(inputinteger,inputinteger2,1,inputreal,inputreal)
+      ENDIF
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("dump_slab_y","dump_y_slab","y_slab","slab_y") !Module DEBUG
+     IF (BOX_VOLUME_GIVEN) THEN
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ELSE
+       inputreal=SUM(give_box_boundaries(2))/2.00d0
+       CALL check_timestep(inputinteger)
+       CALL dump_slab(inputinteger,inputinteger2,2,inputreal,inputreal)
+      ENDIF
+     ELSE
+      CALL report_error(41)
+     ENDIF
+    CASE ("dump_slab_z","dump_z_slab","z_slab","slab_z") !Module DEBUG
+     IF (BOX_VOLUME_GIVEN) THEN
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+      IF (ios/=0) THEN
+       CALL report_error(19,exit_status=ios)
+       EXIT
+      ELSE
+       inputreal=SUM(give_box_boundaries(3))/2.00d0
+       CALL check_timestep(inputinteger)
+       CALL dump_slab(inputinteger,inputinteger2,3,inputreal,inputreal)
+      ENDIF
+     ELSE
+      CALL report_error(41)
+     ENDIF
     CASE ("DEBUG")
      !Here is some space for testing stuff
      WRITE(*,*) "################################DEBUG VERSION"
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "testing stuff."
-     CALL dump_atomic_properties()
-     CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+     CALL dump_slab(1,1,1,10.0d0,10.0d0)
+     !CALL dump_atomic_properties()
+     !CALL write_trajectory(1,give_number_of_timesteps(),"gro")
      WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

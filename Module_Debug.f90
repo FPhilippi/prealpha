@@ -11,7 +11,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	!PRIVATE/PUBLIC declarations
 	PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
 	PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
-	PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties
+	PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab
 	PRIVATE test_dihedrals
 	CONTAINS
 
@@ -632,7 +632,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER,INTENT(IN),OPTIONAL :: outputunit
 		INTEGER,INTENT(IN) :: unit_number
 		INTEGER :: number_of_atoms,ios
-		LOGICAL,OPTIONAL :: addhead,geometric_center
+		LOGICAL,OPTIONAL,INTENT(IN) :: addhead,geometric_center
 		REAL(KIND=WORKING_PRECISION),OPTIONAL :: COC(3),dipole(3)
 		CHARACTER(LEN=*),OPTIONAL :: custom_header
 		TYPE :: atom
@@ -1012,6 +1012,101 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CLOSE(UNIT=3)
 			ENDIF
 		END SUBROUTINE dump_single
+
+		!dumps a slab in x, y, or z.
+		SUBROUTINE dump_slab(timestep,molecule_type_index_in,slab_dimension,lower_boundary,upper_boundary)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index_in,slab_dimension
+		CHARACTER(LEN=1024) :: fstring,moleculestring
+		INTEGER :: molecule_type_index,moleculecounter,on_slab_counter,total_atom_count,atom_counter
+		LOGICAL :: connected,molecule_was_on_slab
+		REAL(KIND=WORKING_PRECISION),INTENT(IN) :: lower_boundary,upper_boundary
+		TYPE :: atom
+			CHARACTER (LEN=2) :: atom_type='X'
+			REAL(KIND=WORKING_PRECISION) :: atom_position(3)
+		END TYPE atom
+		TYPE(atom) :: atom_clipboard
+			!First, do the fools-proof checks
+			IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+				CALL report_error(33,exit_status=molecule_type_index_in)
+				RETURN
+			ENDIF
+			!open the output file
+			INQUIRE(UNIT=4,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=4)
+			IF (molecule_type_index_in<1) THEN
+				moleculestring="all_molecules_"
+				WRITE(*,ADVANCE="NO",FMT='(" Writing snapshot with any molecules on slab in ")')
+			ELSE
+				WRITE(moleculestring,'("molecule_type_index_",I0,"_")') molecule_type_index_in
+				WRITE(*,ADVANCE="NO",FMT='(" Writing snapshot with molecules of type ",I0," on slab in ")')&
+				&molecule_type_index_in
+			ENDIF
+			SELECT CASE (slab_dimension)
+			CASE (1)
+				WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+				&TRIM(moleculestring),"in_x-slab_step_",timestep,".xyz"
+				WRITE(*,'("X direction.")')
+			CASE (2)
+				WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+				&TRIM(moleculestring),"in_y-slab_step_",timestep,".xyz"
+				WRITE(*,'("Y direction.")')
+			CASE (3)
+				WRITE(fstring,'(3A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+				&TRIM(moleculestring),"in_z-slab_step_",timestep,".xyz"
+				WRITE(*,'("Z direction.")')
+			CASE DEFAULT
+				CALL report_error(0)!unknown slab dimension, which should never be passed to this subroutine.
+				RETURN
+			END SELECT
+			OPEN(UNIT=4,FILE=TRIM(fstring))
+			INQUIRE(UNIT=3,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=3)
+			OPEN(UNIT=3,STATUS="SCRATCH")
+			total_atom_count=0
+			IF (molecule_type_index_in<1) THEN
+				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+					on_slab_counter=0
+					DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+						CALL write_molecule_in_slab(3,timestep,molecule_type_index,moleculecounter,&
+						&lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+						IF (molecule_was_on_slab) THEN
+							on_slab_counter=on_slab_counter+1
+							total_atom_count=total_atom_count+give_number_of_atoms_per_molecule(molecule_type_index)
+						ENDIF
+					ENDDO
+					IF (VERBOSE_OUTPUT) WRITE(*,'("   Molecule type ",I0,": ",I0," were on the slab.")')&
+					&molecule_type_index,on_slab_counter
+				ENDDO
+			ELSE
+				on_slab_counter=0
+				DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index_in),1
+					CALL write_molecule_in_slab(3,timestep,molecule_type_index_in,moleculecounter,&
+					&lower_boundary,upper_boundary,slab_dimension,molecule_was_on_slab)
+					IF (molecule_was_on_slab) THEN
+						on_slab_counter=on_slab_counter+1
+						total_atom_count=total_atom_count+give_number_of_atoms_per_molecule(molecule_type_index_in)
+					ENDIF
+				ENDDO
+				IF (VERBOSE_OUTPUT) WRITE(*,'("   ",I0," out of ",I0," were on the slab.")')&
+				&on_slab_counter,give_number_of_molecules_per_step(molecule_type_index_in)
+			ENDIF
+			WRITE(*,*) "  Lower slab boundary: ",SNGL(lower_boundary)
+			WRITE(*,*) "  Upper slab boundary: ",SNGL(upper_boundary)
+			REWIND 3
+			REWIND 4
+			WRITE(4,'(I0)') total_atom_count
+			WRITE(4,*) "Slab with boundaries: ",SNGL(lower_boundary),SNGL(upper_boundary)
+			DO atom_counter=1,total_atom_count,1
+				READ(3,*) atom_clipboard
+				WRITE(4,*) atom_clipboard
+			ENDDO
+			WRITE(4,*)
+			WRITE(4,*)
+			ENDFILE 4
+			CLOSE(UNIT=3)
+			CLOSE(UNIT=4)
+		END SUBROUTINE dump_slab
 
 		SUBROUTINE dump_example()
 		IMPLICIT NONE

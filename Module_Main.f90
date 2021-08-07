@@ -34,6 +34,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 	INFORMATION_IN_TRAJECTORY="UNK"
 	WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
 	EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
+	OUTPUT_PREFIX=""
 	number_of_molecules=-1
 	nsteps=1000000000!expect the worst.
 	smalltask=.TRUE.
@@ -581,6 +582,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Expects two integers: the first timestep and the last timestep."
 			PRINT *," - 'dump_full_gro','dump_full_xyz','dump_full_lmp':"
 			PRINT *,"    Writes the whole trajectory to GROMACS, xyz, or LAMMPS format, respectively."
+			PRINT *,"   'slab_x', 'slab_y', 'slab_z':"
+			PRINT *,"    Writes an xyz file with a slab in the middle of the box."
+			PRINT *,"    The x, y, or z direction are used as the normal directions of the slab plane."
+			PRINT *,"    Wrapping is automatically performed molecule wise!"
+			PRINT *,"    This switch requires two integers:"
+			PRINT *,"    First the timestep to export, and second the molecule type index."
+			PRINT *,"    The molecule type index can also be -1, in which case all molecule types are considered."
 			PRINT *," - 'dump_single':"
 			PRINT *,"    Writes a trajectory containing just one single molecule."
 			PRINT *,"    This keyword expects a logical, followed by four integers in the same line:"
@@ -3239,13 +3247,59 @@ INTEGER :: ios,n
 				CASE ("dump_full_xyz","write_full_xyz")
 					!output is in subroutine
 					CALL write_trajectory(1,give_number_of_timesteps(),"xyz")
+				CASE ("dump_slab_x","dump_x_slab","x_slab","slab_x") !Module DEBUG
+					IF (BOX_VOLUME_GIVEN) THEN
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+						IF (ios/=0) THEN
+							CALL report_error(19,exit_status=ios)
+							EXIT
+						ELSE
+							inputreal=SUM(give_box_boundaries(1))/2.00d0
+							CALL check_timestep(inputinteger)
+							CALL dump_slab(inputinteger,inputinteger2,1,inputreal,inputreal)
+						ENDIF
+					ELSE
+						CALL report_error(41)
+					ENDIF
+				CASE ("dump_slab_y","dump_y_slab","y_slab","slab_y") !Module DEBUG
+					IF (BOX_VOLUME_GIVEN) THEN
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+						IF (ios/=0) THEN
+							CALL report_error(19,exit_status=ios)
+							EXIT
+						ELSE
+							inputreal=SUM(give_box_boundaries(2))/2.00d0
+							CALL check_timestep(inputinteger)
+							CALL dump_slab(inputinteger,inputinteger2,2,inputreal,inputreal)
+						ENDIF
+					ELSE
+						CALL report_error(41)
+					ENDIF
+				CASE ("dump_slab_z","dump_z_slab","z_slab","slab_z") !Module DEBUG
+					IF (BOX_VOLUME_GIVEN) THEN
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
+						IF (ios/=0) THEN
+							CALL report_error(19,exit_status=ios)
+							EXIT
+						ELSE
+							inputreal=SUM(give_box_boundaries(3))/2.00d0
+							CALL check_timestep(inputinteger)
+							CALL dump_slab(inputinteger,inputinteger2,3,inputreal,inputreal)
+						ENDIF
+					ELSE
+						CALL report_error(41)
+					ENDIF
 				CASE ("DEBUG")
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################DEBUG VERSION"
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "testing stuff."
-					CALL dump_atomic_properties()
-					CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+					CALL dump_slab(1,1,1,10.0d0,10.0d0)
+					!CALL dump_atomic_properties()
+					!CALL write_trajectory(1,give_number_of_timesteps(),"gro")
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
