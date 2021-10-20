@@ -4274,7 +4274,12 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CASE ("D")
 				atomic_charge=drude_charge
 			CASE DEFAULT
-				CALL report_error(0)
+				!the 'convert' keyword produces a trajectory with a,b,c,...,z as element names.
+				IF (ANY(ALPHABET_small==IACHAR(element_name(1:1)))) THEN
+					atomic_charge=0.0
+				ELSE
+					CALL report_error(4)
+				ENDIF
 			END SELECT
 		END FUNCTION atomic_charge
 

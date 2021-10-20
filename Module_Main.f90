@@ -55,12 +55,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 	PRINT *, "   Please report any bugs."
 	PRINT *, "   Suggestions and questions are also welcome. Thanks."
 	PRINT *, "   Date of Release: !RELEASEDATE!"
+	PRINT *, "   Please consider citing our work."
 	PRINT *
 	IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
 		PRINT *, "   Imperial College London"
 		PRINT *, "   MSRH Room 601"
 		PRINT *, "   White City Campus"
-		PRINT *, "   80 Wood Lane"
+		PRINT *, "   82 Wood Lane"
 		PRINT *, "   W12 0BZ London"
 		PRINT *, "   f.philippi18"," at ","imperial.ac.uk"
 		PRINT *
@@ -2940,7 +2941,7 @@ INTEGER :: ios,n
 						CALL report_error(19,exit_status=ios)
 						EXIT
 					ENDIF
-					WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
+					WRITE(*,*) "Reduce Trajectory to centre of charge for each molecule type."
 					IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 					CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
@@ -2986,6 +2987,7 @@ INTEGER :: ios,n
 					CALL check_timesteps(startstep,endstep)
 					WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 					CALL report_gyradius(inputinteger,startstep,endstep)
+					CALL add_reference(1)
 				CASE ("gyradius_simple") !Module DEBUG
 					WRITE(*,*) "Calculating ensemble average of radius of gyration - simple mode."
 					WRITE(*,*) "(First 100 timesteps - all molecule types.)"
@@ -2993,6 +2995,7 @@ INTEGER :: ios,n
 					endstep=100
 					CALL check_timesteps(startstep,endstep)
 					CALL report_gyradius(-1,startstep,endstep)
+					CALL add_reference(1)
 				CASE ("drude_temp") !Module DEBUG
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3120,6 +3123,7 @@ INTEGER :: ios,n
 					FILENAME_AUTOCORRELATION_INPUT=dummy
 					WRITE(*,*) "(Auto)correlation module invoked."
 					CALL perform_autocorrelation()
+					CALL add_reference(1)
 				CASE ("dihedral_simple")
 					CALL report_error(113)
 				CASE ("diffusion") !Module DIFFUSION
@@ -3137,6 +3141,7 @@ INTEGER :: ios,n
 						WRITE(*,*) "Diffusion module invoked."
 						CALL perform_diffusion_analysis()
 					ENDIF
+					CALL add_reference(1)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3146,6 +3151,7 @@ INTEGER :: ios,n
 						WRITE(*,*) "Diffusion module invoked."
 						CALL perform_diffusion_analysis()
 					ENDIF
+					CALL add_reference(1)
 				CASE ("distribution") !Module DISTRIBUTION
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3161,6 +3167,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
+					CALL add_reference(1)
 				CASE ("distribution_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3171,6 +3178,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
+					CALL add_reference(1)
 				CASE ("charge_arm_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -3297,7 +3305,8 @@ INTEGER :: ios,n
 					WRITE(*,*) "################################DEBUG VERSION"
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "testing stuff."
-					CALL dump_slab(1,1,1,10.0d0,10.0d0)
+					!CALL add_reference(1)
+					!CALL dump_slab(1,1,1,10.0d0,10.0d0)
 					!CALL dump_atomic_properties()
 					!CALL write_trajectory(1,give_number_of_timesteps(),"gro")
 					WRITE(*,*) "################################DEBUG VERSION"
@@ -3518,6 +3527,7 @@ INTERFACE
 END INTERFACE
 	!begin timing here
 	CALL timing()
+	CALL initialise_references()
 	CALL initialise_command_line_arguments()
 	DO global_iteration_counter=1,GLOBAL_ITERATIONS,1
 		IF (GLOBAL_ITERATIONS>1) WRITE(*,*) " ** current general input file is '",&
@@ -3553,6 +3563,8 @@ END INTERFACE
 	ELSE
 		WRITE(*,'(" Encountered ",I0," errors/warnings globally.")') give_error_count()
 	ENDIF
+	WRITE(*,*)
+	CALL print_references()
 	WRITE(*,*)
 	CALL finalise_command_line_arguments()
 END

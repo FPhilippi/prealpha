@@ -98,6 +98,14 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
 	CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
 	CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
+	!dealing with references
+	TYPE,PRIVATE :: reference_entry
+        CHARACTER(LEN=1024) :: reference_name
+		CHARACTER(LEN=1024) :: reference_DOI
+		INTEGER :: reference_number
+		LOGICAL :: cited !TRUE if cited
+    END TYPE reference_entry
+	TYPE(reference_entry) :: LIST_OF_REFERENCES(1)
 	!LIST OF ERRORS HANDLED BY THE ROUTINES:
 	!0 unspecified error. These errors should (in theory) never be encountered.
 	!1 divided by zero in normalize3D
@@ -250,10 +258,66 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
 	PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real
-	PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION
+	PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION,initialise_references,add_reference,print_references
 	PRIVATE :: q !that's not a typo!
 	PRIVATE :: error_count
 	CONTAINS
+
+		SUBROUTINE initialise_references()
+		IMPLICIT NONE
+			LIST_OF_REFERENCES(:)%reference_number=0
+			LIST_OF_REFERENCES(:)%cited=.FALSE.
+			!Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
+			LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
+			LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+		END SUBROUTINE initialise_references
+
+		SUBROUTINE add_reference(reference_number_to_add)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: reference_number_to_add
+			IF (reference_number_to_add>SIZE(LIST_OF_REFERENCES)) THEN
+				CALL report_error(0)
+				RETURN
+			ENDIF
+			IF (LIST_OF_REFERENCES(reference_number_to_add)%cited) THEN
+				WRITE(*,'(" See also reference [",I0,"].")')&
+				&LIST_OF_REFERENCES(reference_number_to_add)%reference_number
+			ELSE
+				LIST_OF_REFERENCES(reference_number_to_add)%reference_number=&
+				&MAXVAL(LIST_OF_REFERENCES(:)%reference_number)+1
+				LIST_OF_REFERENCES(reference_number_to_add)%cited=.TRUE.
+				WRITE(*,'(" Please cite reference [",I0,"].")')&
+				&LIST_OF_REFERENCES(reference_number_to_add)%reference_number
+			ENDIF
+		END SUBROUTINE add_reference
+
+		SUBROUTINE print_references()
+		IMPLICIT NONE
+		INTEGER :: reference_counter,current_reference
+			IF (ALL(LIST_OF_REFERENCES(:)%cited.eqv..FALSE.)) THEN
+				WRITE(*,'(" Please consider citing our first paper with prealpha:")')
+				WRITE(*,'("   [1] ",A)') &
+				&TRIM(LIST_OF_REFERENCES(1)%reference_name)
+				WRITE(*,'("       dx.doi.org/",A)') &
+				&TRIM(LIST_OF_REFERENCES(1)%reference_DOI)
+			ELSE
+				WRITE(*,'(" References:")')
+				current_reference=0
+				DO
+					current_reference=current_reference+1
+					DO reference_counter=1,SIZE(LIST_OF_REFERENCES),1
+						IF (LIST_OF_REFERENCES(reference_counter)%reference_number==current_reference) THEN
+							WRITE(*,'("   [",I0,"] ",A)') current_reference,&
+							&TRIM(LIST_OF_REFERENCES(reference_counter)%reference_name)
+							WRITE(*,'("       dx.doi.org/",A)') &
+							&TRIM(LIST_OF_REFERENCES(reference_counter)%reference_DOI)
+							LIST_OF_REFERENCES(reference_counter)%cited=.FALSE.
+						ENDIF
+					ENDDO
+					IF (ALL(LIST_OF_REFERENCES(:)%cited.eqv..FALSE.)) EXIT
+				ENDDO
+			ENDIF
+		END SUBROUTINE print_references
 
 		SUBROUTINE report_error(local_error_code,exit_status)!Routine for error handling. Severe Errors cause the program to stop.
 		IMPLICIT NONE

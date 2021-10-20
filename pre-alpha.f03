@@ -1,4 +1,4 @@
-! RELEASED ON 07_Aug_2021 AT 11:45
+! RELEASED ON 20_Oct_2021 AT 19:58
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2021 Frederik Philippi
@@ -99,6 +99,14 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
  CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
  CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
+ !dealing with references
+ TYPE,PRIVATE :: reference_entry
+        CHARACTER(LEN=1024) :: reference_name
+  CHARACTER(LEN=1024) :: reference_DOI
+  INTEGER :: reference_number
+  LOGICAL :: cited !TRUE if cited
+    END TYPE reference_entry
+ TYPE(reference_entry) :: LIST_OF_REFERENCES(1)
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
  !1 divided by zero in normalize3D
@@ -251,10 +259,66 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
  PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real
- PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION
+ PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION,initialise_references,add_reference,print_references
  PRIVATE :: q !that's not a typo!
  PRIVATE :: error_count
  CONTAINS
+
+  SUBROUTINE initialise_references()
+  IMPLICIT NONE
+   LIST_OF_REFERENCES(:)%reference_number=0
+   LIST_OF_REFERENCES(:)%cited=.FALSE.
+   !Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
+   LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
+   LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+  END SUBROUTINE initialise_references
+
+  SUBROUTINE add_reference(reference_number_to_add)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: reference_number_to_add
+   IF (reference_number_to_add>SIZE(LIST_OF_REFERENCES)) THEN
+    CALL report_error(0)
+    RETURN
+   ENDIF
+   IF (LIST_OF_REFERENCES(reference_number_to_add)%cited) THEN
+    WRITE(*,'(" See also reference [",I0,"].")')&
+    &LIST_OF_REFERENCES(reference_number_to_add)%reference_number
+   ELSE
+    LIST_OF_REFERENCES(reference_number_to_add)%reference_number=&
+    &MAXVAL(LIST_OF_REFERENCES(:)%reference_number)+1
+    LIST_OF_REFERENCES(reference_number_to_add)%cited=.TRUE.
+    WRITE(*,'(" Please cite reference [",I0,"].")')&
+    &LIST_OF_REFERENCES(reference_number_to_add)%reference_number
+   ENDIF
+  END SUBROUTINE add_reference
+
+  SUBROUTINE print_references()
+  IMPLICIT NONE
+  INTEGER :: reference_counter,current_reference
+   IF (ALL(LIST_OF_REFERENCES(:)%cited.eqv..FALSE.)) THEN
+    WRITE(*,'(" Please consider citing our first paper with prealpha:")')
+    WRITE(*,'("   [1] ",A)') &
+    &TRIM(LIST_OF_REFERENCES(1)%reference_name)
+    WRITE(*,'("       dx.doi.org/",A)') &
+    &TRIM(LIST_OF_REFERENCES(1)%reference_DOI)
+   ELSE
+    WRITE(*,'(" References:")')
+    current_reference=0
+    DO
+     current_reference=current_reference+1
+     DO reference_counter=1,SIZE(LIST_OF_REFERENCES),1
+      IF (LIST_OF_REFERENCES(reference_counter)%reference_number==current_reference) THEN
+       WRITE(*,'("   [",I0,"] ",A)') current_reference,&
+       &TRIM(LIST_OF_REFERENCES(reference_counter)%reference_name)
+       WRITE(*,'("       dx.doi.org/",A)') &
+       &TRIM(LIST_OF_REFERENCES(reference_counter)%reference_DOI)
+       LIST_OF_REFERENCES(reference_counter)%cited=.FALSE.
+      ENDIF
+     ENDDO
+     IF (ALL(LIST_OF_REFERENCES(:)%cited.eqv..FALSE.)) EXIT
+    ENDDO
+   ENDIF
+  END SUBROUTINE print_references
 
   SUBROUTINE report_error(local_error_code,exit_status)!Routine for error handling. Severe Errors cause the program to stop.
   IMPLICIT NONE
@@ -5627,7 +5691,12 @@ MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
    CASE ("D")
     atomic_charge=drude_charge
    CASE DEFAULT
-    CALL report_error(0)
+    !the 'convert' keyword produces a trajectory with a,b,c,...,z as element names.
+    IF (ANY(ALPHABET_small==IACHAR(element_name(1:1)))) THEN
+     atomic_charge=0.0
+    ELSE
+     CALL report_error(4)
+    ENDIF
    END SELECT
   END FUNCTION atomic_charge
 
@@ -15224,13 +15293,14 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 07_Aug_2021"
+ PRINT *, "   Date of Release: 20_Oct_2021"
+ PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
   PRINT *, "   Imperial College London"
   PRINT *, "   MSRH Room 601"
   PRINT *, "   White City Campus"
-  PRINT *, "   80 Wood Lane"
+  PRINT *, "   82 Wood Lane"
   PRINT *, "   W12 0BZ London"
   PRINT *, "   f.philippi18"," at ","imperial.ac.uk"
   PRINT *
@@ -18110,7 +18180,7 @@ INTEGER :: ios,n
       CALL report_error(19,exit_status=ios)
       EXIT
      ENDIF
-     WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
+     WRITE(*,*) "Reduce Trajectory to centre of charge for each molecule type."
      IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
@@ -18156,6 +18226,7 @@ INTEGER :: ios,n
      CALL check_timesteps(startstep,endstep)
      WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
      CALL report_gyradius(inputinteger,startstep,endstep)
+     CALL add_reference(1)
     CASE ("gyradius_simple") !Module DEBUG
      WRITE(*,*) "Calculating ensemble average of radius of gyration - simple mode."
      WRITE(*,*) "(First 100 timesteps - all molecule types.)"
@@ -18163,6 +18234,7 @@ INTEGER :: ios,n
      endstep=100
      CALL check_timesteps(startstep,endstep)
      CALL report_gyradius(-1,startstep,endstep)
+     CALL add_reference(1)
     CASE ("drude_temp") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18290,6 +18362,7 @@ INTEGER :: ios,n
      FILENAME_AUTOCORRELATION_INPUT=dummy
      WRITE(*,*) "(Auto)correlation module invoked."
      CALL perform_autocorrelation()
+     CALL add_reference(1)
     CASE ("dihedral_simple")
      CALL report_error(113)
     CASE ("diffusion") !Module DIFFUSION
@@ -18307,6 +18380,7 @@ INTEGER :: ios,n
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
+     CALL add_reference(1)
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18316,6 +18390,7 @@ INTEGER :: ios,n
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
+     CALL add_reference(1)
     CASE ("distribution") !Module DISTRIBUTION
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18331,6 +18406,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+     CALL add_reference(1)
     CASE ("distribution_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18341,6 +18417,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+     CALL add_reference(1)
     CASE ("charge_arm_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -18467,7 +18544,8 @@ INTEGER :: ios,n
      WRITE(*,*) "################################DEBUG VERSION"
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "testing stuff."
-     CALL dump_slab(1,1,1,10.0d0,10.0d0)
+     !CALL add_reference(1)
+     !CALL dump_slab(1,1,1,10.0d0,10.0d0)
      !CALL dump_atomic_properties()
      !CALL write_trajectory(1,give_number_of_timesteps(),"gro")
      WRITE(*,*) "################################DEBUG VERSION"
@@ -18688,6 +18766,7 @@ INTERFACE
 END INTERFACE
  !begin timing here
  CALL timing()
+ CALL initialise_references()
  CALL initialise_command_line_arguments()
  DO global_iteration_counter=1,GLOBAL_ITERATIONS,1
   IF (GLOBAL_ITERATIONS>1) WRITE(*,*) " ** current general input file is '",&
@@ -18723,6 +18802,8 @@ END INTERFACE
  ELSE
   WRITE(*,'(" Encountered ",I0," errors/warnings globally.")') give_error_count()
  ENDIF
+ WRITE(*,*)
+ CALL print_references()
  WRITE(*,*)
  CALL finalise_command_line_arguments()
 END
