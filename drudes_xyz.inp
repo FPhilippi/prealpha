@@ -7,6 +7,7 @@
  show_drude ### print detailed information about drude assignments
  dump_example ### write xyz files for all the molecule types
  remove_drudes 1 1 ### writes a trajectory file without drude particles for step 1
+ remove_cores 1 1 ### writes a trajectory file only with internal coordinates of Drude particles
  sequential_read T ### read one timestep after the other
  trajectory_type lmp ### which format the (input) trajectory has
  quit
