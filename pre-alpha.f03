@@ -1,7 +1,7 @@
-! RELEASED ON 20_Oct_2021 AT 19:58
+! RELEASED ON 10_Feb_2022 AT 14:06
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
-    ! Copyright (C) 2021 Frederik Philippi
+    ! Copyright (C) 2022 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
 
     ! This program is free software: you can redistribute it and/or modify
@@ -106,7 +106,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   INTEGER :: reference_number
   LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
- TYPE(reference_entry) :: LIST_OF_REFERENCES(1)
+ TYPE(reference_entry) :: LIST_OF_REFERENCES(2)
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
  !1 divided by zero in normalize3D
@@ -271,6 +271,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    !Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
    LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
    LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+   LIST_OF_REFERENCES(2)%reference_name="Phys. Chem. Chem. Phys., 2022, 24, 3144–3162."
+   LIST_OF_REFERENCES(2)%reference_DOI="10.1039/D1CP04592J"
   END SUBROUTINE initialise_references
 
   SUBROUTINE add_reference(reference_number_to_add)
@@ -1234,7 +1236,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
-MODULE ANGLES ! Copyright (C) 2021 Frederik Philippi
+MODULE ANGLES ! Copyright (C) 2022 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -1417,7 +1419,7 @@ MODULE ANGLES ! Copyright (C) 2021 Frederik Philippi
 END MODULE ANGLES
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This module is responsible for handling the trajectory and passing information to other modules.
-MODULE MOLECULAR ! Copyright (C) 2021 Frederik Philippi
+MODULE MOLECULAR ! Copyright (C) 2022 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
@@ -5704,7 +5706,7 @@ END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
 !This module contains procedures for debugging and technical purposes.
-MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
+MODULE DEBUG ! Copyright (C) 2022 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -5715,7 +5717,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
  PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
- PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab
+ PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab,dump_split_single
  PRIVATE test_dihedrals
  CONTAINS
 
@@ -6307,7 +6309,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    ELSE
     molecule_type_index=molecule_type_index_in
     WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances for molecule type ",I0," at timestep ",I0,".")')&
-    &,molecule_type_index,startstep_in
+    &molecule_type_index,startstep_in
     CALL print_distances()
    ENDIF
 
@@ -6898,6 +6900,82 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
    CLOSE(UNIT=3)
   END SUBROUTINE dump_split
 
+  SUBROUTINE dump_split_single(startstep_in,endstep_in,output_format,molecule_type_index_in)
+  IMPLICIT NONE
+  INTEGER :: startstep,endstep
+  INTEGER :: stepcounter,moleculecounter,atomcount
+  INTEGER,INTENT(IN) :: startstep_in,endstep_in,molecule_type_index_in
+  LOGICAL :: connected
+  CHARACTER(LEN=1024) :: fstring
+  CHARACTER(LEN=3),INTENT(IN) :: output_format
+   !First, do the fools-proof checks
+   startstep=startstep_in
+   endstep=endstep_in
+   IF (startstep<1) THEN
+    CALL report_error(57,exit_status=startstep)
+    startstep=1
+   ENDIF
+   IF (endstep>give_number_of_timesteps()) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=give_number_of_timesteps()
+   ENDIF
+   IF (endstep<startstep) THEN
+    CALL report_error(57,exit_status=endstep)
+    endstep=startstep
+   ENDIF
+   IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+    CALL report_error(33,exit_status=molecule_type_index_in)
+    RETURN
+   ENDIF
+   IF (molecule_type_index_in<1) THEN
+    WRITE(*,FMT='(" Switching to dump_split.")')
+    CALL dump_split(startstep,endstep,output_format)
+    RETURN
+   ENDIF
+   OPEN(UNIT=3,STATUS="SCRATCH")
+   WRITE(*,ADVANCE="NO",FMT='(" Writing separate trajectory for molecule number ",I0," ...")')&
+   & molecule_type_index_in
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((endstep-startstep)>100) WRITE(*,*)
+    CALL print_progress(endstep-startstep)
+   ENDIF
+   WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+   &"traj_",molecule_type_index_in,"."//output_format
+   INQUIRE(UNIT=4,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=4)
+   OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
+   atomcount=give_number_of_atoms_per_molecule(molecule_type_index_in)*give_number_of_molecules_per_step(molecule_type_index_in)
+atomcount=atomcount+2
+   DO stepcounter=startstep,endstep,1
+    !Write head, depending on which type the trajectory has...
+    CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,atomcount,output_format)
+    !Reset unit 3
+    REWIND 3
+    !Add the header
+WRITE(3,*) atomcount-2
+    WRITE(3,*)
+    DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index_in),1
+     !the following line appends one molecule to the scratch file.
+     CALL write_molecule(3,stepcounter,molecule_type_index_in,moleculecounter,include_header=.FALSE.)
+    ENDDO
+    !Here, all the molecules for the current timestep have been appended. Thus, transfer to output:
+    CALL center_xyz(3,addhead=.FALSE.,outputunit=4)
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+WRITE(4,'("F 0.0 0.0 0.0")')
+WRITE(4,'("F 0.0 0.0 1.0")')
+   ENDDO
+   ENDFILE 4
+   CLOSE(UNIT=4)
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((give_number_of_timesteps())>100) THEN
+     WRITE(*,*)
+     WRITE(*,FMT='(" ")',ADVANCE="NO")
+    ENDIF
+   ENDIF
+   WRITE(*,'("done.")')
+   CLOSE(UNIT=3)
+  END SUBROUTINE dump_split_single
+
   SUBROUTINE convert(writemolecularinputfile,output_format,useCOC_in)
   IMPLICIT NONE
   CHARACTER(LEN=3),INTENT(IN) :: output_format
@@ -7042,7 +7120,7 @@ MODULE DEBUG ! Copyright (C) 2021 Frederik Philippi
     ENDDO
    ELSE
     molecule_type_index=molecule_type_index_in
-    WRITE(*,FMT='(" Calculating radius of gyration for molecule type ",I0,".")'),molecule_type_index
+    WRITE(*,FMT='(" Calculating radius of gyration for molecule type ",I0,".")')molecule_type_index
     WRITE(*,'(" Taking ensemble average from step ",I0," to ",I0,".")') startstep,endstep
     CALL print_gyradius()
    ENDIF
@@ -7542,7 +7620,7 @@ END MODULE DEBUG
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
 !reorientational autocorrelation functions.
 !relative mean molecular velocity correlation functions.
-MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
+MODULE AUTOCORRELATION ! Copyright (C) 2022 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -8214,7 +8292,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
      WRITE(*,*) "Performing autocorrelation analysis of vector reorientation."
      WRITE(*,*) "See for example dx.doi.org/10.1016/B978-0-12-387032-2.00011-8"
      WRITE(*,*) "or, for ionic liquids, dx.doi.org/10.1016/j.cplett.2007.03.084"
-     WRITE(*,'(" Molecule type index is ",I0)'),molecule_type_index
+     WRITE(*,'(" Molecule type index is ",I0)')molecule_type_index
      CALL read_input_for_reorientation()
     CASE ("rmm-vcf")!correlation module!
      IF (give_number_of_molecule_types()==1) THEN
@@ -11079,11 +11157,14 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
    CASE ("vcf","ecaf")
     CALL check_boost()
     CALL velocity_correlation()
+    CALL add_reference(2)
    CASE ("dihedral")
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL dihedral_autocorrelation()!fill the array
     IF (.NOT.(skip_autocorr)) CALL calculate_autocorrelation_function_from_binary_array() !calculate the autocorrelation function from the array
     IF (jump_analysis_dihedral) CALL calculate_jump_histograms_from_binary_array()
+    CALL add_reference(1)
+    CALL add_reference(2)
    CASE ("reorientation")
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL reorientational_autocorrelation()
@@ -11095,6 +11176,7 @@ MODULE AUTOCORRELATION ! Copyright (C) 2021 Frederik Philippi
     ELSE
      CALL cross_correlation()
     ENDIF
+    CALL add_reference(2)
    CASE DEFAULT
     CALL report_error(0)
    END SELECT
@@ -11111,7 +11193,7 @@ END MODULE AUTOCORRELATION
 
 !This Module calculates (drift corrected) mean squared displacements.
 !The diffusion implementation is shit. Use TRAVIS.
-MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
+MODULE DIFFUSION ! Copyright (C) 2022 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -12086,7 +12168,7 @@ MODULE DIFFUSION ! Copyright (C) 2021 Frederik Philippi
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs low-level command line tasks.
-MODULE RECOGNITION ! Copyright (C) 2021 Frederik Philippi
+MODULE RECOGNITION ! Copyright (C) 2022 Frederik Philippi
  USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -12723,7 +12805,7 @@ MODULE RECOGNITION ! Copyright (C) 2021 Frederik Philippi
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates special combined distribution functions - such as cylindrical or polar.
-MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
+MODULE DISTRIBUTION ! Copyright (C) 2022 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -13996,7 +14078,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2021 Frederik Philippi
 END MODULE DISTRIBUTION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates intra- and intermolecular contact distance estimates (averages of closest distance)
-MODULE DISTANCE ! Copyright (C) 2021 Frederik Philippi
+MODULE DISTANCE ! Copyright (C) 2022 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -15290,10 +15372,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *, "   #######################"
   PRINT *
  ENDIF
- PRINT *, "   Copyright (C) 2021 Frederik Philippi (Tom Welton Group)"
+ PRINT *, "   Copyright (C) 2022 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 20_Oct_2021"
+ PRINT *, "   Date of Release: 10_Feb_2022"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -15644,7 +15726,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   SUBROUTINE show_program_features()
   IMPLICIT NONE
    PRINT *,"The program has the following features:"
-   PRINT *,
+   PRINT *
    PRINT *,"   Dihedral Conditions:"
    PRINT *,"   Allows the user to specify a set of dihedral conditions to be fulfilled."
    PRINT *,"   These could e.g. be the two dihedrals in NTf2 ('cisoid' vs. 'transoid'),"
@@ -16012,7 +16094,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory.."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
-   PRINT *,
+   PRINT *
    PRINT *,"custom velocity correlation AND cacf components input file:"
    PRINT *,"The first line gives the operation mode, followed by the number of custom components."
    PRINT *,"The operation mode is either 'vcf' or 'cacf'."
@@ -17881,6 +17963,7 @@ INTEGER :: ios,n
      CALL print_atomic_charges()
     CASE ("print_dipole_statistics")
      CALL print_dipole_statistics()
+     CALL add_reference(2)
     CASE ("show_drude")
      CALL show_drude_settings()
     CASE ("switch_to_com","barycentric","barycenter","barycentre") !Module MOLECULAR
@@ -17963,6 +18046,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(91)
      ENDIF
+     CALL add_reference(2)
     CASE ("remove_drudes_simple") !Module DEBUG
      IF (are_drudes_assigned()) THEN
       WRITE(*,*) "Writing trajectory with drude particles merged into cores - simple mode."
@@ -17975,6 +18059,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(91)
      ENDIF
+     CALL add_reference(2)
     CASE ("remove_cores") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
@@ -17991,6 +18076,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(91)
      ENDIF
+     CALL add_reference(2)
     CASE ("remove_cores_simple") !Module DEBUG
      IF (are_drudes_assigned()) THEN
       WRITE(*,*) "Writing trajectory with only drude particles (minus cores) - simple mode."
@@ -18003,6 +18089,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(91)
      ENDIF
+     CALL add_reference(2)
     CASE ("contact_distance") !Module DEBUG
      IF (BOX_VOLUME_GIVEN) THEN
       BACKSPACE 7
@@ -18215,6 +18302,7 @@ INTEGER :: ios,n
       CALL check_timesteps(startstep,endstep)
       CALL report_temperature(inputinteger,startstep,endstep)
      ENDIF
+     CALL add_reference(2)
     CASE ("gyradius") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,startstep,endstep
@@ -18251,6 +18339,7 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       CALL report_drude_temperature(startstep,endstep)
      ENDIF
+     CALL add_reference(2)
     CASE ("drude_temp_simple") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18259,6 +18348,7 @@ INTEGER :: ios,n
       WRITE(*,*) "(Extended support of drude particles requires manual drude assignment)"
       CALL report_drude_temperature(1,1)
      ENDIF
+     CALL add_reference(2)
     CASE ("set_threads") !Module DEBUG
      !$ IF (.FALSE.) THEN
       WRITE(*,*) "keyword 'set_threads' has no effect (Compiler not OpenMP compliant)"
@@ -18322,6 +18412,7 @@ INTEGER :: ios,n
      FILENAME_AUTOCORRELATION_INPUT=dummy
      WRITE(*,*) "(Auto)correlation module invoked."
      CALL perform_autocorrelation()
+     !REFERENCES are called from the autocorrelation module!!!
     CASE ("correlation_simple")
      CALL report_error(113)
     CASE ("distance","distances") !Module DISTANCE
@@ -18362,7 +18453,7 @@ INTEGER :: ios,n
      FILENAME_AUTOCORRELATION_INPUT=dummy
      WRITE(*,*) "(Auto)correlation module invoked."
      CALL perform_autocorrelation()
-     CALL add_reference(1)
+     !REFERENCES are called from the autocorrelation module!!!
     CASE ("dihedral_simple")
      CALL report_error(113)
     CASE ("diffusion") !Module DIFFUSION
@@ -18381,6 +18472,7 @@ INTEGER :: ios,n
       CALL perform_diffusion_analysis()
      ENDIF
      CALL add_reference(1)
+     CALL add_reference(2)
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18391,6 +18483,7 @@ INTEGER :: ios,n
       CALL perform_diffusion_analysis()
      ENDIF
      CALL add_reference(1)
+     CALL add_reference(2)
     CASE ("distribution") !Module DISTRIBUTION
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18407,6 +18500,7 @@ INTEGER :: ios,n
       CALL report_error(41)
      ENDIF
      CALL add_reference(1)
+     CALL add_reference(2)
     CASE ("distribution_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18424,6 +18518,7 @@ INTEGER :: ios,n
      WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
      CALL write_simple_charge_arm()
      CALL perform_distribution_analysis()
+     CALL add_reference(2)
     CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -18431,12 +18526,14 @@ INTEGER :: ios,n
      WRITE(*,*) "(charge arm with charge lever moment correction)"
      CALL write_simple_charge_arm(normalise=.TRUE.)
      CALL perform_distribution_analysis()
+     CALL add_reference(2)
     CASE ("conductivity_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       WRITE(*,*) "Autocorrelation module invoked - simple mode:"
       WRITE(*,*) "Calculating overall conductivity."
       CALL write_simple_conductivity()
       CALL perform_autocorrelation()
+      !REFERENCES are called from the autocorrelation module!!!
      ELSE
       CALL report_error(41)
      ENDIF
@@ -18546,8 +18643,9 @@ INTEGER :: ios,n
      WRITE(*,*) "testing stuff."
      !CALL add_reference(1)
      !CALL dump_slab(1,1,1,10.0d0,10.0d0)
-     !CALL dump_atomic_properties()
-     !CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+     CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
+     ! CALL dump_atomic_properties()
+     ! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
      WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
@@ -18734,7 +18832,7 @@ INTEGER :: deallocstatus
  IF (DISCONNECTED) CLOSE(UNIT=6)
 END SUBROUTINE finalise_command_line_arguments
 
-PROGRAM PREALPHA ! Copyright (C) 2021 Frederik Philippi
+PROGRAM PREALPHA ! Copyright (C) 2022 Frederik Philippi
 USE SETTINGS
 USE MOLECULAR
 USE DEBUG

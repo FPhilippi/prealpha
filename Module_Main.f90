@@ -405,7 +405,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		SUBROUTINE show_program_features()
 		IMPLICIT NONE
 			PRINT *,"The program has the following features:"
-			PRINT *,
+			PRINT *
 			PRINT *,"   Dihedral Conditions:"
 			PRINT *,"   Allows the user to specify a set of dihedral conditions to be fulfilled."
 			PRINT *,"   These could e.g. be the two dihedrals in NTf2 ('cisoid' vs. 'transoid'),"
@@ -773,7 +773,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Note that the printed tcf will always have the same time resolution as the trajectory.."
 			PRINT *," - 'quit'"
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
-			PRINT *,
+			PRINT *
 			PRINT *,"custom velocity correlation AND cacf components input file:"
 			PRINT *,"The first line gives the operation mode, followed by the number of custom components."
 			PRINT *,"The operation mode is either 'vcf' or 'cacf'."
@@ -2642,6 +2642,7 @@ INTEGER :: ios,n
 					CALL print_atomic_charges()
 				CASE ("print_dipole_statistics")
 					CALL print_dipole_statistics()
+					CALL add_reference(2)
 				CASE ("show_drude")
 					CALL show_drude_settings()
 				CASE ("switch_to_com","barycentric","barycenter","barycentre") !Module MOLECULAR
@@ -2724,6 +2725,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(91)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("remove_drudes_simple") !Module DEBUG
 					IF (are_drudes_assigned()) THEN
 						WRITE(*,*) "Writing trajectory with drude particles merged into cores - simple mode."
@@ -2736,6 +2738,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(91)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("remove_cores") !Module DEBUG
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,startstep,endstep
@@ -2752,6 +2755,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(91)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("remove_cores_simple") !Module DEBUG
 					IF (are_drudes_assigned()) THEN
 						WRITE(*,*) "Writing trajectory with only drude particles (minus cores) - simple mode."
@@ -2764,6 +2768,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(91)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("contact_distance") !Module DEBUG
 					IF (BOX_VOLUME_GIVEN) THEN
 						BACKSPACE 7
@@ -2976,6 +2981,7 @@ INTEGER :: ios,n
 						CALL check_timesteps(startstep,endstep)
 						CALL report_temperature(inputinteger,startstep,endstep)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("gyradius") !Module DEBUG
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,inputinteger,startstep,endstep
@@ -3012,6 +3018,7 @@ INTEGER :: ios,n
 						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 						CALL report_drude_temperature(startstep,endstep)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("drude_temp_simple") !Module DEBUG
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3020,6 +3027,7 @@ INTEGER :: ios,n
 						WRITE(*,*) "(Extended support of drude particles requires manual drude assignment)"
 						CALL report_drude_temperature(1,1)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("set_threads") !Module DEBUG
 				 !$ IF (.FALSE.) THEN
 						WRITE(*,*) "keyword 'set_threads' has no effect (Compiler not OpenMP compliant)"
@@ -3083,6 +3091,7 @@ INTEGER :: ios,n
 					FILENAME_AUTOCORRELATION_INPUT=dummy
 					WRITE(*,*) "(Auto)correlation module invoked."
 					CALL perform_autocorrelation()
+					!REFERENCES are called from the autocorrelation module!!!
 				CASE ("correlation_simple")
 					CALL report_error(113)
 				CASE ("distance","distances") !Module DISTANCE
@@ -3123,7 +3132,7 @@ INTEGER :: ios,n
 					FILENAME_AUTOCORRELATION_INPUT=dummy
 					WRITE(*,*) "(Auto)correlation module invoked."
 					CALL perform_autocorrelation()
-					CALL add_reference(1)
+					!REFERENCES are called from the autocorrelation module!!!
 				CASE ("dihedral_simple")
 					CALL report_error(113)
 				CASE ("diffusion") !Module DIFFUSION
@@ -3142,6 +3151,7 @@ INTEGER :: ios,n
 						CALL perform_diffusion_analysis()
 					ENDIF
 					CALL add_reference(1)
+					CALL add_reference(2)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3152,6 +3162,7 @@ INTEGER :: ios,n
 						CALL perform_diffusion_analysis()
 					ENDIF
 					CALL add_reference(1)
+					CALL add_reference(2)
 				CASE ("distribution") !Module DISTRIBUTION
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3168,6 +3179,7 @@ INTEGER :: ios,n
 						CALL report_error(41)
 					ENDIF
 					CALL add_reference(1)
+					CALL add_reference(2)
 				CASE ("distribution_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3185,6 +3197,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
 					CALL write_simple_charge_arm()
 					CALL perform_distribution_analysis()
+					CALL add_reference(2)
 				CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -3192,12 +3205,14 @@ INTEGER :: ios,n
 					WRITE(*,*) "(charge arm with charge lever moment correction)"
 					CALL write_simple_charge_arm(normalise=.TRUE.)
 					CALL perform_distribution_analysis()
+					CALL add_reference(2)
 				CASE ("conductivity_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						WRITE(*,*) "Autocorrelation module invoked - simple mode:"
 						WRITE(*,*) "Calculating overall conductivity."
 						CALL write_simple_conductivity()
 						CALL perform_autocorrelation()
+						!REFERENCES are called from the autocorrelation module!!!
 					ELSE
 						CALL report_error(41)
 					ENDIF
@@ -3307,8 +3322,9 @@ INTEGER :: ios,n
 					WRITE(*,*) "testing stuff."
 					!CALL add_reference(1)
 					!CALL dump_slab(1,1,1,10.0d0,10.0d0)
-					!CALL dump_atomic_properties()
-					!CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+					CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
+					! CALL dump_atomic_properties()
+					! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

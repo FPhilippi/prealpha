@@ -676,7 +676,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					WRITE(*,*) "Performing autocorrelation analysis of vector reorientation."
 					WRITE(*,*) "See for example dx.doi.org/10.1016/B978-0-12-387032-2.00011-8"
 					WRITE(*,*) "or, for ionic liquids, dx.doi.org/10.1016/j.cplett.2007.03.084"
-					WRITE(*,'(" Molecule type index is ",I0)'),molecule_type_index
+					WRITE(*,'(" Molecule type index is ",I0)')molecule_type_index
 					CALL read_input_for_reorientation()
 				CASE ("rmm-vcf")!correlation module!
 					IF (give_number_of_molecule_types()==1) THEN
@@ -3541,11 +3541,14 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CASE ("vcf","ecaf")
 				CALL check_boost()
 				CALL velocity_correlation()
+				CALL add_reference(2)
 			CASE ("dihedral")
 				IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 				CALL dihedral_autocorrelation()!fill the array
 				IF (.NOT.(skip_autocorr)) CALL calculate_autocorrelation_function_from_binary_array() !calculate the autocorrelation function from the array
 				IF (jump_analysis_dihedral) CALL calculate_jump_histograms_from_binary_array()
+				CALL add_reference(1)
+				CALL add_reference(2)
 			CASE ("reorientation")
 				IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 				CALL reorientational_autocorrelation()
@@ -3557,6 +3560,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ELSE
 					CALL cross_correlation()
 				ENDIF
+				CALL add_reference(2)
 			CASE DEFAULT
 				CALL report_error(0)
 			END SELECT

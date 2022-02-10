@@ -105,7 +105,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		INTEGER :: reference_number
 		LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
-	TYPE(reference_entry) :: LIST_OF_REFERENCES(1)
+	TYPE(reference_entry) :: LIST_OF_REFERENCES(2)
 	!LIST OF ERRORS HANDLED BY THE ROUTINES:
 	!0 unspecified error. These errors should (in theory) never be encountered.
 	!1 divided by zero in normalize3D
@@ -270,6 +270,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			!Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
 			LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
 			LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+			LIST_OF_REFERENCES(2)%reference_name="Phys. Chem. Chem. Phys., 2022, 24, 3144–3162."
+			LIST_OF_REFERENCES(2)%reference_DOI="10.1039/D1CP04592J"
 		END SUBROUTINE initialise_references
 
 		SUBROUTINE add_reference(reference_number_to_add)

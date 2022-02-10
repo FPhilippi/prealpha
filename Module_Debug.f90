@@ -11,7 +11,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	!PRIVATE/PUBLIC declarations
 	PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
 	PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
-	PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab
+	PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab,dump_split_single
 	PRIVATE test_dihedrals
 	CONTAINS
 
@@ -603,7 +603,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ELSE
 				molecule_type_index=molecule_type_index_in
 				WRITE(*,FMT='(" Calculating intra- and intermolecular contact distances for molecule type ",I0," at timestep ",I0,".")')&
-				&,molecule_type_index,startstep_in
+				&molecule_type_index,startstep_in
 				CALL print_distances()
 			ENDIF
 
@@ -1194,6 +1194,82 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CLOSE(UNIT=3)
 		END SUBROUTINE dump_split
 
+		SUBROUTINE dump_split_single(startstep_in,endstep_in,output_format,molecule_type_index_in)
+		IMPLICIT NONE
+		INTEGER :: startstep,endstep
+		INTEGER :: stepcounter,moleculecounter,atomcount
+		INTEGER,INTENT(IN) :: startstep_in,endstep_in,molecule_type_index_in
+		LOGICAL :: connected
+		CHARACTER(LEN=1024) :: fstring
+		CHARACTER(LEN=3),INTENT(IN) :: output_format
+			!First, do the fools-proof checks
+			startstep=startstep_in
+			endstep=endstep_in
+			IF (startstep<1) THEN
+				CALL report_error(57,exit_status=startstep)
+				startstep=1
+			ENDIF
+			IF (endstep>give_number_of_timesteps()) THEN
+				CALL report_error(57,exit_status=endstep)
+				endstep=give_number_of_timesteps()
+			ENDIF
+			IF (endstep<startstep) THEN
+				CALL report_error(57,exit_status=endstep)
+				endstep=startstep
+			ENDIF
+			IF (molecule_type_index_in>give_number_of_molecule_types()) THEN
+				CALL report_error(33,exit_status=molecule_type_index_in)
+				RETURN
+			ENDIF
+			IF (molecule_type_index_in<1) THEN
+				WRITE(*,FMT='(" Switching to dump_split.")')
+				CALL dump_split(startstep,endstep,output_format)
+				RETURN
+			ENDIF
+			OPEN(UNIT=3,STATUS="SCRATCH")
+			WRITE(*,ADVANCE="NO",FMT='(" Writing separate trajectory for molecule number ",I0," ...")')&
+			& molecule_type_index_in
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((endstep-startstep)>100) WRITE(*,*)
+				CALL print_progress(endstep-startstep)
+			ENDIF
+			WRITE(fstring,'(2A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),&
+			&"traj_",molecule_type_index_in,"."//output_format
+			INQUIRE(UNIT=4,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=4)
+			OPEN(UNIT=4,FILE=TRIM(fstring),STATUS="REPLACE")
+			atomcount=give_number_of_atoms_per_molecule(molecule_type_index_in)*give_number_of_molecules_per_step(molecule_type_index_in)
+atomcount=atomcount+2
+			DO stepcounter=startstep,endstep,1
+				!Write head, depending on which type the trajectory has...
+				CALL write_header(4,stepcounter*TIME_SCALING_FACTOR,atomcount,output_format)
+				!Reset unit 3
+				REWIND 3
+				!Add the header
+WRITE(3,*) atomcount-2
+				WRITE(3,*)
+				DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index_in),1
+					!the following line appends one molecule to the scratch file.
+					CALL write_molecule(3,stepcounter,molecule_type_index_in,moleculecounter,include_header=.FALSE.)
+				ENDDO
+				!Here, all the molecules for the current timestep have been appended. Thus, transfer to output:
+				CALL center_xyz(3,addhead=.FALSE.,outputunit=4)
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+WRITE(4,'("F 0.0 0.0 0.0")')
+WRITE(4,'("F 0.0 0.0 1.0")')
+			ENDDO
+			ENDFILE 4
+			CLOSE(UNIT=4)
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((give_number_of_timesteps())>100) THEN
+					WRITE(*,*)
+					WRITE(*,FMT='(" ")',ADVANCE="NO")
+				ENDIF
+			ENDIF
+			WRITE(*,'("done.")')
+			CLOSE(UNIT=3)
+		END SUBROUTINE dump_split_single
+
 		SUBROUTINE convert(writemolecularinputfile,output_format,useCOC_in)
 		IMPLICIT NONE
 		CHARACTER(LEN=3),INTENT(IN) :: output_format
@@ -1338,7 +1414,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDDO
 			ELSE
 				molecule_type_index=molecule_type_index_in
-				WRITE(*,FMT='(" Calculating radius of gyration for molecule type ",I0,".")'),molecule_type_index
+				WRITE(*,FMT='(" Calculating radius of gyration for molecule type ",I0,".")')molecule_type_index
 				WRITE(*,'(" Taking ensemble average from step ",I0," to ",I0,".")') startstep,endstep
 				CALL print_gyradius()
 			ENDIF
