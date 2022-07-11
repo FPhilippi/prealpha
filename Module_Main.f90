@@ -2857,6 +2857,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("dump_dimers_simple")
 					CALL report_error(113)
 				CASE ("dump_neighbour_traj")
@@ -2939,6 +2940,7 @@ INTEGER :: ios,n
 					IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 					CALL convert(inputlogical,TRAJECTORY_TYPE)
+					CALL add_reference(4)
 				CASE ("convert_coc","convert_COC") !Module DEBUG
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
@@ -2950,11 +2952,13 @@ INTEGER :: ios,n
 					IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 					CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
+					CALL add_reference(4)
 				CASE ("convert_simple") !Module DEBUG
 					WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
 					WRITE(*,*) "An adjusted molecular input file will be written, too."
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
 					CALL convert(.TRUE.,TRAJECTORY_TYPE)
+					CALL add_reference(4)
 				CASE ("temperature") !Module DEBUG
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -2970,6 +2974,7 @@ INTEGER :: ios,n
 						WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
 						CALL report_temperature(inputinteger,startstep,endstep)
 					ENDIF
+					CALL add_reference(2)
 				CASE ("temperature_simple") !Module DEBUG
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3105,6 +3110,7 @@ INTEGER :: ios,n
 					FILENAME_DISTANCE_INPUT=dummy
 					WRITE(*,*) "distance module invoked."
 					CALL perform_distance_analysis()
+					CALL add_reference(5)
 				CASE ("distance_simple","distances_simple") !Module DISTANCE
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Calculating, where possible, intra- and intermolecular distances for H and F."
@@ -3120,6 +3126,7 @@ INTEGER :: ios,n
 					ELSE
 						WRITE(*,*) "Can't do intermolecular distances. Do manually if necessary."
 					ENDIF
+					CALL add_reference(5)
 				CASE ("dihedral") !Module AUTOCORRELATION
 					!the (INFORMATION_IN_TRAJECTORY=="VEL") test is done in perform_autocorrelation()!
 					!same for the wrap test.
@@ -3150,8 +3157,8 @@ INTEGER :: ios,n
 						WRITE(*,*) "Diffusion module invoked."
 						CALL perform_diffusion_analysis()
 					ENDIF
-					CALL add_reference(1)
 					CALL add_reference(2)
+					CALL add_reference(4)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3161,8 +3168,8 @@ INTEGER :: ios,n
 						WRITE(*,*) "Diffusion module invoked."
 						CALL perform_diffusion_analysis()
 					ENDIF
-					CALL add_reference(1)
 					CALL add_reference(2)
+					CALL add_reference(4)
 				CASE ("distribution") !Module DISTRIBUTION
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3180,6 +3187,8 @@ INTEGER :: ios,n
 					ENDIF
 					CALL add_reference(1)
 					CALL add_reference(2)
+					CALL add_reference(3)
+					CALL add_reference(4)
 				CASE ("distribution_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3191,13 +3200,19 @@ INTEGER :: ios,n
 						CALL report_error(41)
 					ENDIF
 					CALL add_reference(1)
+					CALL add_reference(2)
+					CALL add_reference(3)
+					CALL add_reference(4)
 				CASE ("charge_arm_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Distribution module invoked - simple mode:"
 					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
 					CALL write_simple_charge_arm()
 					CALL perform_distribution_analysis()
+					CALL add_reference(1)
 					CALL add_reference(2)
+					CALL add_reference(3)
+					CALL add_reference(4)
 				CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -3205,7 +3220,10 @@ INTEGER :: ios,n
 					WRITE(*,*) "(charge arm with charge lever moment correction)"
 					CALL write_simple_charge_arm(normalise=.TRUE.)
 					CALL perform_distribution_analysis()
+					CALL add_reference(1)
 					CALL add_reference(2)
+					CALL add_reference(3)
+					CALL add_reference(4)
 				CASE ("conductivity_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
 						WRITE(*,*) "Autocorrelation module invoked - simple mode:"
@@ -3264,6 +3282,7 @@ INTEGER :: ios,n
 				CASE ("dump_full_gro","write_full_gro")
 					!output is in subroutine
 					CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+					CALL add_reference(4)
 				CASE ("dump_full_lmp","write_full_lmp")
 					!output is in subroutine
 					CALL write_trajectory(1,give_number_of_timesteps(),"lmp")
@@ -3322,9 +3341,13 @@ INTEGER :: ios,n
 					WRITE(*,*) "testing stuff."
 					!CALL add_reference(1)
 					!CALL dump_slab(1,1,1,10.0d0,10.0d0)
-					CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
+					!CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
 					! CALL dump_atomic_properties()
 					! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+					!FILENAME_DISPERSION_INPUT="intra.inp"
+					!CALL perform_dispersion_analysis()
+					!FILENAME_DISPERSION_INPUT="inter.inp"
+					!CALL perform_dispersion_analysis()
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

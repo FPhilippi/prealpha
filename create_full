@@ -1,0 +1,15 @@
+#!/bin/bash
+
+gfortran Module_SETTINGS.f90 Module_Main.f90 Module_Molecular.f90 Module_Angles.f90 Module_Debug.f90 Module_Autocorrelation.f90 Module_Diffusion.f90 Module_Recognition.f90 Module_Distribution.f90 Module_Distances.f90 -g -fbacktrace -fopenmp
+
+echo "./a.out is compiled"
+
+bash create_master
+
+gfortran -fopenmp pre-alpha.f03 -o prealpha_debug -g -fbacktrace # -Wall
+
+gfortran -fopenmp pre-alpha.f03 -o prealpha
+
+cp prealpha ~/bin/
+cp prealpha_debug ~/bin/
+export PATH=$PATH:/rdsgpfs/general/user/fdp18/home/bin

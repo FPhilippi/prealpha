@@ -95,6 +95,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
+	CHARACTER(LEN=1024) :: FILENAME_DISPERSION_INPUT="dispersion.inp"
 	CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
 	CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
 	CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
@@ -105,7 +106,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		INTEGER :: reference_number
 		LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
-	TYPE(reference_entry) :: LIST_OF_REFERENCES(2)
+	TYPE(reference_entry) :: LIST_OF_REFERENCES(5)
 	!LIST OF ERRORS HANDLED BY THE ROUTINES:
 	!0 unspecified error. These errors should (in theory) never be encountered.
 	!1 divided by zero in normalize3D
@@ -253,6 +254,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!143 no charged particles - centre of charge trajectory will be empty.
 	!144 the specified trajectory output or input format is not supported (.gro, .xyz, .lmp)
 	!145 print notice about nm convention in gromacs
+	! DISPERSION MODULE CURRENTLY NOT FURTHER DEVELOPED
+	!146 dispersion.inp is not available
+	!147 dispersion.inp is not correctly formatted
+	!148 no valid subjobs in dispersion module
+	!149 problem when streaming dispersion input.
+	!150 Couldn't allocate memory for dispersion list
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -268,10 +275,21 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			LIST_OF_REFERENCES(:)%reference_number=0
 			LIST_OF_REFERENCES(:)%cited=.FALSE.
 			!Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
+			!Daniel's curled cation paper
 			LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
 			LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+			!The CTPOL paper
 			LIST_OF_REFERENCES(2)%reference_name="Phys. Chem. Chem. Phys., 2022, 24, 3144–3162."
 			LIST_OF_REFERENCES(2)%reference_DOI="10.1039/D1CP04592J"
+			!yongji's paper
+			LIST_OF_REFERENCES(3)%reference_name="J. Chem. Phys., 2022, 156, 204312."
+			LIST_OF_REFERENCES(3)%reference_DOI="10.1063/5.0091322"
+			!The fluorination/flexibility paper
+			LIST_OF_REFERENCES(4)%reference_name="Accepted to Chemical Science"
+			LIST_OF_REFERENCES(4)%reference_DOI="10.1039/d2sc03074h"
+			!Julian's FFC paper
+			LIST_OF_REFERENCES(5)%reference_name="Submitted to JPC"
+			LIST_OF_REFERENCES(5)%reference_DOI="wait for it"
 		END SUBROUTINE initialise_references
 
 		SUBROUTINE add_reference(reference_number_to_add)
@@ -841,6 +859,25 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					error_count=error_count-1
 					WRITE(*,*) " #  NOTICE 145: GROMACS assumes nm, prealpha assumes Angström."
 					WRITE(*,*) "--> Coordinates will be divided by 10 for '.gro' output."
+				CASE (146)
+					WRITE(*,*) " #  ERROR 146: couldn't find '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+					WRITE(*,*) "--> redelivering control to main unit"
+				CASE (147)
+					WRITE(*,*) " #  SEVERE ERROR 147: couldn't read '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+					WRITE(*,*) " #  Check format of input file!"
+					CLOSE(UNIT=3)!unit 3 is the distance input file
+					CALL finalise_global()
+					STOP
+				CASE (148)
+					WRITE(*,*) " #  ERROR 148: No (remaining) valid subjobs in module DISPERSION."
+					WRITE(*,*) "--> Check your input files."
+				CASE (149)
+					WRITE(*,*) " #  ERROR 149: problem streaming '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+					WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISPERSION_INPUT),"'!"
+				CASE (150)
+					WRITE(*,*) " #  SEVERE ERROR 150: couldn't allocate memory for dispersion list (or atom_indices)."
+					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+					STOP
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

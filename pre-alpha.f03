@@ -1,4 +1,4 @@
-! RELEASED ON 10_Feb_2022 AT 14:06
+! RELEASED ON 09_Jul_2022 AT 19:33
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2022 Frederik Philippi
@@ -96,6 +96,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
  CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
  CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
+ CHARACTER(LEN=1024) :: FILENAME_DISPERSION_INPUT="dispersion.inp"
  CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
  CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
  CHARACTER(LEN=3) :: INFORMATION_IN_TRAJECTORY="UNK"!does the trajectory contain velocities (VEL) or coordinates (POS)????
@@ -106,7 +107,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   INTEGER :: reference_number
   LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
- TYPE(reference_entry) :: LIST_OF_REFERENCES(2)
+ TYPE(reference_entry) :: LIST_OF_REFERENCES(5)
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
  !1 divided by zero in normalize3D
@@ -254,6 +255,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !143 no charged particles - centre of charge trajectory will be empty.
  !144 the specified trajectory output or input format is not supported (.gro, .xyz, .lmp)
  !145 print notice about nm convention in gromacs
+ ! DISPERSION MODULE CURRENTLY NOT FURTHER DEVELOPED
+ !146 dispersion.inp is not available
+ !147 dispersion.inp is not correctly formatted
+ !148 no valid subjobs in dispersion module
+ !149 problem when streaming dispersion input.
+ !150 Couldn't allocate memory for dispersion list
 
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -269,10 +276,21 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    LIST_OF_REFERENCES(:)%reference_number=0
    LIST_OF_REFERENCES(:)%cited=.FALSE.
    !Here, add the references. need to manually increase the max number for LIST_OF_REFERENCES in the declaration.
+   !Daniel's curled cation paper
    LIST_OF_REFERENCES(1)%reference_name="Phys. Chem. Chem. Phys., 2021, 23, 21042–21064."
    LIST_OF_REFERENCES(1)%reference_DOI="10.1039/D1CP02889H"
+   !The CTPOL paper
    LIST_OF_REFERENCES(2)%reference_name="Phys. Chem. Chem. Phys., 2022, 24, 3144–3162."
    LIST_OF_REFERENCES(2)%reference_DOI="10.1039/D1CP04592J"
+   !yongji's paper
+   LIST_OF_REFERENCES(3)%reference_name="J. Chem. Phys., 2022, 156, 204312."
+   LIST_OF_REFERENCES(3)%reference_DOI="10.1063/5.0091322"
+   !The fluorination/flexibility paper
+   LIST_OF_REFERENCES(4)%reference_name="Accepted to Chemical Science"
+   LIST_OF_REFERENCES(4)%reference_DOI="10.1039/d2sc03074h"
+   !Julian's FFC paper
+   LIST_OF_REFERENCES(5)%reference_name="Submitted to JPC"
+   LIST_OF_REFERENCES(5)%reference_DOI="wait for it"
   END SUBROUTINE initialise_references
 
   SUBROUTINE add_reference(reference_number_to_add)
@@ -842,6 +860,25 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      error_count=error_count-1
      WRITE(*,*) " #  NOTICE 145: GROMACS assumes nm, prealpha assumes Angström."
      WRITE(*,*) "--> Coordinates will be divided by 10 for '.gro' output."
+    CASE (146)
+     WRITE(*,*) " #  ERROR 146: couldn't find '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+     WRITE(*,*) "--> redelivering control to main unit"
+    CASE (147)
+     WRITE(*,*) " #  SEVERE ERROR 147: couldn't read '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+     WRITE(*,*) " #  Check format of input file!"
+     CLOSE(UNIT=3)!unit 3 is the distance input file
+     CALL finalise_global()
+     STOP
+    CASE (148)
+     WRITE(*,*) " #  ERROR 148: No (remaining) valid subjobs in module DISPERSION."
+     WRITE(*,*) "--> Check your input files."
+    CASE (149)
+     WRITE(*,*) " #  ERROR 149: problem streaming '",TRIM(FILENAME_DISPERSION_INPUT),"'"
+     WRITE(*,*) " #  check format of '",TRIM(FILENAME_DISPERSION_INPUT),"'!"
+    CASE (150)
+     WRITE(*,*) " #  SEVERE ERROR 150: couldn't allocate memory for dispersion list (or atom_indices)."
+     WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+     STOP
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -2245,13 +2282,13 @@ MODULE MOLECULAR ! Copyright (C) 2022 Frederik Philippi
   !This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
   REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
   &(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,&
-  &molecule_index_1,molecule_index_2,atom_index_1,atom_index_2,translation)
+  &molecule_index_1,molecule_index_2,atom_index_1,atom_index_2,translation,connection_vector)
   IMPLICIT NONE
   INTEGER :: a,b,c
   INTEGER,INTENT(IN) :: timestep1,timestep2,molecule_type_index_1,molecule_type_index_2
   INTEGER,INTENT(IN) :: molecule_index_1,molecule_index_2,atom_index_1,atom_index_2
   REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip,wrapshift(3)
-  REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3)
+  REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3),connection_vector(3)
    IF (READ_SEQUENTIAL) THEN
     CALL goto_timestep(timestep1)
     pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%snapshot(atom_index_1,molecule_index_1)%coordinates(:))
@@ -2263,13 +2300,13 @@ MODULE MOLECULAR ! Copyright (C) 2022 Frederik Philippi
    ENDIF
    !two atoms can be no further apart than the diagonale of the box... that's what I initialise to
    give_smallest_atom_distance_squared=maximum_distance_squared
-   ! The following is always needed, because the trajectory is wrapped molecule-wise.
+   ! The following is always needed, because the trajectory is wrapped molecule-wise. If at all.
    CALL wrap_vector(pos_1,shift(:))
    CALL wrap_vector(pos_2,wrapshift(:))
    !"shift" is now the vector to translate the reference atom into the box by wrapping.
    !"wrapshift" is the same for the second, observed atom.
    !now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
-   wrapshift(:)=wrapshift(:)-shift(:)
+   IF (PRESENT(translation)) wrapshift(:)=wrapshift(:)-shift(:)
    !Now, check all mirror images
    DO a=-1,1,1! a takes the values (-1, 0, 1)
     DO b=-1,1,1! b takes the values (-1, 0, 1)
@@ -2284,6 +2321,7 @@ MODULE MOLECULAR ! Copyright (C) 2022 Frederik Philippi
        !a distance has been found that's closer than the current best - amend that.
        give_smallest_atom_distance_squared=distance_clip
        IF (PRESENT(translation)) translation(:)=shift(:)
+       IF (PRESENT(connection_vector)) connection_vector(:)=(pos_2+shift)-pos_1
       ENDIF
        ENDDO
     ENDDO
@@ -11163,11 +11201,12 @@ MODULE AUTOCORRELATION ! Copyright (C) 2022 Frederik Philippi
     CALL dihedral_autocorrelation()!fill the array
     IF (.NOT.(skip_autocorr)) CALL calculate_autocorrelation_function_from_binary_array() !calculate the autocorrelation function from the array
     IF (jump_analysis_dihedral) CALL calculate_jump_histograms_from_binary_array()
-    CALL add_reference(1)
     CALL add_reference(2)
+    CALL add_reference(4)
    CASE ("reorientation")
     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
     CALL reorientational_autocorrelation()
+    CALL add_reference(4)
    CASE ("rmm-vcf")
     IF (INFORMATION_IN_TRAJECTORY=="POS") CALL report_error(56)
     CALL check_boost()
@@ -15375,7 +15414,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2022 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 10_Feb_2022"
+ PRINT *, "   Date of Release: 09_Jul_2022"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -18178,6 +18217,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
+     CALL add_reference(2)
     CASE ("dump_dimers_simple")
      CALL report_error(113)
     CASE ("dump_neighbour_traj")
@@ -18260,6 +18300,7 @@ INTEGER :: ios,n
      IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(inputlogical,TRAJECTORY_TYPE)
+     CALL add_reference(4)
     CASE ("convert_coc","convert_COC") !Module DEBUG
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
@@ -18271,11 +18312,13 @@ INTEGER :: ios,n
      IF (inputlogical) WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(inputlogical,TRAJECTORY_TYPE,.TRUE.)
+     CALL add_reference(4)
     CASE ("convert_simple") !Module DEBUG
      WRITE(*,*) "Reduce Trajectory to centre of mass for each molecule type."
      WRITE(*,*) "An adjusted molecular input file will be written, too."
      IF (VERBOSE_OUTPUT) WRITE(*,*) "Trajectory type will be '",TRAJECTORY_TYPE,"'"
      CALL convert(.TRUE.,TRAJECTORY_TYPE)
+     CALL add_reference(4)
     CASE ("temperature") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18291,6 +18334,7 @@ INTEGER :: ios,n
       WRITE(*,'(A,I0,A,I0,A)') " (For timesteps ",startstep," to ",endstep,")"
       CALL report_temperature(inputinteger,startstep,endstep)
      ENDIF
+     CALL add_reference(2)
     CASE ("temperature_simple") !Module DEBUG
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18426,6 +18470,7 @@ INTEGER :: ios,n
      FILENAME_DISTANCE_INPUT=dummy
      WRITE(*,*) "distance module invoked."
      CALL perform_distance_analysis()
+     CALL add_reference(5)
     CASE ("distance_simple","distances_simple") !Module DISTANCE
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Calculating, where possible, intra- and intermolecular distances for H and F."
@@ -18441,6 +18486,7 @@ INTEGER :: ios,n
      ELSE
       WRITE(*,*) "Can't do intermolecular distances. Do manually if necessary."
      ENDIF
+     CALL add_reference(5)
     CASE ("dihedral") !Module AUTOCORRELATION
      !the (INFORMATION_IN_TRAJECTORY=="VEL") test is done in perform_autocorrelation()!
      !same for the wrap test.
@@ -18471,8 +18517,8 @@ INTEGER :: ios,n
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
-     CALL add_reference(1)
      CALL add_reference(2)
+     CALL add_reference(4)
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -18482,8 +18528,8 @@ INTEGER :: ios,n
       WRITE(*,*) "Diffusion module invoked."
       CALL perform_diffusion_analysis()
      ENDIF
-     CALL add_reference(1)
      CALL add_reference(2)
+     CALL add_reference(4)
     CASE ("distribution") !Module DISTRIBUTION
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18501,6 +18547,8 @@ INTEGER :: ios,n
      ENDIF
      CALL add_reference(1)
      CALL add_reference(2)
+     CALL add_reference(3)
+     CALL add_reference(4)
     CASE ("distribution_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -18512,13 +18560,19 @@ INTEGER :: ios,n
       CALL report_error(41)
      ENDIF
      CALL add_reference(1)
+     CALL add_reference(2)
+     CALL add_reference(3)
+     CALL add_reference(4)
     CASE ("charge_arm_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Distribution module invoked - simple mode:"
      WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
      CALL write_simple_charge_arm()
      CALL perform_distribution_analysis()
+     CALL add_reference(1)
      CALL add_reference(2)
+     CALL add_reference(3)
+     CALL add_reference(4)
     CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      WRITE(*,*) "Distribution module invoked - simple mode:"
@@ -18526,7 +18580,10 @@ INTEGER :: ios,n
      WRITE(*,*) "(charge arm with charge lever moment correction)"
      CALL write_simple_charge_arm(normalise=.TRUE.)
      CALL perform_distribution_analysis()
+     CALL add_reference(1)
      CALL add_reference(2)
+     CALL add_reference(3)
+     CALL add_reference(4)
     CASE ("conductivity_simple")
      IF (BOX_VOLUME_GIVEN) THEN
       WRITE(*,*) "Autocorrelation module invoked - simple mode:"
@@ -18585,6 +18642,7 @@ INTEGER :: ios,n
     CASE ("dump_full_gro","write_full_gro")
      !output is in subroutine
      CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+     CALL add_reference(4)
     CASE ("dump_full_lmp","write_full_lmp")
      !output is in subroutine
      CALL write_trajectory(1,give_number_of_timesteps(),"lmp")
@@ -18643,9 +18701,13 @@ INTEGER :: ios,n
      WRITE(*,*) "testing stuff."
      !CALL add_reference(1)
      !CALL dump_slab(1,1,1,10.0d0,10.0d0)
-     CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
+     !CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
      ! CALL dump_atomic_properties()
      ! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
+     !FILENAME_DISPERSION_INPUT="intra.inp"
+     !CALL perform_dispersion_analysis()
+     !FILENAME_DISPERSION_INPUT="inter.inp"
+     !CALL perform_dispersion_analysis()
      WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

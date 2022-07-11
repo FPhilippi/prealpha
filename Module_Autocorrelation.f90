@@ -3547,11 +3547,12 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				CALL dihedral_autocorrelation()!fill the array
 				IF (.NOT.(skip_autocorr)) CALL calculate_autocorrelation_function_from_binary_array() !calculate the autocorrelation function from the array
 				IF (jump_analysis_dihedral) CALL calculate_jump_histograms_from_binary_array()
-				CALL add_reference(1)
 				CALL add_reference(2)
+				CALL add_reference(4)
 			CASE ("reorientation")
 				IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 				CALL reorientational_autocorrelation()
+				CALL add_reference(4)
 			CASE ("rmm-vcf")
 				IF (INFORMATION_IN_TRAJECTORY=="POS") CALL report_error(56)
 				CALL check_boost()

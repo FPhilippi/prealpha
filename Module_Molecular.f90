@@ -826,13 +826,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!This FUNCTION returns the smallest squared distance of 2 atoms considering all PBCs.
 		REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_atom_distance_squared&
 		&(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,&
-		&molecule_index_1,molecule_index_2,atom_index_1,atom_index_2,translation)
+		&molecule_index_1,molecule_index_2,atom_index_1,atom_index_2,translation,connection_vector)
 		IMPLICIT NONE
 		INTEGER :: a,b,c
 		INTEGER,INTENT(IN) :: timestep1,timestep2,molecule_type_index_1,molecule_type_index_2
 		INTEGER,INTENT(IN) :: molecule_index_1,molecule_index_2,atom_index_1,atom_index_2
 		REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip,wrapshift(3)
-		REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3)
+		REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3),connection_vector(3)
 			IF (READ_SEQUENTIAL) THEN
 				CALL goto_timestep(timestep1)
 				pos_1(:)=DBLE(molecule_list(molecule_type_index_1)%snapshot(atom_index_1,molecule_index_1)%coordinates(:))
@@ -844,13 +844,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			!two atoms can be no further apart than the diagonale of the box... that's what I initialise to
 			give_smallest_atom_distance_squared=maximum_distance_squared
-			! The following is always needed, because the trajectory is wrapped molecule-wise.
+			! The following is always needed, because the trajectory is wrapped molecule-wise. If at all.
 			CALL wrap_vector(pos_1,shift(:))
 			CALL wrap_vector(pos_2,wrapshift(:))
 			!"shift" is now the vector to translate the reference atom into the box by wrapping.
 			!"wrapshift" is the same for the second, observed atom.
 			!now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
-			wrapshift(:)=wrapshift(:)-shift(:)
+			IF (PRESENT(translation)) wrapshift(:)=wrapshift(:)-shift(:)
 			!Now, check all mirror images
 			DO a=-1,1,1! a takes the values (-1, 0, 1)
 				DO b=-1,1,1! b takes the values (-1, 0, 1)
@@ -865,6 +865,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							!a distance has been found that's closer than the current best - amend that.
 							give_smallest_atom_distance_squared=distance_clip
 							IF (PRESENT(translation)) translation(:)=shift(:)
+							IF (PRESENT(connection_vector)) connection_vector(:)=(pos_2+shift)-pos_1
 						ENDIF
 				   ENDDO
 				ENDDO
