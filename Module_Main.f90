@@ -3338,16 +3338,8 @@ INTEGER :: ios,n
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################DEBUG VERSION"
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
-					WRITE(*,*) "testing stuff."
-					!CALL add_reference(1)
-					!CALL dump_slab(1,1,1,10.0d0,10.0d0)
-					!CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
-					! CALL dump_atomic_properties()
-					! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
-					!FILENAME_DISPERSION_INPUT="intra.inp"
-					!CALL perform_dispersion_analysis()
-					!FILENAME_DISPERSION_INPUT="inter.inp"
-					!CALL perform_dispersion_analysis()
+					WRITE(*,*) "testing stuff for JMD."
+					CALL dump_atomic_properties()
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
