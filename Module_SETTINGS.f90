@@ -285,7 +285,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			LIST_OF_REFERENCES(3)%reference_name="J. Chem. Phys., 2022, 156, 204312."
 			LIST_OF_REFERENCES(3)%reference_DOI="10.1063/5.0091322"
 			!The fluorination/flexibility paper
-			LIST_OF_REFERENCES(4)%reference_name="Accepted to Chemical Science"
+			LIST_OF_REFERENCES(4)%reference_name="Chem. Sci., 2022, 13, 9176–9190."
 			LIST_OF_REFERENCES(4)%reference_DOI="10.1039/d2sc03074h"
 			!Julian's FFC paper
 			LIST_OF_REFERENCES(5)%reference_name="Submitted to JPC"

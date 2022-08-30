@@ -1,4 +1,4 @@
-! RELEASED ON 09_Jul_2022 AT 19:33
+! RELEASED ON 30_Aug_2022 AT 14:09
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2022 Frederik Philippi
@@ -286,7 +286,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    LIST_OF_REFERENCES(3)%reference_name="J. Chem. Phys., 2022, 156, 204312."
    LIST_OF_REFERENCES(3)%reference_DOI="10.1063/5.0091322"
    !The fluorination/flexibility paper
-   LIST_OF_REFERENCES(4)%reference_name="Accepted to Chemical Science"
+   LIST_OF_REFERENCES(4)%reference_name="Chem. Sci., 2022, 13, 9176–9190."
    LIST_OF_REFERENCES(4)%reference_DOI="10.1039/d2sc03074h"
    !Julian's FFC paper
    LIST_OF_REFERENCES(5)%reference_name="Submitted to JPC"
@@ -15414,7 +15414,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2022 Frederik Philippi (Tom Welton Group)"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 09_Jul_2022"
+ PRINT *, "   Date of Release: 30_Aug_2022"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -18698,16 +18698,8 @@ INTEGER :: ios,n
      !Here is some space for testing stuff
      WRITE(*,*) "################################DEBUG VERSION"
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
-     WRITE(*,*) "testing stuff."
-     !CALL add_reference(1)
-     !CALL dump_slab(1,1,1,10.0d0,10.0d0)
-     !CALL dump_split_single(1,give_number_of_timesteps(),"xyz",1)
-     ! CALL dump_atomic_properties()
-     ! CALL write_trajectory(1,give_number_of_timesteps(),"gro")
-     !FILENAME_DISPERSION_INPUT="intra.inp"
-     !CALL perform_dispersion_analysis()
-     !FILENAME_DISPERSION_INPUT="inter.inp"
-     !CALL perform_dispersion_analysis()
+     WRITE(*,*) "testing stuff for JMD."
+     CALL dump_atomic_properties()
      WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
