@@ -288,8 +288,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			LIST_OF_REFERENCES(4)%reference_name="Chem. Sci., 2022, 13, 9176–9190."
 			LIST_OF_REFERENCES(4)%reference_DOI="10.1039/d2sc03074h"
 			!Julian's FFC paper
-			LIST_OF_REFERENCES(5)%reference_name="Submitted to JPC"
-			LIST_OF_REFERENCES(5)%reference_DOI="wait for it"
+			LIST_OF_REFERENCES(5)%reference_name="J. Phys. Chem. B., 2022, 126, 7143–7158."
+			LIST_OF_REFERENCES(5)%reference_DOI="10.1021/acs.jpcb.2c01372"
 		END SUBROUTINE initialise_references
 
 		SUBROUTINE add_reference(reference_number_to_add)
