@@ -153,7 +153,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		CHARACTER (LEN=*) :: filename_conductivity
 		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
 		INTEGER,INTENT(IN) :: number_of_molecules,nsteps
-		INTEGER :: maxmol,allocstatus,deallocstatus,ios,ncomponents,n
+		INTEGER :: ios
 		LOGICAL :: connected
 			PRINT *,"Generating input for electrical conductivity."
 			PRINT *,"How many steps do you want the shift of the (auto)correlation functions to be?"
@@ -2663,7 +2663,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			SUBROUTINE report_jump_statistics(jump_length)
 			IMPLICIT NONE
 			INTEGER,INTENT(IN) :: jump_length
-			INTEGER :: bin_counter,number_counter,first,last,ios
+			INTEGER :: bin_counter,first,last,ios
 			LOGICAL :: connected
 			REAL :: share
 			CHARACTER(LEN=16) :: jump_length_string
@@ -3098,7 +3098,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				SUBROUTINE report_vcfs()
 				IMPLICIT NONE
 				LOGICAL :: connected
-				INTEGER :: ios,timeline,component_counter,molecule_type_counter
+				INTEGER :: ios,timeline,component_counter
 				REAL(KIND=WORKING_PRECISION) :: integral(ncomponents),area,conversion_factor,temperature
 				CHARACTER(LEN=64) :: component_name
 					!Opening output file for velocity correlation functions
@@ -3256,7 +3256,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 				SUBROUTINE initialise_velocity_correlation()
 				IMPLICIT NONE
-				INTEGER :: allocstatus,component_counter
+				INTEGER :: allocstatus
 					nsteps=give_number_of_timesteps()
 					IF ((tmax>(nsteps-1)).OR.(tmax<1)) THEN
 						tmax=(nsteps-1)
@@ -3510,7 +3510,7 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		SUBROUTINE write_simple_conductivity()
 		IMPLICIT NONE
 		LOGICAL :: file_exists,connected
-		INTEGER :: n,ios,tstep_local
+		INTEGER :: ios,tstep_local
 			FILENAME_AUTOCORRELATION_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_AUTOCORRELATION_INPUT),EXIST=file_exists)
 			IF (file_exists) CALL report_error(114)

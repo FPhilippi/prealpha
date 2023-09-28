@@ -33,6 +33,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 	TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT
 	INFORMATION_IN_TRAJECTORY="UNK"
 	WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
+	UNWRAP_TRAJECTORY=UNWRAP_TRAJECTORY_DEFAULT
 	EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT
 	OUTPUT_PREFIX=""
 	number_of_molecules=-1
@@ -51,7 +52,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		PRINT *, "   #######################"
 		PRINT *
 	ENDIF
-	PRINT *, "   Copyright (C) !RELEASEYEAR! Frederik Philippi (Tom Welton Group)"
+	PRINT *, "   Copyright (C) !RELEASEYEAR! Frederik Philippi"
 	PRINT *, "   Please report any bugs."
 	PRINT *, "   Suggestions and questions are also welcome. Thanks."
 	PRINT *, "   Date of Release: !RELEASEDATE!"
@@ -213,7 +214,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				ENDIF
 				IF (ios==0) THEN
 					IF (TRIM(inputstring)=="wrap_trajectory") THEN
-						!"trajectory_type found in input file."
+						!"wrap_trajectory found in input file."
 						WRITE(*,'(A45,I0)') " found a 'wrap_trajectory' statement in line ",n
 						BACKSPACE 7
 						READ(7,IOSTAT=ios,FMT=*) inputstring,input_condition
@@ -226,6 +227,48 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 							ELSE
 								CALL report_error(0)
 							ENDIF
+						ENDIF
+						EXIT
+					ELSEIF (TRIM(inputstring)=="quit") THEN
+						EXIT
+					ENDIF
+				ENDIF
+			ENDDO
+			REWIND 7
+			!search for an 'unwrap' statement
+			UNWRAP_TRAJECTORY=UNWRAP_TRAJECTORY_DEFAULT
+			inputstring=""
+			DO n=1,MAXITERATIONS,1
+				READ(7,IOSTAT=ios,FMT=*) inputstring
+				IF (ios<0) THEN
+					!end of file encountered
+					EXIT
+				ENDIF
+				IF (ios==0) THEN
+					IF (TRIM(inputstring)=="unwrap_trajectory") THEN
+						!"unwrap_trajectory found in input file."
+						WRITE(*,'(A47,I0)') " found an 'unwrap_trajectory' statement in line ",n
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,input_condition
+						IF (ios/=0) THEN
+							IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting unwrap_trajectory to default."
+							UNWRAP_TRAJECTORY=UNWRAP_TRAJECTORY_DEFAULT!setting to default
+						ELSE
+							IF (TRIM(inputstring)=="unwrap_trajectory") THEN
+								UNWRAP_TRAJECTORY=input_condition
+							ELSE
+								CALL report_error(0)
+							ENDIF
+						ENDIF
+						IF (WRAP_TRAJECTORY) THEN
+							CALL report_error(151)
+							UNWRAP_TRAJECTORY=.FALSE.
+							WRAP_TRAJECTORY=.FALSE.
+						ENDIF
+						!unwrapping is only available with the full trajectory in RAM
+						IF (READ_SEQUENTIAL) THEN
+							CALL report_error(152)
+							UNWRAP_TRAJECTORY=.FALSE.
 						ENDIF
 						EXIT
 					ELSEIF (TRIM(inputstring)=="quit") THEN
@@ -539,7 +582,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"Each line contains a switch or keyword, followed by an argument (if required)"
 			PRINT *,"Only the necessary information is read from any line, with the rest being ignored."
 			PRINT *,"Be aware that keywords affect only the lines below them."
-			PRINT *,"This is with the exception of sequential_read, trajectory_type and wrap_trajectory."
+			PRINT *,"This is with the exception of sequential_read, trajectory_type and wrap_trajectory / unwrap_trajectory."
 			PRINT *,"These latter three act on the whole analysis, no matter where specified."
 			PRINT *,"Only their first occurence matters - everything afterwards is ignored."
 			PRINT *,"An incorrectly formatted 'general.inp' is not tolerated (read the error messages)."
@@ -558,10 +601,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'wrap_trajectory':"
 			PRINT *,"    Expects one logical. If 'T', then molecules are wrapped into the box."
 			PRINT *,"    (based on their centre of mass. Might not be sensible for some analyses.)"
-			PRINT *,"    This is the third and last switch affecting every line."
+			PRINT *,"    This is the third switch affecting every line."
+			PRINT *," - 'unwrap_trajectory':"
+			PRINT *,"    Expects one logical. If 'T', then molecules are unwrapped, i.e. the molecules"
+			PRINT *,"    are translated to minimise the jump distance between subsequent timesteps."
+			PRINT *,"    'unwrap_trajectory' is only available with 'sequential_read F'."
+			PRINT *,"    (based on their centre of mass. Only works if jumps are small.)"
+			PRINT *,"    This is the fourth and last switch affecting every line."
 			PRINT *," - 'parallel_operation':"
 			PRINT *,"    Turns parallelisation on (T) or off (F)."
-			PRINT *,"    Parallelisation is only available with 'sequential_read F'"
+			PRINT *,"    Parallelisation is only available with 'sequential_read F'."
 			PRINT *," - 'set_threads':"
 			PRINT *,"    Sets the number of threads to use. 'set_threads 0' uses all available threads."
 			PRINT *," - 'error_output':"
@@ -2671,6 +2720,8 @@ INTEGER :: ios,n
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (sequential_read)"
 				CASE ("wrap_trajectory")
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (wrap_trajectory)"
+				CASE ("unwrap_trajectory")
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (unwrap_trajectory)"
 				CASE ("trajectory_type")
 					IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (trajectory_type)"
 				CASE ("dump_snapshot") !Module DEBUG
@@ -3367,6 +3418,7 @@ INTEGER :: ios,n
 			WRITE(*,15) "READ_SEQUENTIAL     ",TRIM(logical_to_yesno(READ_SEQUENTIAL))
 			WRITE(*,15) "BOX_VOLUME_GIVEN    ",TRIM(logical_to_yesno(BOX_VOLUME_GIVEN))
 			WRITE(*,15) "WRAP_TRAJECTORY     ",TRIM(logical_to_yesno(WRAP_TRAJECTORY))
+			WRITE(*,15) "UNWRAP_TRAJECTORY   ",TRIM(logical_to_yesno(UNWRAP_TRAJECTORY))
 			WRITE(*,15) "DISCONNECTED        ",TRIM(logical_to_yesno(DISCONNECTED))
 			WRITE(*,15) "EXTRA_VELOCITY      ",TRIM(logical_to_yesno(EXTRA_VELOCITY))
 			WRITE(*,16) "GLOBAL_ITERATIONS   ",GLOBAL_ITERATIONS

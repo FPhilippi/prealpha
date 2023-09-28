@@ -301,7 +301,7 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER,INTENT(IN) :: startstep_in,endstep_in,molecule_type_index_1,molecule_type_index_2,molecule_index_1,neighbour_num
 		LOGICAL,INTENT(IN) :: update_com
 		INTEGER :: natoms,stepcounter
-		CHARACTER(LEN=1024) :: fstring,header
+		CHARACTER(LEN=1024) :: fstring
 		REAL(KIND=WORKING_PRECISION) :: current_centre(3)
 		TYPE :: molecule
 			INTEGER :: molecule_index
@@ -372,7 +372,6 @@ MODULE DEBUG ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 			SUBROUTINE make_neighbour_list()
 			IMPLICIT NONE
-			REAL(KIND=WORKING_PRECISION) :: current_shift(3),pivot
 			INTEGER :: counter!counter iterates over all possible neighbours.
 				!first, get all the neighbours...
 				DO counter=1,give_number_of_molecules_per_step(molecule_type_index_2),1
@@ -1396,7 +1395,7 @@ WRITE(4,'("F 0.0 0.0 1.0")')
 		SUBROUTINE report_gyradius(molecule_type_index_in,startstep,endstep)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN) :: molecule_type_index_in,startstep,endstep
-		INTEGER :: timestep,molecule_type_index
+		INTEGER :: molecule_type_index
 		REAL(KIND=GENERAL_PRECISION),DIMENSION(:),ALLOCATABLE :: averages_maxdist,averages_rgysquared,averages_rgy
 			!first, do all the annoying fools-proof tests...
 			IF (molecule_type_index_in>give_number_of_molecule_types()) THEN

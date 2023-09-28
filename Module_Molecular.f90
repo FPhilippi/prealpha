@@ -110,10 +110,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
 	END TYPE molecule
-	REAL(KIND=STORAGE_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
-	REAL(KIND=STORAGE_PRECISION) :: box_size(3) !size of the box.
-	REAL(KIND=STORAGE_PRECISION) :: maximum_distance !maximum possible distance in box.
-	REAL(KIND=STORAGE_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
+	REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
+	REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
+	REAL(KIND=WORKING_PRECISION) :: maximum_distance !maximum possible distance in box.
+	REAL(KIND=WORKING_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
     REAL(KIND=SP) :: drude_mass=0.0e0
 	REAL(KIND=SP) :: drude_charge=0.0e0
 	REAL(KIND=SP) :: COM_mass_list(IACHAR("a"):(IACHAR("a")+25)) !A list of user-specified masses for centre-of-mass trajectories.
@@ -133,14 +133,14 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	TYPE(molecule),DIMENSION(:),ALLOCATABLE :: molecule_list !list of molecules, usually two members: cation and anion. Has to be same order as in lammps trajectory. The different molecule types / members are usually referred to as 'molecule_type_index' in subroutines.
 	!PRIVATE VARIABLES
 	PRIVATE :: box_dimensions,drude_mass,number_of_molecule_types,total_number_of_atoms,number_of_steps,box_size
-	PRIVATE :: dihedrals_initialised,dihedral_member_indices,number_of_dihedrals,wrap_snap
-	PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_default_masses,wrap_full
+	PRIVATE :: dihedrals_initialised,dihedral_member_indices,number_of_dihedrals
+	PRIVATE :: file_position,goto_timestep,headerlines_to_skip,lines_to_skip,COM_mass_list,custom_default_masses
 	PRIVATE :: number_of_drude_particles,allocate_drude_list,drudes_allocated,drudes_assigned,ndrudes_check,molecule_list
 	PRIVATE :: fragments_initialised,fragment_list_base,fragment_list_tip,number_of_tip_atoms,number_of_base_atoms
 	PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments,custom_constraints
 	PRIVATE :: custom_atom_masses,use_firstatom_as_com
 	!PRIVATE/PUBLIC declarations
-	PRIVATE :: report_trajectory_properties,reset_trajectory_file
+	PRIVATE :: report_trajectory_properties,reset_trajectory_file,wrap_full,wrap_snap,unwrap_full
 	PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
 	PUBLIC :: give_dihedrals,initialise_dihedrals,give_number_of_molecule_types,give_number_of_atoms_per_molecule
 	PUBLIC :: give_number_of_molecules_per_step,give_mass_of_molecule,show_molecular_settings,print_memory_requirement
@@ -875,7 +875,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 		!This FUNCTION returns the smallest squared distance of centres of mass considering all PBCs - as well as the corresponding translation vector.
 		REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_distance_squared&
-		&(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2,translation)
+		&(timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,&
+		&molecule_index_1,molecule_index_2,translation)
 		IMPLICIT NONE
 		INTEGER :: a,b,c
 		INTEGER,INTENT(IN) :: timestep1,timestep2,molecule_type_index_1,molecule_type_index_2,molecule_index_1,molecule_index_2
@@ -885,8 +886,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			pos_2(:)=give_center_of_mass(timestep2,molecule_type_index_2,molecule_index_2)
 			!two molecules can be no further apart than the diagonale of the box... that's what I initialise to
 			give_smallest_distance_squared=maximum_distance_squared
-			IF (.NOT.(WRAP_TRAJECTORY)) THEN
-				CALL wrap_vector(pos_1,shift(:))
+			IF (.NOT.(WRAP_TRAJECTORY)) THEN	
+				CALL wrap_vector(pos_1,shift(:))	
 				CALL wrap_vector(pos_2,wrapshift(:))
 				!"shift" is now the vector to translate the reference molecule into the box by wrapping.
 				!"wrapshift" is the same for the second, observed molecule.
@@ -1198,10 +1199,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		IMPLICIT NONE
 		REAL(KIND=WORKING_PRECISION),INTENT(INOUT) :: input_vector(3)
 		REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: wrapshift(3)
-		INTEGER :: xyzcounter
+		INTEGER :: xyzcounter,safetycounter
 			IF (PRESENT(wrapshift)) wrapshift(:)=0.0d0
 			DO xyzcounter=1,3,1
-				DO
+				DO safetycounter=1,1000,1
 					IF (input_vector(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
 						!input vector is outside of box (smaller)
 						input_vector(xyzcounter)=input_vector(xyzcounter)+box_size(xyzcounter)
@@ -1222,13 +1223,243 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDDO
 		END SUBROUTINE wrap_vector
 
+		!UNwrap the molecules - full trajectory.
+		!This routine can be parallelised, but seems pretty fast to me.
+		!at least much slower than reading the trajectory.
+		SUBROUTINE unwrap_full()
+		IMPLICIT NONE
+		INTEGER :: allocstatus,deallocstatus
+		INTEGER :: molecule_type_index,molecule_index,stepcounter,shiftlistcounter,atom_index,jumpcounter
+		REAL(KIND=WORKING_PRECISION) :: current_distance_squared,link_vector(3),jump_threshold(3),largest_link_vector_squared
+		REAL(KIND=WORKING_PRECISION) :: largest_observed_distance_squared,smallest_observed_distance_squared
+		TYPE :: unique_molecule
+			INTEGER :: molecule_type_index_local
+			INTEGER :: molecule_index_local
+			REAL(KIND=WORKING_PRECISION) :: accumulated_shift(3)
+			LOGICAL :: molecule_jumped
+		END TYPE unique_molecule
+		TYPE(unique_molecule),DIMENSION(:),ALLOCATABLE :: shiftlist
+			!Allocate memory for the array which stores the shift required to unwrap
+			!The way this works:
+			!I have decided to make one entry for each unique molecule.
+			!It is not perfect with array access, but this way I can potentially parallelise over the molecules.
+			!This would avoid racing conditions etc compared to parallelising over the snapshots / timesteps
+			ALLOCATE(shiftlist(give_total_number_of_molecules_per_step()),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+			!if any molecule jumps more than box/2, it has probably been wrapped.
+			jump_threshold(:)=box_size(:)/2.0d0
+			!Initialise shiftlist
+			shiftlistcounter=0
+			!initialise largest / smallest jump distances and jump counter for statistics
+			jumpcounter=0
+			largest_link_vector_squared=0.0d0
+			largest_observed_distance_squared=0.0d0
+			smallest_observed_distance_squared=maximum_distance_squared
+			DO molecule_type_index=1,number_of_molecule_types,1
+				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+					shiftlistcounter=shiftlistcounter+1
+					shiftlist(shiftlistcounter)%molecule_type_index_local=molecule_type_index
+					shiftlist(shiftlistcounter)%molecule_index_local=molecule_index
+					shiftlist(shiftlistcounter)%accumulated_shift(:)=0.0d0
+					shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
+				ENDDO
+			ENDDO
+			!sanity checks, should not give any output.
+			IF (READ_SEQUENTIAL) CALL report_error(0)
+			IF (give_total_number_of_molecules_per_step()/=shiftlistcounter) CALL report_error(0)
+			!start the unwrapping - outer loop goes over unique molecules.
+			IF (VERBOSE_OUTPUT) CALL print_progress(give_total_number_of_molecules_per_step())
+			DO shiftlistcounter=1,give_total_number_of_molecules_per_step(),1
+				molecule_type_index=shiftlist(shiftlistcounter)%molecule_type_index_local
+				molecule_index=shiftlist(shiftlistcounter)%molecule_index_local
+				!inner loop over timesteps
+				DO stepcounter=1,number_of_steps-1,1
+					!shift the molecule (accumulated shift from previous steps)
+					IF (shiftlist(shiftlistcounter)%molecule_jumped) THEN
+						IF (SUM(shiftlist(shiftlistcounter)%accumulated_shift(:)**2)<0.001d0) THEN
+							!apparently, the molecule does not need moving - moved back
+							shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
+						ELSE
+							DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+								!the current molecule, which was stepcounter+1 in the previous iteration, has already been moved by link_vector.
+								!However, the molecule after that will need moving too! Unless it jumped back of course.
+								molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
+								&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
+								&shiftlist(shiftlistcounter)%accumulated_shift(:)
+							ENDDO	
+						ENDIF
+					ENDIF
+
+					!check if there is a jump. Always compare to the next molecule in the step,
+					!which if necessary will be moved in the next iteration of the inner loop over "stepcounter"
+					current_distance_squared=give_smallest_distance_squared&
+					&(stepcounter,stepcounter+1,molecule_type_index,molecule_type_index,molecule_index,molecule_index,&
+					&translation=link_vector(:))
+					!keep track of smallest / largest distances
+					IF (current_distance_squared>largest_observed_distance_squared) THEN
+						largest_observed_distance_squared=current_distance_squared
+					ENDIF
+					IF (current_distance_squared<smallest_observed_distance_squared) THEN
+						smallest_observed_distance_squared=current_distance_squared
+					ENDIF
+					!check and unwrap if necessary
+					IF ((ABS(link_vector(1))>jump_threshold(1)).OR.&
+					&(ABS(link_vector(2))>jump_threshold(2)).OR.&
+					&(ABS(link_vector(3))>jump_threshold(3))) THEN
+						IF (SUM(link_vector(:)**2)>largest_link_vector_squared) THEN
+							largest_link_vector_squared=SUM(link_vector(:)**2)
+						ENDIF
+						jumpcounter=jumpcounter+1
+						!Move the molecule in the next step accordingly.
+						DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+							!should never be called with read sequential! thus, only the trajectory is required.
+							molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
+							&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
+							&link_vector(:)
+						ENDDO
+						!Update accumuted shift
+						shiftlist(shiftlistcounter)%molecule_jumped=.TRUE.
+						shiftlist(shiftlistcounter)%accumulated_shift(:)=&
+						&shiftlist(shiftlistcounter)%accumulated_shift(:)+link_vector(:)
+					ENDIF
+				ENDDO
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+			ENDDO
+			IF ((give_total_number_of_molecules_per_step()>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+			IF (VERBOSE_OUTPUT) THEN
+				WRITE(*,'(A,E9.3)') "   Largest jump distance:  ",SQRT(largest_observed_distance_squared)
+				WRITE(*,'(A,E9.3)') "   Smallest jump distance: ",SQRT(smallest_observed_distance_squared)
+				WRITE(*,'(A,E9.3)') "   Largest link vector:    ",SQRT(largest_link_vector_squared)
+				WRITE(*,'(A,I0)')   "   Total number of jumps:  ",jumpcounter
+				IF (jumpcounter==0) THEN
+					WRITE(*,*) "No jumps - trajectory very likely was already unwrapped."
+				ELSE
+					WRITE(*,*) "Trajectory is now unwrapped."
+				ENDIF
+			ENDIF
+			DEALLOCATE(shiftlist,STAT=deallocstatus)
+			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+		END SUBROUTINE unwrap_full
+
+		!UNwrap the molecules - full trajectory.
+		!This routine will never benefit from parallelisation.
+		SUBROUTINE unwrap_full_SEQUENTIAL()
+		IMPLICIT NONE
+		INTEGER :: allocstatus,deallocstatus
+		INTEGER :: molecule_type_index,molecule_index,stepcounter,shiftlistcounter,atom_index,jumpcounter
+		REAL(KIND=WORKING_PRECISION) :: current_distance_squared,link_vector(3),jump_threshold(3),largest_link_vector_squared
+		REAL(KIND=WORKING_PRECISION) :: largest_observed_distance_squared,smallest_observed_distance_squared
+		TYPE :: unique_molecule
+			INTEGER :: molecule_type_index_local
+			INTEGER :: molecule_index_local
+			REAL(KIND=WORKING_PRECISION) :: accumulated_shift(3)
+			LOGICAL :: molecule_jumped
+		END TYPE unique_molecule
+		TYPE(unique_molecule),DIMENSION(:),ALLOCATABLE :: shiftlist
+			!Allocate memory for the array which stores the shift required to unwrap
+			!I have decided to make one entry for each unique molecule.
+			ALLOCATE(shiftlist(give_total_number_of_molecules_per_step()),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+			!if any molecule jumps more than box/2, it has probably been wrapped.
+			jump_threshold(:)=box_size(:)/2.0d0
+			!Initialise shiftlist
+			shiftlistcounter=0
+			!initialise largest / smallest jump distances and jump counter for statistics
+			jumpcounter=0
+			largest_link_vector_squared=0.0d0
+			largest_observed_distance_squared=0.0d0
+			smallest_observed_distance_squared=maximum_distance_squared
+			DO molecule_type_index=1,number_of_molecule_types,1
+				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+					shiftlistcounter=shiftlistcounter+1
+					shiftlist(shiftlistcounter)%molecule_type_index_local=molecule_type_index
+					shiftlist(shiftlistcounter)%molecule_index_local=molecule_index
+					shiftlist(shiftlistcounter)%accumulated_shift(:)=0.0d0
+					shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
+				ENDDO
+			ENDDO
+			!sanity checks, should not give any output.
+			IF (READ_SEQUENTIAL) CALL report_error(0)
+			IF (give_total_number_of_molecules_per_step()/=shiftlistcounter) CALL report_error(0)
+			IF (VERBOSE_OUTPUT) CALL print_progress(number_of_steps-1)
+			!start the unwrapping
+			DO stepcounter=1,number_of_steps-1,1
+				DO shiftlistcounter=1,give_total_number_of_molecules_per_step(),1
+					molecule_type_index=shiftlist(shiftlistcounter)%molecule_type_index_local
+					molecule_index=shiftlist(shiftlistcounter)%molecule_index_local
+					!shift the molecule (accumulated shift from previous steps)
+					IF (shiftlist(shiftlistcounter)%molecule_jumped) THEN
+						IF (SUM(shiftlist(shiftlistcounter)%accumulated_shift(:)**2)<0.001d0) THEN
+							!apparently, the molecule does not need moving - moved back
+							shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
+						ELSE
+							DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+								!the current molecule, which was stepcounter+1 in the previous iteration, has already been moved by link_vector.
+								!However, the molecule after that will need moving too! Unless it jumped back of course.
+								molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
+								&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
+								&shiftlist(shiftlistcounter)%accumulated_shift(:)
+							ENDDO	
+						ENDIF
+					ENDIF
+					!check if there is a jump. Always compare to the next molecule in the step,
+					!which if necessary will be moved in the next iteration of the inner loop over "stepcounter"
+					current_distance_squared=give_smallest_distance_squared&
+					&(stepcounter,stepcounter+1,molecule_type_index,molecule_type_index,molecule_index,molecule_index,&
+					&translation=link_vector(:))
+					!keep track of smallest / largest distances
+					IF (current_distance_squared>largest_observed_distance_squared) THEN
+						largest_observed_distance_squared=current_distance_squared
+					ENDIF
+					IF (current_distance_squared<smallest_observed_distance_squared) THEN
+						smallest_observed_distance_squared=current_distance_squared
+					ENDIF
+					!check and unwrap if necessary
+					IF ((ABS(link_vector(1))>jump_threshold(1)).OR.&
+					&(ABS(link_vector(2))>jump_threshold(2)).OR.&
+					&(ABS(link_vector(3))>jump_threshold(3))) THEN
+						IF (SUM(link_vector(:)**2)>largest_link_vector_squared) THEN
+							largest_link_vector_squared=SUM(link_vector(:)**2)
+						ENDIF
+						jumpcounter=jumpcounter+1
+						!Move the molecule in the next step accordingly.
+						DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
+							!should never be called with read sequential! thus, only the trajectory is required.
+							molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
+							&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
+							&link_vector(:)
+						ENDDO
+						!Update accumulated shift
+						shiftlist(shiftlistcounter)%molecule_jumped=.TRUE.
+						shiftlist(shiftlistcounter)%accumulated_shift(:)=&
+						&shiftlist(shiftlistcounter)%accumulated_shift(:)+link_vector(:)
+					ENDIF
+				ENDDO
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+			ENDDO
+			IF ((give_total_number_of_molecules_per_step()>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+			IF (VERBOSE_OUTPUT) THEN
+				WRITE(*,'(A,E9.3)') "   Largest jump distance:  ",SQRT(largest_observed_distance_squared)
+				WRITE(*,'(A,E9.3)') "   Smallest jump distance: ",SQRT(smallest_observed_distance_squared)
+				WRITE(*,'(A,E9.3)') "   Largest link vector:    ",SQRT(largest_link_vector_squared)
+				WRITE(*,'(A,I0)')   "   Total number of jumps:  ",jumpcounter
+				IF (jumpcounter==0) THEN
+					WRITE(*,*) "No jumps - trajectory very likely was already unwrapped."
+				ELSE
+					WRITE(*,*) "Trajectory is now unwrapped."
+				ENDIF
+			ENDIF
+			DEALLOCATE(shiftlist,STAT=deallocstatus)
+			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+		END SUBROUTINE unwrap_full_SEQUENTIAL
+
 		!wrap the molecules into the box - full trajectory.
 		!This routine benefits from parallelisation.
 		SUBROUTINE wrap_full()
 		IMPLICIT NONE
 		INTEGER :: molecule_type_index,molecule_index,stepcounter
 		REAL :: centre_of_mass(3)
-		INTEGER :: xyzcounter
+		INTEGER :: xyzcounter,safetycounter
 	 !$ INTERFACE
 	 !$ 	FUNCTION OMP_get_num_threads()
 	 !$ 	INTEGER :: OMP_get_num_threads
@@ -1249,7 +1480,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						centre_of_mass=give_center_of_mass(stepcounter,molecule_type_index,molecule_index)
 						DO xyzcounter=1,3,1
 						!See? I got rid of it! (The jump)
-							DO
+							DO safetycounter=1,1000,1
 								IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
 									!centre of mass is outside of box (smaller)
 									centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
@@ -3804,6 +4035,12 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						WRITE(*,*) "trajectory file will be read sequentially (needs less RAM, but slow)."
 						WRITE(*,*)
 						WRITE(*,*) "opening file '",TRIM(PATH_TRAJECTORY)//TRIM(FILENAME_TRAJECTORY),"'"
+						!This should have been dealt with before - just here in case I messed up.
+						IF ((READ_SEQUENTIAL).AND.(UNWRAP_TRAJECTORY)) THEN
+							CALL report_error(152)
+							CALL report_error(0)
+							UNWRAP_TRAJECTORY=.FALSE.
+						ENDIF
 					ELSE
 						WRITE(*,*) "load complete trajectory into RAM. Very fast for some analyses, like diffusion."
 						WRITE(*,*)
@@ -3818,8 +4055,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				!first, read the header of the trajectory file to get box sizes.
 				CALL load_trajectory_header_information()
 				!WRAP_TRAJECTORY check here
-				!error report 73 also sets WRAP_TRAJECTORY to .FALSE.
+				!error report 73 also sets (UN)WRAP_TRAJECTORY to .FALSE.
 				IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(WRAP_TRAJECTORY)) CALL report_error(73)
+				IF ((INFORMATION_IN_TRAJECTORY=="VEL").AND.(UNWRAP_TRAJECTORY)) CALL report_error(73)
 				IF (READ_SEQUENTIAL) THEN
 					CLOSE(UNIT=3)
 					IF ((WRAP_TRAJECTORY).AND.(VERBOSE_OUTPUT)) THEN
@@ -3834,6 +4072,15 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					IF (WRAP_TRAJECTORY) THEN
 						IF (VERBOSE_OUTPUT) WRITE(*,*) "Wrapping centres of mass of each specified molecule into box *now*."
 						CALL wrap_full()
+					ENDIF
+					!IF necessary, unwrap trajectory
+					IF (UNWRAP_TRAJECTORY) THEN
+						IF (VERBOSE_OUTPUT) WRITE(*,*) "UNwrapping centres of mass of each specified molecule *now*."
+						CALL unwrap_full_SEQUENTIAL()
+						IF (DEVELOPERS_VERSION) THEN
+							WRITE(*,'("  ! Sanity check: unwrap everything again. link vector should be zero.")')
+							CALL unwrap_full_SEQUENTIAL()
+						ENDIF
 					ENDIF
 					!At this point, the trajectory should be available.
 					CLOSE(UNIT=3)
@@ -3868,6 +4115,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDIF
 						READ(3,IOSTAT=ios,FMT=*)
 						IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
+						box_dimensions(:,:)=0.0d0
 						DO n=1,3,1
 							READ(3,IOSTAT=ios,FMT=*) box_dimensions(:,n)
 							IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)

@@ -399,7 +399,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 				SUBROUTINE read_references()!This subroutine is responsible for reading the body of the distribution input file, connected as unit 3.
 				IMPLICIT NONE
-				INTEGER :: n,inputbin,m
+				INTEGER :: n,inputbin
 				CHARACTER(LEN=32) :: inputstring
 					IF ((TRIM(operation_mode)=="cdf").OR.(TRIM(operation_mode)=="pdf")) THEN
 						!read user-specified references
@@ -849,7 +849,7 @@ MODULE DISTRIBUTION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IMPLICIT NONE
 				INTEGER :: binpos_a,binpos_b,molecule_index
 				INTEGER,INTENT(IN) :: timestep_in
-				REAL :: current_distance_squared,a,b
+				REAL :: a,b
 				REAL(KIND=WORKING_PRECISION) :: link_vector(3),local_reference(3),rgy_sq
 				INTEGER(KIND=DP),INTENT(INOUT) :: distribution_histogram_local(:,:)
 				INTEGER(KIND=DP),INTENT(OUT) :: within_bin_local,out_of_bounds_local

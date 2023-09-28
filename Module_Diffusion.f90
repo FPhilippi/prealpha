@@ -35,7 +35,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		SUBROUTINE write_simple_diffusion()
 		IMPLICIT NONE
 		LOGICAL :: file_exists,connected
-		INTEGER :: n,ios,tstep_local
+		INTEGER :: ios,tstep_local
 			FILENAME_DIFFUSION_INPUT="prealpha_simple.inp"
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DIFFUSION_INPUT),EXIST=file_exists)
 			IF (file_exists) CALL report_error(114)
@@ -168,7 +168,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		IMPLICIT NONE
 		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
 		CHARACTER (LEN=*) :: filename_msd
-		LOGICAL :: use_default,connected
+		LOGICAL :: connected
 		INTEGER,INTENT(IN) :: number_of_molecules,nsteps
 		INTEGER :: nprojections,allocstatus,deallocstatus,maxmol,tstep,tmax,n,ios
 	!	INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index, just as in module DIFFUSION
@@ -750,7 +750,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	 !$ 	INTEGER :: OMP_get_num_threads
 	 !$ 	END FUNCTION OMP_get_num_threads
 	 !$ END INTERFACE
-		INTEGER :: current_distance,starting_timestep,molecule_index,n,array_pos,molecule_type_index_a,molecule_type_index_b
+		INTEGER :: current_distance,starting_timestep,molecule_index,array_pos,molecule_type_index_a,molecule_type_index_b
 		INTEGER,INTENT(IN) :: projection_number
 		INTEGER :: number_of_timesteps,allocstatus,nmolecules_a,nmolecules_b,deallocstatus
 		REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3),x_a,x_b

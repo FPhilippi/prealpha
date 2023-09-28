@@ -2,6 +2,7 @@
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) !RELEASEYEAR! Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
+	! This work is funded by the Japan Society for the Promotion of Science
 
     ! This program is free software: you can redistribute it and/or modify
     ! it under the terms of the GNU General Public License as published by
@@ -54,6 +55,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	INTEGER,PARAMETER :: ERROR_CODE_DEFAULT=-1
 	INTEGER,PARAMETER :: TIME_SCALING_FACTOR_DEFAULT=1
 	LOGICAL,PARAMETER :: WRAP_TRAJECTORY_DEFAULT=.FALSE.
+	LOGICAL,PARAMETER :: UNWRAP_TRAJECTORY_DEFAULT=.FALSE.
 	LOGICAL,PARAMETER :: EXTRA_VELOCITY_DEFAULT=.FALSE.
 	INTEGER,PARAMETER :: HEADER_LINES_DEFAULT=5
 	INTEGER,PARAMETER :: MAXITERATIONS=500
@@ -75,6 +77,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	LOGICAL :: READ_SEQUENTIAL=READ_SEQUENTIAL_DEFAULT!reading the trajectory in a serial way rather than everything at once.
 	LOGICAL :: BOX_VOLUME_GIVEN=BOX_VOLUME_GIVEN_DEFAULT!is there a box volume available?
 	LOGICAL :: WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT!Wrap the trajectory?
+	LOGICAL :: UNWRAP_TRAJECTORY=UNWRAP_TRAJECTORY_DEFAULT!manually UNWrap the trajectory?
 	LOGICAL :: EXTRA_VELOCITY=EXTRA_VELOCITY_DEFAULT!are there extra 3 columns to read? (i.e. "E vx vy vz xu yu zu", or vice versa)
 	LOGICAL :: SKIP_ANALYSIS!don't do the actual analysis...
 	LOGICAL :: USER_INPUT=.FALSE.!Turns on as soon as user input started...
@@ -260,6 +263,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!148 no valid subjobs in dispersion module
 	!149 problem when streaming dispersion input.
 	!150 Couldn't allocate memory for dispersion list
+	!151 requested both wrapped and unwrapped trajectory
+	!152 requested unwrapping with sequential read
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -622,8 +627,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  ERROR 72: This feature is not available with a wrapped trajectory."
 					WRITE(*,*) "--> Main program will continue, but this analysis is aborted."
 				CASE (73)
-					WRITE(*,*) " #  ERROR 73: Trajectory contains velocities - wrapping not available."
+					WRITE(*,*) " #  ERROR 73: Trajectory contains velocities - (UN)wrapping not available."
 					WRAP_TRAJECTORY=.FALSE.
+					UNWRAP_TRAJECTORY=.FALSE.
 				CASE (74)
 					WRITE(*,*) " #  ERROR 74: unphysical number of constraints."
 					WRITE(*,*) " #  Temperature values don't include the constraints correction!"
@@ -878,6 +884,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  SEVERE ERROR 150: couldn't allocate memory for dispersion list (or atom_indices)."
 					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
 					STOP
+				CASE (151)
+					WRITE(*,*) " #  ERROR 151: Requested both wrapping and unwrapping."
+					WRITE(*,*) " #  Trajectory will be left as is - no (un)wrapping action."
+				CASE (152)
+					WRITE(*,*) " #  ERROR 152: Requested unwrapping with sequential read."
+					WRITE(*,*) " #  Trajectory will not be unwrapped! Do do so, please load in RAM."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
