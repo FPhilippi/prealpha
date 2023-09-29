@@ -265,6 +265,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!150 Couldn't allocate memory for dispersion list
 	!151 requested both wrapped and unwrapped trajectory
 	!152 requested unwrapping with sequential read
+	!153 requested change of exponent with alpha2. But we won't let them.
+	!154 non-unit vector requested as projection for alpha2.
 
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
@@ -890,6 +892,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (152)
 					WRITE(*,*) " #  ERROR 152: Requested unwrapping with sequential read."
 					WRITE(*,*) " #  Trajectory will not be unwrapped! Do do so, please load in RAM."
+				CASE (153)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 153: 'exponent' has no meaning for alpha2 calculations."
+				CASE (154)
+					WRITE(*,*) " #  WARNING 154: alpha2 only makes sense with the unit vector."
+					WRITE(*,*) " #  (i.e. the projection 1 1 1, analysis continues but results are likely meaningless)"
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

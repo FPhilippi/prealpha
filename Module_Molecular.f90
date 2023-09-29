@@ -112,6 +112,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	END TYPE molecule
 	REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
 	REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
+	REAL(KIND=WORKING_PRECISION) :: box_size_NPT(3,10) !size of the box. manual support for NPT possible
 	REAL(KIND=WORKING_PRECISION) :: maximum_distance !maximum possible distance in box.
 	REAL(KIND=WORKING_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
     REAL(KIND=SP) :: drude_mass=0.0e0
