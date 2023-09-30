@@ -1,4 +1,4 @@
-! RELEASED ON 29_Sep_2023 AT 22:03
+! RELEASED ON 30_Sep_2023 AT 15:39
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2023 Frederik Philippi
@@ -1588,7 +1588,6 @@ MODULE MOLECULAR ! Copyright (C) 2023 Frederik Philippi
  END TYPE molecule
  REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
  REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
- REAL(KIND=WORKING_PRECISION) :: box_size_NPT(3,10) !size of the box. manual support for NPT possible
  REAL(KIND=WORKING_PRECISION) :: maximum_distance !maximum possible distance in box.
  REAL(KIND=WORKING_PRECISION) :: maximum_distance_squared !square of maximum possible distance in box.
     REAL(KIND=SP) :: drude_mass=0.0e0
@@ -11526,7 +11525,8 @@ MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
  PRIVATE :: finalise_diffusion,make_diffusion_functions,x_num,x_squared,x_unsquared,x_bisquared
  PRIVATE :: tmax_default,tstep_default,verbose_print_default,verbose_print
  PRIVATE :: write_diffusion_functions
- PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input,write_simple_diffusion,user_cross_input
+ PUBLIC :: perform_diffusion_analysis,print_helpful_info,user_msd_input
+ PUBLIC :: write_simple_diffusion,user_cross_input,write_simple_alpha2,user_alpha2_input
 
  CONTAINS
 
@@ -11553,6 +11553,126 @@ MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
    CLOSE(UNIT=8)
    IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
   END SUBROUTINE write_simple_diffusion
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_distribution'
+  SUBROUTINE write_simple_alpha2()
+  IMPLICIT NONE
+  LOGICAL :: file_exists,connected
+  INTEGER :: ios,tstep_local
+   FILENAME_DIFFUSION_INPUT="prealpha_simple.inp"
+   INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DIFFUSION_INPUT),EXIST=file_exists)
+   IF (file_exists) CALL report_error(114)
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_DIFFUSION_INPUT),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   tstep_local=(give_number_of_timesteps()-1)/10000
+   IF (tstep_local<5) tstep_local=1
+   WRITE(8,'("a2default")')
+   WRITE(8,'("tmax ",I0)') give_number_of_timesteps()-1
+   WRITE(8,'("tstep ",I0)') tstep_local
+   WRITE(8,'("print_verbose F")')
+   WRITE(8,'("quit")')
+   CLOSE(UNIT=8)
+   IF (VERBOSE_OUTPUT) PRINT *,"File 'prealpha_simple.inp' written."
+  END SUBROUTINE write_simple_alpha2
+
+  !WRITING input file to unit 8, which shouldn't be open.
+  !has to be compliant with 'read_input_for_self_diffusion'
+  SUBROUTINE user_alpha2_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+  IMPLICIT NONE
+  LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+  CHARACTER (LEN=*) :: filename_msd
+  LOGICAL :: use_default,printdrift,connected
+  INTEGER,INTENT(IN) :: number_of_molecules,nsteps
+  INTEGER :: nprojections,allocstatus,deallocstatus,maxmol,tstep,tmax,n,ios
+ ! INTEGER,DIMENSION(:,:),ALLOCATABLE :: projections ! x y z molecule_type_index, just as in module DIFFUSION
+   parallelisation_possible=.TRUE.
+   PRINT *,"Generating alpha2 / MSD input."
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"First of all, the calculation of diffusion functions benefits from parallelisation."
+    PRINT *,"Would you like to turn on parallelisation? (y/n)"
+    IF (user_input_logical()) parallelisation_requested=.TRUE.
+   ENDIF
+   PRINT *,"This feature has the capability of calculating the non-gaussian parameter alpha2"
+   PRINT *,"together with <x²> and <x>. The alpha2 parameter is only correct for the 1 1 1 projection."
+   PRINT *,"It is possible to just calculate alpha2 and mean squared displacement for every molecule."
+   PRINT *,"Do you want to take this shortcut? (y/n)"
+   use_default=user_input_logical()
+   IF (use_default) THEN
+    !shortcut - write default.
+    PRINT *,"Program will use defaults - no need to specify projection. Rather robust, too."
+   ELSE
+    PRINT *,"Please enter the number of molecule types you want to specify."
+    nprojections=user_input_integer(1,100000)
+    !Allocate memory for intermediate storage...
+    ALLOCATE(projections(4,nprojections),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    maxmol=number_of_molecules
+    IF (maxmol<1) maxmol=10000!unknown molecule number... expect the worst.
+    !Then, read projections from the standard input.
+    DO n=1,nprojections,1
+     WRITE(*,'(" Reading projection number ",I0,"...")') n
+     PRINT *,"Please give the molecule type index / number of the molecule to observe:"
+     projections(4,n)=user_input_integer(1,maxmol)
+     PRINT *,"Projection is set to '1 1 1' (3D)."
+     projections(1,n)=1
+     projections(2,n)=1
+     projections(3,n)=1
+    ENDDO
+   ENDIF
+   PRINT *
+   !At this point, projections should be initialised (if necessary!)
+   !Thus, continue with reading in the switches:
+   PRINT *,"How many steps do you want the shift of the displacement functions to be?"
+   WRITE(*,'(" The default is currently set to ",I0,".")') tmax_default
+   tmax=user_input_integer(10,(nsteps-1))
+   PRINT *,"How fine do you want the functions to be computed?"
+   PRINT *,"For example, when specifying '10', then the displacements are printed"
+   PRINT *,"in intervals of 10 timesteps."
+   WRITE(*,'(" The default is currently set to ",I0,".")') tstep_default
+   tstep=user_input_integer(1,(tmax/10))
+   msd_exponent=2
+   !tstep and tmax have sensible values.
+   PRINT *,"Finally, would you like the detailed drift to be printed? (y/n)"
+   printdrift=user_input_logical()
+   WRITE(*,FMT='(A32)',ADVANCE="NO") " writing MSD/drift input file..."
+   INQUIRE(UNIT=8,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=8)
+   OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_msd),IOSTAT=ios)!input path is added for the MSD file!
+   IF (ios/=0) CALL report_error(46,exit_status=ios)
+   IF (use_default) THEN
+    !let the diffusion module take care of all that.
+    WRITE(8,*) "default ### calculating <R²> and alpha2 for every molecule type"
+    !--> thus, no projections required.
+   ELSE
+    WRITE(8,'(" msd ",I0," ### mean-squared displacement for given number of projections")') nprojections
+    DO n=1,nprojections,1
+     WRITE(8,'(" ",I0," ",I0," ",I0," ",I0," ### x-y-z projection for molecule type ",I0)') projections(:,n),projections(4,n)
+    ENDDO
+    !Done writing - projections is no longer needed.
+    DEALLOCATE(projections,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ENDIF
+   WRITE(8,'(" tmax ",I0," ### maximum time shift of the displacement function")') tmax
+   WRITE(8,'(" tstep ",I0)') tstep
+   WRITE(8,FMT='(" print_verbose ",L1)',ADVANCE="NO") printdrift
+   IF (printdrift) Then
+    WRITE(8,'(" ### detailed drift will be printed.")')
+   ELSE
+    WRITE(8,'(" ### do not print detailed drift.")')
+   ENDIF
+   IF (msd_exponent/=2) WRITE(8,'(" exponent ",I0," ### custom exponent - computing <x**",I0,">")')&
+   &msd_exponent,msd_exponent
+   WRITE(8,*) "quit"
+   WRITE(8,*)
+   WRITE(8,*) "This is an input file for the calculation of alpha2 parameter and mean-squared displacement."
+   WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
+   ENDFILE 8
+   CLOSE(UNIT=8)
+   WRITE(*,*) "done"
+  END SUBROUTINE user_alpha2_input
 
   !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_input_for_self_diffusion'
@@ -12179,7 +12299,7 @@ MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
      WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">':      mean",&
      &TRIM(power_terminology)," displacement, not corrected"
      IF ((TRIM(operation_mode)=="alpha2").OR.(TRIM(operation_mode)=="a2default")) THEN
-      WRITE(*,*) "   'alpha2':        non-gaussian parameter."
+      WRITE(*,*) "   'alpha2':        non-gaussian parameter.*"
      ENDIF
      WRITE(*,*) "   '<R>':           average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
      WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">-<R>**"//TRIM(msd_exponent_str)//"': drift corrected mean",&
@@ -12193,9 +12313,12 @@ MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
      WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
      WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': mean",TRIM(power_terminology)," displacement, not corrected"
      IF ((TRIM(operation_mode)=="alpha2").OR.(TRIM(operation_mode)=="a2default")) THEN
-      WRITE(*,*) "   'alpha2':   non-gaussian parameter."
+      WRITE(*,*) "   'alpha2':   non-gaussian parameter.*"
      ENDIF
      WRITE(*,*) "   '<R>':      average drift of the center of mass, calculated as <R>=SQRT(<x>²+<y>²+<z>²)"
+    ENDIF
+    IF ((TRIM(operation_mode)=="alpha2").OR.(TRIM(operation_mode)=="a2default")) THEN
+     WRITE(*,*) "   * alpha2=(3*<|R|**4>)/(5*(<|R|**2>**2))-1"
     ENDIF
    ENDIF
    WRITE(*,'(" the time scaling factor is ",I0)') TIME_SCALING_FACTOR
@@ -15961,7 +16084,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2023 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 29_Sep_2023"
+ PRINT *, "   Date of Release: 30_Sep_2023"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -16652,11 +16775,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'conductivity'  (requests feature 'cacf components' or 'conductivity_simple')"
    PRINT *," - 'velocity'      (requests feature 'vcf components')"
    PRINT *," - 'rmm-vcf'       (requests feature 'Relative Mean Molecular Velocity Correlation Coefficients')"
-   PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (simple mode available)"
+   PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (2 simple modes available *)"
    PRINT *," - 'dihedral'      (requests feature 'Dihedral Conditions')"
    PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
    PRINT *," - 'distribution'  (requests feature 'polar/cylindrical distribution function) (simple mode available)"
    PRINT *," - 'distance'      (requests feature 'Average distances') (simple mode available)"
+   PRINT *,"   * diffusion_simple and alpha2_simple"
    PRINT *
    PRINT *,"Molecular input file:"
    PRINT *,"This file contains information about the system, located in the same folder as the executable"
@@ -16780,6 +16904,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Thus, 'exponent 2' is the normal MSD, but others can be used, too."
    PRINT *," - 'quit'"
    PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+   PRINT *
+   PRINT *,"diffusion input file for alpha2 parameter:"
+   PRINT *,"The first line contains the expression 'alpha2'"
+   PRINT *,"The rest of the file follows the same rules as if starting with 'msd'."
+   PRINT *,"However, only the projection 1 1 1 makes sense."
    PRINT *
    PRINT *,"diffusion input file for cross diffusion:"
    PRINT *,"The first line contains the expression 'cross', followed by the number of projections N."
@@ -17708,6 +17837,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
     PRINT *," 29 - Reduce the trajectory to centre of charge."
     PRINT *," 30 - Write the full trajectory in a specific format."
+    PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
     SELECT CASE (user_input_integer(0,30))
     CASE (0)!done here.
      EXIT
@@ -18311,6 +18441,37 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
      ENDIF
      smalltask=.FALSE.
      PRINT *,"The corresponding section has been added to the input file."
+    CASE (31)!alpha2 non-gaussian parameter section.
+     wrapping_is_sensible=.FALSE.
+     smalltask=.FALSE.
+     IF (nsteps<11) THEN
+      PRINT *,"Your trajectory is really too short for that. Please use more timesteps."
+      PRINT *,"The minimum of steps - even if only for debugging purposes - should be 11."
+     ELSE
+      CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+      IF (own_prefix) THEN
+       own_prefix=.FALSE.
+      ELSE
+       analysis_number=analysis_number+1
+      ENDIF
+      PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+      PRINT *,"(calculate alpha2 and MSD for all molecule types)"
+      PRINT *,"Would you like to take this shortcut? (y/n)"
+      IF (user_input_logical()) THEN
+       CALL append_string("alpha2_simple ### alpha2 non-gaussian parameter for all molecule types.")
+       CYCLE
+      ENDIF
+      CALL user_alpha2_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+      IF (parallelisation_requested) THEN
+       CALL append_string("parallel_operation T ### turn on parallel operation")
+       WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+       CALL append_string(fstring)
+      ENDIF
+      CALL append_string('diffusion "'//TRIM(OUTPUT_PREFIX)//&
+      &TRIM(filename_msd)//'" ### compute alpha2 non-gaussian parameter and MSD')
+      !enough information for the analysis.
+      SKIP_ANALYSIS=.FALSE.
+     ENDIF
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
@@ -19126,6 +19287,16 @@ INTEGER :: ios,n
       CALL perform_diffusion_analysis()
      ENDIF
      CALL add_reference(2)
+     CALL add_reference(4)
+    CASE ("a2simple","alpha2_simple","alpha2simple","a2_simple")
+     IF (WRAP_TRAJECTORY) THEN
+      CALL report_error(72)
+     ELSE
+      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+      CALL write_simple_alpha2()
+      WRITE(*,*) "Diffusion module invoked."
+      CALL perform_diffusion_analysis()
+     ENDIF
      CALL add_reference(4)
     CASE ("distribution") !Module DISTRIBUTION
      IF (BOX_VOLUME_GIVEN) THEN

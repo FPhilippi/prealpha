@@ -746,11 +746,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'conductivity'  (requests feature 'cacf components' or 'conductivity_simple')"
 			PRINT *," - 'velocity'      (requests feature 'vcf components')"
 			PRINT *," - 'rmm-vcf'       (requests feature 'Relative Mean Molecular Velocity Correlation Coefficients')"
-			PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (simple mode available)"
+			PRINT *," - 'diffusion'     (requests feature 'Mean Squared Displacement') (2 simple modes available *)"
 			PRINT *," - 'dihedral'      (requests feature 'Dihedral Conditions')"
 			PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
 			PRINT *," - 'distribution'  (requests feature 'polar/cylindrical distribution function) (simple mode available)"
 			PRINT *," - 'distance'      (requests feature 'Average distances') (simple mode available)"
+			PRINT *,"   * diffusion_simple and alpha2_simple"
 			PRINT *
 			PRINT *,"Molecular input file:"
 			PRINT *,"This file contains information about the system, located in the same folder as the executable"
@@ -874,6 +875,11 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    Thus, 'exponent 2' is the normal MSD, but others can be used, too."
 			PRINT *," - 'quit'"
 			PRINT *,"    Terminates the analysis. Lines after this switch are ignored."
+			PRINT *
+			PRINT *,"diffusion input file for alpha2 parameter:"
+			PRINT *,"The first line contains the expression 'alpha2'"
+			PRINT *,"The rest of the file follows the same rules as if starting with 'msd'."
+			PRINT *,"However, only the projection 1 1 1 makes sense."
 			PRINT *
 			PRINT *,"diffusion input file for cross diffusion:"
 			PRINT *,"The first line contains the expression 'cross', followed by the number of projections N."
@@ -1802,6 +1808,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 28 - Calculate average distances (closest or weighed, intra- or intermolecular)."
 				PRINT *," 29 - Reduce the trajectory to centre of charge."
 				PRINT *," 30 - Write the full trajectory in a specific format."
+				PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
 				SELECT CASE (user_input_integer(0,30))
 				CASE (0)!done here.
 					EXIT
@@ -2405,6 +2412,37 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					ENDIF
 					smalltask=.FALSE.
 					PRINT *,"The corresponding section has been added to the input file."
+				CASE (31)!alpha2 non-gaussian parameter section.
+					wrapping_is_sensible=.FALSE.
+					smalltask=.FALSE.
+					IF (nsteps<11) THEN
+						PRINT *,"Your trajectory is really too short for that. Please use more timesteps."
+						PRINT *,"The minimum of steps - even if only for debugging purposes - should be 11."
+					ELSE
+						CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+						IF (own_prefix) THEN
+							own_prefix=.FALSE.
+						ELSE
+							analysis_number=analysis_number+1
+						ENDIF
+						PRINT *,"There is a default mode available for this analysis that doesn't require additional input."
+						PRINT *,"(calculate alpha2 and MSD for all molecule types)"
+						PRINT *,"Would you like to take this shortcut? (y/n)"
+						IF (user_input_logical()) THEN
+							CALL append_string("alpha2_simple ### alpha2 non-gaussian parameter for all molecule types.")
+							CYCLE
+						ENDIF
+						CALL user_alpha2_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
+						IF (parallelisation_requested) THEN
+							CALL append_string("parallel_operation T ### turn on parallel operation")
+							WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+							CALL append_string(fstring)
+						ENDIF
+						CALL append_string('diffusion "'//TRIM(OUTPUT_PREFIX)//&
+						&TRIM(filename_msd)//'" ### compute alpha2 non-gaussian parameter and MSD')
+						!enough information for the analysis.
+						SKIP_ANALYSIS=.FALSE.
+					ENDIF
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT
@@ -3220,6 +3258,16 @@ INTEGER :: ios,n
 						CALL perform_diffusion_analysis()
 					ENDIF
 					CALL add_reference(2)
+					CALL add_reference(4)
+				CASE ("a2simple","alpha2_simple","alpha2simple","a2_simple")
+					IF (WRAP_TRAJECTORY) THEN
+						CALL report_error(72)
+					ELSE
+						IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+						CALL write_simple_alpha2()
+						WRITE(*,*) "Diffusion module invoked."
+						CALL perform_diffusion_analysis()
+					ENDIF
 					CALL add_reference(4)
 				CASE ("distribution") !Module DISTRIBUTION
 					IF (BOX_VOLUME_GIVEN) THEN
