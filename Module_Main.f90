@@ -1809,7 +1809,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 29 - Reduce the trajectory to centre of charge."
 				PRINT *," 30 - Write the full trajectory in a specific format."
 				PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
-				SELECT CASE (user_input_integer(0,30))
+				SELECT CASE (user_input_integer(0,31))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis

@@ -1,7 +1,7 @@
-! RELEASED ON 30_Sep_2023 AT 15:39
+! RELEASED ON 30_Jan_2024 AT 14:45
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
-    ! Copyright (C) 2023 Frederik Philippi
+    ! Copyright (C) 2024 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
  ! This work is funded by the Japan Society for the Promotion of Science
 
@@ -1293,7 +1293,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
-MODULE ANGLES ! Copyright (C) 2023 Frederik Philippi
+MODULE ANGLES ! Copyright (C) 2024 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -1476,7 +1476,7 @@ MODULE ANGLES ! Copyright (C) 2023 Frederik Philippi
 END MODULE ANGLES
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This module is responsible for handling the trajectory and passing information to other modules.
-MODULE MOLECULAR ! Copyright (C) 2023 Frederik Philippi
+MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
@@ -6012,7 +6012,7 @@ END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
 !This module contains procedures for debugging and technical purposes.
-MODULE DEBUG ! Copyright (C) 2023 Frederik Philippi
+MODULE DEBUG ! Copyright (C) 2024 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -7925,7 +7925,7 @@ END MODULE DEBUG
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
 !reorientational autocorrelation functions.
 !relative mean molecular velocity correlation functions.
-MODULE AUTOCORRELATION ! Copyright (C) 2023 Frederik Philippi
+MODULE AUTOCORRELATION ! Copyright (C) 2024 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -11499,7 +11499,7 @@ END MODULE AUTOCORRELATION
 
 !This Module calculates (drift corrected) mean squared displacements.
 !The diffusion implementation is shit. Use TRAVIS.
-MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
+MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -12876,7 +12876,7 @@ MODULE DIFFUSION ! Copyright (C) 2023 Frederik Philippi
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs low-level command line tasks.
-MODULE RECOGNITION ! Copyright (C) 2023 Frederik Philippi
+MODULE RECOGNITION ! Copyright (C) 2024 Frederik Philippi
  USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -13513,7 +13513,7 @@ MODULE RECOGNITION ! Copyright (C) 2023 Frederik Philippi
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates special combined distribution functions - such as cylindrical or polar.
-MODULE DISTRIBUTION ! Copyright (C) 2023 Frederik Philippi
+MODULE DISTRIBUTION ! Copyright (C) 2024 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -14786,7 +14786,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2023 Frederik Philippi
 END MODULE DISTRIBUTION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates intra- and intermolecular contact distance estimates (averages of closest distance)
-MODULE DISTANCE ! Copyright (C) 2023 Frederik Philippi
+MODULE DISTANCE ! Copyright (C) 2024 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -16081,10 +16081,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *, "   #######################"
   PRINT *
  ENDIF
- PRINT *, "   Copyright (C) 2023 Frederik Philippi"
+ PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 30_Sep_2023"
+ PRINT *, "   Date of Release: 30_Jan_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -17838,7 +17838,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 29 - Reduce the trajectory to centre of charge."
     PRINT *," 30 - Write the full trajectory in a specific format."
     PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
-    SELECT CASE (user_input_integer(0,30))
+    SELECT CASE (user_input_integer(0,31))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -19655,7 +19655,7 @@ INTEGER :: deallocstatus
  IF (DISCONNECTED) CLOSE(UNIT=6)
 END SUBROUTINE finalise_command_line_arguments
 
-PROGRAM PREALPHA ! Copyright (C) 2023 Frederik Philippi
+PROGRAM PREALPHA ! Copyright (C) 2024 Frederik Philippi
 USE SETTINGS
 USE MOLECULAR
 USE DEBUG
