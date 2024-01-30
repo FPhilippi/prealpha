@@ -1,4 +1,4 @@
-! RELEASED ON 30_Jan_2024 AT 14:45
+! RELEASED ON 30_Jan_2024 AT 15:00
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -18458,7 +18458,19 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       PRINT *,"(calculate alpha2 and MSD for all molecule types)"
       PRINT *,"Would you like to take this shortcut? (y/n)"
       IF (user_input_logical()) THEN
+       IF (.NOT.(parallelisation_requested)) THEN! ask for parallelisation, if not yet requested.
+        PRINT *,"The calculation of diffusion functions benefits from parallelisation."
+        PRINT *,"Would you like to turn on parallelisation? (y/n)"
+        IF (user_input_logical()) parallelisation_requested=.TRUE.
+       ENDIF
+       IF (parallelisation_requested) THEN
+        CALL append_string("parallel_operation T ### turn on parallel operation")
+        WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+        CALL append_string(fstring)
+       ENDIF
        CALL append_string("alpha2_simple ### alpha2 non-gaussian parameter for all molecule types.")
+       !enough information for the analysis.
+       SKIP_ANALYSIS=.FALSE.
        CYCLE
       ENDIF
       CALL user_alpha2_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_msd)
