@@ -1,4 +1,4 @@
-! RELEASED ON 30_Jan_2024 AT 15:00
+! RELEASED ON 06_Feb_2024 AT 13:34
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -11864,8 +11864,9 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
    &msd_exponent,msd_exponent
    WRITE(8,*) "quit"
    WRITE(8,*)
-   WRITE(8,*) "R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+   WRITE(8,*) "R=((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
    WRITE(8,*) "with R_a(t)=(1/N_a)*SUM(r_a(t)"
+   WRITE(8,*) "MSD multiplied with number of particles N"
    WRITE(8,*)
    WRITE(8,*) "This is an input file for the calculation of mean-squared displacements."
    WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
@@ -12290,8 +12291,8 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
    WRITE(*,*) "These quantities will be calculated and reported:"
    IF (TRIM(operation_mode)=="cross") THEN
     WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-    WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
-    WRITE(*,*) "   here, R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+    WRITE(*,*) "   'N*<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
+    WRITE(*,*) "   here, R=((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
     WRITE(*,*) "   with R_a(t)=(1/N_a)*SUM(r_a(t)"
    ELSE
     IF (verbose_print) THEN
@@ -12593,7 +12594,7 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
    ENDDO
   END SUBROUTINE calculate_alpha2
 
-  !This subroutine generates (N_a+N_b)*x_a*x_b*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
+  !This subroutine generates (N)*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
   !With R_a(t)=(1/N_a)*SUM(r_a(t))
   SUBROUTINE make_cross_diffusion_functions(projection_number)
   IMPLICIT NONE
@@ -12605,7 +12606,7 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
   INTEGER :: current_distance,starting_timestep,molecule_index,array_pos,molecule_type_index_a,molecule_type_index_b
   INTEGER,INTENT(IN) :: projection_number
   INTEGER :: number_of_timesteps,allocstatus,nmolecules_a,nmolecules_b,deallocstatus
-  REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3),x_a,x_b
+  REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3)
   REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: positions!first dimension: timestep, second dimension: the three coordinates.
   !local functions for parallelisation
   REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared_temp !mean squared displacement, dimension is the time shift given in timesteps
@@ -12617,8 +12618,9 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
    !get number of molecules
    nmolecules_a=give_number_of_molecules_per_step(molecule_type_index_a)
    nmolecules_b=give_number_of_molecules_per_step(molecule_type_index_b)
-   x_a=FLOAT(nmolecules_a)/FLOAT(nmolecules_a+nmolecules_b)
-   x_b=FLOAT(nmolecules_b)/FLOAT(nmolecules_a+nmolecules_b)
+    !REMOVED mole fraction
+    !x_a=FLOAT(nmolecules_a)/FLOAT(nmolecules_a+nmolecules_b)
+    !x_b=FLOAT(nmolecules_b)/FLOAT(nmolecules_a+nmolecules_b)
    !initialise the diffusion functions:
    x_num(:)=0
    x_squared(:)=0.0d0
@@ -12704,8 +12706,10 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
    !$ ENDIF
    DEALLOCATE(positions,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-   !Account for the averaging, and the molar fractions:
-   x_squared(:)=x_squared(:)*(FLOAT(nmolecules_a+nmolecules_b)*x_a*x_b/DFLOAT(x_num(:)))
+   !Account for the averaging.
+   !Molar fractions no longer included, "Na+Nb" changed to total N from version 06/02/2024
+   x_squared(:)=x_squared(:)*(FLOAT(give_total_number_of_molecules_per_step())&
+   &/DFLOAT(x_num(:)))
   END SUBROUTINE make_cross_diffusion_functions
 
   !This subroutine is responsible for writing the output into a file.
@@ -16084,7 +16088,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 30_Jan_2024"
+ PRINT *, "   Date of Release: 06_Feb_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -16697,7 +16701,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    This keyword expects six integers:"
    PRINT *,"    The first and second integers specify the first and last timestep to write."
    PRINT *,"    The third and fourth integers are the molecule type index Y and the molecule index M, respectively."
-   PRINT *,"    The fith integer is the integer of the neighbour molecule to consider"
+   PRINT *,"    The fith integer is the index of the neighbour molecule to consider"
    PRINT *,"    The last integer is the number of neighbours to write."
    PRINT *," - 'cubic_box_edge':"
    PRINT *,"    this keyword expects two real values, the lower and upper bounds of the simulation box."
@@ -17820,7 +17824,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 11 - Split the trajectory according to molecule type"
     PRINT *," 12 - Convert the trajectory to centre of mass."
     PRINT *," 13 - Write a trajectory subset for just one specific molecule."
-    PRINT *," 14 - Write a trajectory for a specific molecule and its neighbours"
+    PRINT *," 14 - Write a trajectory for a specific molecule and its neighbours (*)"
     PRINT *," 15 - vector reorientation dynamics (time correlation function)"
     PRINT *," 16 - Print information about drude particles."
     PRINT *," 17 - Compute ensemble average of radius of gyration."
@@ -17838,6 +17842,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 29 - Reduce the trajectory to centre of charge."
     PRINT *," 30 - Write the full trajectory in a specific format."
     PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
+    PRINT *,"  (*) Option 14 uses a distance cutoff to find any nearest neighbour,"
+    PRINT *,"      while option 23 gives a defined number of nearest neighbours of a specific type."
     SELECT CASE (user_input_integer(0,31))
     CASE (0)!done here.
      EXIT

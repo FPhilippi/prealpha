@@ -366,8 +366,9 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			&msd_exponent,msd_exponent
 			WRITE(8,*) "quit"
 			WRITE(8,*)
-			WRITE(8,*) "R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+			WRITE(8,*) "R=((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
 			WRITE(8,*) "with R_a(t)=(1/N_a)*SUM(r_a(t)"
+			WRITE(8,*) "MSD multiplied with number of particles N"
 			WRITE(8,*)
 			WRITE(8,*) "This is an input file for the calculation of mean-squared displacements."
 			WRITE(8,*) "To actually perform the implied calculations, it has to be referenced in 'general.inp'."
@@ -792,8 +793,8 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(*,*) "These quantities will be calculated and reported:"
 			IF (TRIM(operation_mode)=="cross") THEN
 				WRITE(*,*) "   'timeline': number of the timestep * time scaling factor"
-				WRITE(*,*) "   '<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
-				WRITE(*,*) "   here, R=(N_a+N_b)*x_a*x_b*((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
+				WRITE(*,*) "   'N*<|R|**"//TRIM(msd_exponent_str)//">': relative mean molecular",TRIM(power_terminology)," displacement"
+				WRITE(*,*) "   here, R=((R_a(t)-R_b(t))-(R_a(0)-R_b(0)))"
 				WRITE(*,*) "   with R_a(t)=(1/N_a)*SUM(r_a(t)"
 			ELSE
 				IF (verbose_print) THEN
@@ -1095,7 +1096,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDDO
 		END SUBROUTINE calculate_alpha2
 
-		!This subroutine generates (N_a+N_b)*x_a*x_b*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
+		!This subroutine generates (N)*|(R_a(t)-R_b(t))-(R_a(0)-R_b(0))|^2
 		!With R_a(t)=(1/N_a)*SUM(r_a(t))
 		SUBROUTINE make_cross_diffusion_functions(projection_number)
 		IMPLICIT NONE
@@ -1107,7 +1108,7 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: current_distance,starting_timestep,molecule_index,array_pos,molecule_type_index_a,molecule_type_index_b
 		INTEGER,INTENT(IN) :: projection_number
 		INTEGER :: number_of_timesteps,allocstatus,nmolecules_a,nmolecules_b,deallocstatus
-		REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3),x_a,x_b
+		REAL(KIND=WORKING_PRECISION) :: vector_clip(3),projektionsvektor(3)
 		REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: positions!first dimension: timestep, second dimension: the three coordinates.
 		!local functions for parallelisation
 		REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: x_squared_temp !mean squared displacement, dimension is the time shift given in timesteps
@@ -1119,8 +1120,9 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			!get number of molecules
 			nmolecules_a=give_number_of_molecules_per_step(molecule_type_index_a)
 			nmolecules_b=give_number_of_molecules_per_step(molecule_type_index_b)
-			x_a=FLOAT(nmolecules_a)/FLOAT(nmolecules_a+nmolecules_b)
-			x_b=FLOAT(nmolecules_b)/FLOAT(nmolecules_a+nmolecules_b)
+				!REMOVED mole fraction
+				!x_a=FLOAT(nmolecules_a)/FLOAT(nmolecules_a+nmolecules_b)
+				!x_b=FLOAT(nmolecules_b)/FLOAT(nmolecules_a+nmolecules_b)
 			!initialise the diffusion functions:
 			x_num(:)=0
 			x_squared(:)=0.0d0
@@ -1206,8 +1208,10 @@ MODULE DIFFUSION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		 !$ ENDIF
 			DEALLOCATE(positions,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-			!Account for the averaging, and the molar fractions:
-			x_squared(:)=x_squared(:)*(FLOAT(nmolecules_a+nmolecules_b)*x_a*x_b/DFLOAT(x_num(:)))
+			!Account for the averaging.
+			!Molar fractions no longer included, "Na+Nb" changed to total N from version 06/02/2024
+			x_squared(:)=x_squared(:)*(FLOAT(give_total_number_of_molecules_per_step())&
+			&/DFLOAT(x_num(:)))
 		END SUBROUTINE make_cross_diffusion_functions
 
 		!This subroutine is responsible for writing the output into a file.
