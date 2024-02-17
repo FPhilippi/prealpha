@@ -98,6 +98,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	CHARACTER(LEN=1024) :: FILENAME_DIFFUSION_INPUT="diffusion.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
+	CHARACTER(LEN=1024) :: FILENAME_SPECIATION_INPUT="speciation.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISPERSION_INPUT="dispersion.inp"
 	CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
 	CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
@@ -267,7 +268,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!152 requested unwrapping with sequential read
 	!153 requested change of exponent with alpha2. But we won't let them.
 	!154 non-unit vector requested as projection for alpha2.
-
+	!155 speciation.inp is not correctly formatted
+	!156 Couldn't allocate memory for speciation list
+	!157 speciation.inp is not available
+	!158 problem when streaming speciation input.
+	!159 no valid donors or acceptors left
+	!160 neighbour overflow in speciation module
+	!161 species overflow in speciation module
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -898,6 +905,31 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (154)
 					WRITE(*,*) " #  WARNING 154: alpha2 only makes sense with the unit vector."
 					WRITE(*,*) " #  (i.e. the projection 1 1 1, analysis continues but results are likely meaningless)"
+				CASE (155)
+					WRITE(*,*) " #  SEVERE ERROR 155: couldn't read '",TRIM(FILENAME_SPECIATION_INPUT),"'"
+					WRITE(*,*) " #  Check format of input file!"
+					CLOSE(UNIT=3)!unit 3 is the speciation input file
+					CALL finalise_global()
+					STOP
+				CASE (156)
+					WRITE(*,*) " #  SEVERE ERROR 156: couldn't allocate memory for speciation list (or clipboards)."
+					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+					STOP
+				CASE (157)
+					WRITE(*,*) " #  ERROR 157: couldn't find '",TRIM(FILENAME_SPECIATION_INPUT),"'"
+					WRITE(*,*) "--> redelivering control to main unit"
+				CASE (158)
+					WRITE(*,*) " #  ERROR 158: problem streaming '",TRIM(FILENAME_SPECIATION_INPUT),"'"
+					WRITE(*,*) " #  check format of '",TRIM(FILENAME_SPECIATION_INPUT),"'!"
+				CASE (159)
+					WRITE(*,*) " #  ERROR 159: not enough valid acceptor and donor atoms."
+					WRITE(*,*) "--> redelivering control to main unit"
+				CASE (160)
+					WRITE(*,*) " #  SERIOUS WARNING 160: Neighbour overflow occurred in Module SPECIATION."
+					WRITE(*,*) "--> consider increasing N_neighbours"
+				CASE (161)
+					WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
+					WRITE(*,*) "--> consider increasing N_species"
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

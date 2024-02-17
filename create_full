@@ -1,6 +1,6 @@
 #!/bin/bash
 
-gfortran Module_SETTINGS.f90 Module_Main.f90 Module_Molecular.f90 Module_Angles.f90 Module_Debug.f90 Module_Autocorrelation.f90 Module_Diffusion.f90 Module_Recognition.f90 Module_Distribution.f90 Module_Distances.f90 -g -fbacktrace -fopenmp
+gfortran Module_SETTINGS.f90 Module_Main.f90 Module_Molecular.f90 Module_Angles.f90 Module_Debug.f90 Module_Autocorrelation.f90 Module_Diffusion.f90 Module_Recognition.f90 Module_Distribution.f90 Module_Distances.f90 Module_Speciation.f90 -g -fbacktrace -fopenmp
 
 echo "./a.out is compiled"
 

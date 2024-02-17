@@ -1,3 +1,9 @@
+17.02.2024:
+	Introduced speciation module. This module calculates speciation statistics.
+06.02.2024:
+	updated manual with a definition of how prealpha calculates the cross-diffusion coefficients
+30.01.2024:
+	Bug fixes, removed typos
 30.09.2023:
 	Added user input interface for alpha2
 29.09.2023:

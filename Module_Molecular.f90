@@ -2536,7 +2536,6 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			give_center_of_mass_2(:)=give_center_of_mass_2(:)/DBLE(molecule_list(molecule_type_index)%mass)
 		END FUNCTION give_center_of_mass_2
 
-
 		!The following function gives what would be the dipole moment of a neutral molecule
 		FUNCTION give_qd_vector(timestep,molecule_type_index,molecule_index)
 		IMPLICIT NONE

@@ -2647,6 +2647,7 @@ USE DIFFUSION
 USE SETTINGS
 USE DISTRIBUTION
 USE DISTANCE
+USE SPECIATION
 IMPLICIT NONE
 	 !$ INTERFACE
 	 !$ 	FUNCTION OMP_get_num_threads()
@@ -3449,8 +3450,9 @@ INTEGER :: ios,n
 					!Here is some space for testing stuff
 					WRITE(*,*) "################################DEBUG VERSION"
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
-					WRITE(*,*) "testing stuff for JMD."
-					CALL dump_atomic_properties()
+					!WRITE(*,*) "testing stuff for JMD."
+					!CALL dump_atomic_properties()
+					CALL perform_speciation_analysis()
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN
