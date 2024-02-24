@@ -2615,12 +2615,12 @@ SUBROUTINE finalise_global()
 USE MOLECULAR
 USE SETTINGS
 IMPLICIT NONE
-42	FORMAT ("    ########   #####")
-44	FORMAT ("        ########")
-43	FORMAT ("        #      #")
-28	FORMAT ("    #   ##  #      #")
-45	FORMAT ("    #      #       #")
-13	FORMAT ("    ##### #### #####")
+13	FORMAT ("    ##### ####  #####")
+28	FORMAT ("    #   ##  #       #")
+42	FORMAT ("    ########    #####")
+43	FORMAT ("        #       #")
+44	FORMAT ("        #########")
+45	FORMAT ("    #      #        #")
 	CALL finalise_molecular()!also closes unit 9, if still open.
 	CLOSE(UNIT=7)
 	IF (DEVELOPERS_VERSION) THEN
@@ -3452,6 +3452,8 @@ INTEGER :: ios,n
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					!WRITE(*,*) "testing stuff for JMD."
 					!CALL dump_atomic_properties()
+					!CALL perform_speciation_analysis()
+					FILENAME_SPECIATION_INPUT="speciationX.inp"
 					CALL perform_speciation_analysis()
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT

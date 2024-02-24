@@ -275,6 +275,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!159 no valid donors or acceptors left
 	!160 neighbour overflow in speciation module
 	!161 species overflow in speciation module
+	!162 overwriting existing atom groups in speciation module
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -912,7 +913,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					CALL finalise_global()
 					STOP
 				CASE (156)
-					WRITE(*,*) " #  SEVERE ERROR 156: couldn't allocate memory for speciation list (or clipboards)."
+					WRITE(*,*) " #  SEVERE ERROR 156: couldn't allocate memory for species list (or clipboards)."
 					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
 					STOP
 				CASE (157)
@@ -930,6 +931,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (161)
 					WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
 					WRITE(*,*) "--> consider increasing N_species"
+				CASE (162)
+					WRITE(*,*) " #  WARNING 162: overwriting existing atom group in Module SPECIATION."
+					WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

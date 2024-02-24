@@ -147,7 +147,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_total_number_of_molecules_per_step,show_drude_settings,give_box_volume,give_box_limit
 	PUBLIC :: assign_drudes,give_intramolecular_distances,give_total_temperature,give_sum_formula,constraints_available
 	PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
-	PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles
+	PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles,give_atom_position
 	PUBLIC :: give_smallest_distance,give_number_of_neighbours,wrap_vector,give_smallest_distance_squared,compute_drude_properties
 	PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
 	PUBLIC :: give_intermolecular_contact_distance,give_smallest_atom_distance,give_smallest_atom_distance_squared
@@ -2471,6 +2471,20 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				&atomic_weight(molecule_list(molecule_type_index)%list_of_elements(atom_index))
 			ENDDO
 		END SUBROUTINE print_atom_properties
+
+		FUNCTION give_atom_position(timestep,molecule_type_index,molecule_index,atom_index)
+		IMPLICIT NONE
+		REAL(KIND=WORKING_PRECISION) :: give_atom_position(3)
+		INTEGER,INTENT(IN) :: timestep,molecule_type_index,molecule_index,atom_index
+			IF ((READ_SEQUENTIAL).AND.((timestep/=file_position))) CALL goto_timestep(timestep)
+			IF (READ_SEQUENTIAL) THEN
+				give_atom_position(:)=&
+				&molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)
+			ELSE
+				give_atom_position(:)=&
+				&molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)
+			ENDIF
+		END FUNCTION give_atom_position
 
 		FUNCTION give_center_of_mass(timestep,molecule_type_index,molecule_index)
 		IMPLICIT NONE
