@@ -7,6 +7,8 @@
  sequential_read F
  dump_dimers T 1 1 2
  gyradius -1 1 1
+ parallel_operation F
+ speciation "species_cation.inp"
  quit <-- delete this 'quit' statement for the distance analysis!
  parallel_operation T
  set_threads 64

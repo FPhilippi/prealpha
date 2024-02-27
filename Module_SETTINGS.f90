@@ -276,6 +276,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!160 neighbour overflow in speciation module
 	!161 species overflow in speciation module
 	!162 overwriting existing atom groups in speciation module
+	!163 existing element groups are kept / overwritten
+	!164 no group defined for this atom
+	!165 atom assigned twice to a group
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -932,7 +935,18 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
 					WRITE(*,*) "--> consider increasing N_species"
 				CASE (162)
-					WRITE(*,*) " #  WARNING 162: overwriting existing atom group in Module SPECIATION."
+					WRITE(*,*) " #  WARNING 162: Overwriting existing atom groups in Module SPECIATION."
+					WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+				CASE (163)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 163: Atoms already grouped by elements."
+					WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+				CASE (164)
+					WRITE(*,*) " #  ERROR 164: Could not add atom to group - no group defined."
+					WRITE(*,*) "--> please first make a new group with new_acceptor_group or new_donor_group"
+				CASE (165)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 165: An atom_index was assigned twice."
 					WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"

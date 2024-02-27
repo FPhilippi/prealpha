@@ -3261,6 +3261,17 @@ INTEGER :: ios,n
 					ENDIF
 					CALL add_reference(2)
 					CALL add_reference(4)
+				CASE ("speciation","species") !Module SPECIATION
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					BACKSPACE 7
+					READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
+					IF (ios/=0) THEN
+						CALL report_error(19,exit_status=ios)
+						EXIT
+					ENDIF
+					FILENAME_SPECIATION_INPUT=dummy
+					WRITE(*,*) "Speciation module invoked."
+					CALL perform_speciation_analysis()
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)

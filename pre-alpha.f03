@@ -1,4 +1,4 @@
-! RELEASED ON 24_Feb_2024 AT 20:02
+! RELEASED ON 27_Feb_2024 AT 12:15
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -277,6 +277,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !160 neighbour overflow in speciation module
  !161 species overflow in speciation module
  !162 overwriting existing atom groups in speciation module
+ !163 existing element groups are kept / overwritten
+ !164 no group defined for this atom
+ !165 atom assigned twice to a group
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -933,7 +936,18 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
      WRITE(*,*) "--> consider increasing N_species"
     CASE (162)
-     WRITE(*,*) " #  WARNING 162: overwriting existing atom group in Module SPECIATION."
+     WRITE(*,*) " #  WARNING 162: Overwriting existing atom groups in Module SPECIATION."
+     WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+    CASE (163)
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 163: Atoms already grouped by elements."
+     WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+    CASE (164)
+     WRITE(*,*) " #  ERROR 164: Could not add atom to group - no group defined."
+     WRITE(*,*) "--> please first make a new group with new_acceptor_group or new_donor_group"
+    CASE (165)
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 165: An atom_index was assigned twice."
      WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
@@ -16109,9 +16123,10 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
  INTEGER :: maximum_number_of_connections=maximum_number_of_connections_default
  INTEGER :: N_acceptor_types
  INTEGER :: N_donor_types
+ INTEGER :: bytes_needed
  INTEGER :: species_overflow
  INTEGER :: neighbour_atom_overflow
- LOGICAL :: atoms_grouped
+ LOGICAL :: atoms_grouped,grouped_by_elements
  LOGICAL :: print_connection_beads=print_connection_beads_default
  REAL,DIMENSION(:,:,:,:),ALLOCATABLE :: squared_cutoff_list !the squared cutoffs. The dimensions are: entry of acceptor_list -- entry of acceptor atom_index_list -- entry of donor_list -- entry of donor atom_index_list.
  TYPE,PRIVATE :: connections
@@ -16176,7 +16191,9 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    N_donor_types=0
    maximum_number_of_connections=maximum_number_of_connections_default
    atoms_grouped=.FALSE.
+   grouped_by_elements=.FALSE.
    print_connection_beads=print_connection_beads_default
+   bytes_needed=0
   END SUBROUTINE set_defaults
 
   !initialises the speciation module by reading the specified input file.
@@ -16207,6 +16224,9 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     DO n=1,N_acceptor_types,1
      IF (ALLOCATED(acceptor_list(n)%list_of_all_species)) CALL report_error(0)
      ALLOCATE(acceptor_list(n)%list_of_all_species(maximum_number_of_species),STAT=allocstatus)
+     !these are 4 bytes, actually
+     bytes_needed=bytes_needed+13*maximum_number_of_species
+     bytes_needed=bytes_needed+6*maximum_number_of_species*maximum_number_of_connections
      IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
      !Initialise the list_of_all_species
      DO m=1,maximum_number_of_species,1
@@ -16263,6 +16283,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     IF (ALLOCATED(squared_cutoff_list)) CALL report_error(0)
     ALLOCATE(squared_cutoff_list&
     &(N_acceptor_types,acceptor_maxatoms,N_donor_types,donor_maxatoms),STAT=allocstatus)
+    bytes_needed=bytes_needed+N_acceptor_types*acceptor_maxatoms*N_donor_types*donor_maxatoms
     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
     DO n=1,N_acceptor_types,1
      DO m=1,N_donor_types,1
@@ -16285,6 +16306,11 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     SUBROUTINE read_body()
     IMPLICIT NONE
     CHARACTER(LEN=33) :: inputstring
+    LOGICAL :: successful_group_assignment
+    INTEGER :: n_acceptor,molecule_type_index,atom_index,n_donor,n_acceptor_last,n_donor_last,atom_counter
+     molecule_type_index=0
+     n_acceptor_last=0
+     n_donor_last=0
      DO n=1,MAXITERATIONS,1
       READ(3,IOSTAT=ios,FMT=*) inputstring
       IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_SPECIATION_INPUT)
@@ -16310,9 +16336,140 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
        IF (atoms_grouped) THEN
         CALL report_error(162)
        ENDIF
-       IF (VERBOSE_OUTPUT) WRITE(*,'("  grouping atoms together based on their element symbols.")')
+       IF (VERBOSE_OUTPUT) WRITE(*,'("   grouping atoms together based on their element symbols.")')
        CALL group_element_names()
        atoms_grouped=.TRUE.
+       grouped_by_elements=.TRUE.
+      CASE ("assign_to_acceptor_group","assign_atom_to_acceptor_group",&
+      &"add_to_acceptor_group","add_atom_to_acceptor_group")
+       IF ((.NOT.(atoms_grouped)).OR.(molecule_type_index==0)) THEN
+        CALL report_error(164)
+       ELSE
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,atom_index
+        IF (ios/=0) THEN
+         CALL report_error(158,exit_status=ios)
+        ELSE
+         successful_group_assignment=.FALSE.
+         DO n_acceptor=1,N_acceptor_types,1
+          IF (acceptor_list(n_acceptor)%molecule_type_index==molecule_type_index) THEN
+           IF (successful_group_assignment) CALL report_error(0)
+           DO atom_counter=1,acceptor_list(n_acceptor)%N_atoms,1
+            IF (acceptor_list(n_acceptor)%atom_index_list(atom_counter,1)==atom_index) THEN
+             IF (successful_group_assignment) CALL report_error(165)
+             successful_group_assignment=.TRUE.
+             acceptor_list(n_acceptor)%atom_index_list(atom_counter,2)=&
+             &-acceptor_list(n_acceptor)%N_groups
+            ENDIF
+           ENDDO
+           IF ((VERBOSE_OUTPUT).AND.(successful_group_assignment)) &
+           &WRITE(*,'("   Added atom_index ",I0," to acceptor group #",I0," (molecule_type_index ",I0,")")')&
+           &atom_index,acceptor_list(n_acceptor)%N_groups,molecule_type_index
+          ENDIF
+         ENDDO
+         IF (.NOT.(successful_group_assignment)) CALL report_error(111,atom_index)
+        ENDIF
+       ENDIF
+      CASE ("assign_to_donor_group","assign_atom_to_donor_group",&
+      &"add_to_donor_group","add_atom_to_donor_group")
+       IF ((.NOT.(atoms_grouped)).OR.(molecule_type_index==0)) THEN
+        CALL report_error(164)
+       ELSE
+        BACKSPACE 3
+        READ(3,IOSTAT=ios,FMT=*) inputstring,atom_index
+        IF (ios/=0) THEN
+         CALL report_error(158,exit_status=ios)
+        ELSE
+         successful_group_assignment=.FALSE.
+         DO n_donor=1,N_donor_types,1
+          IF (donor_list(n_donor)%molecule_type_index==molecule_type_index) THEN
+           IF (successful_group_assignment) CALL report_error(0)
+           DO atom_counter=1,donor_list(n_donor)%N_atoms,1
+            IF (donor_list(n_donor)%atom_index_list(atom_counter,1)==atom_index) THEN
+             IF (successful_group_assignment) CALL report_error(165)
+             successful_group_assignment=.TRUE.
+             donor_list(n_donor)%atom_index_list(atom_counter,2)=&
+             &-donor_list(n_donor)%N_groups
+            ENDIF
+           ENDDO
+           IF ((VERBOSE_OUTPUT).AND.(successful_group_assignment)) &
+           &WRITE(*,'("   Added atom_index ",I0," to donor group #",I0," (molecule_type_index ",I0,")")')&
+           &atom_index,donor_list(n_donor)%N_groups,molecule_type_index
+          ENDIF
+         ENDDO
+         IF (.NOT.(successful_group_assignment)) CALL report_error(111,atom_index)
+        ENDIF
+       ENDIF
+      CASE ("new_acceptor_group","acceptor_new_group","acceptor_group","acceptors_new_group")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,molecule_type_index
+       IF (ios/=0) THEN
+        CALL report_error(158,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A)')&
+        &"   no changes to atom groups."
+       ELSE
+        IF (grouped_by_elements) THEN
+         CALL report_error(163)
+         grouped_by_elements=.FALSE.
+        ELSE
+         IF (.NOT.(atoms_grouped)) THEN
+          WRITE(*,'("   turned on atom groups.")')
+          DO n_acceptor=1,N_acceptor_types,1
+           acceptor_list(n_acceptor)%N_groups=0
+          ENDDO
+         ENDIF
+        ENDIF
+        successful_group_assignment=.FALSE.
+        DO n_acceptor=1,N_acceptor_types,1
+         IF (acceptor_list(n_acceptor)%molecule_type_index==molecule_type_index) THEN
+          IF (successful_group_assignment) CALL report_error(0)
+          successful_group_assignment=.TRUE.
+          acceptor_list(n_acceptor)%N_groups=acceptor_list(n_acceptor)%N_groups+1
+          IF (VERBOSE_OUTPUT) &
+          &WRITE(*,'("   Added group ",I0," to acceptor #",I0," (molecule_type_index ",I0,")")')&
+          &acceptor_list(n_acceptor)%N_groups,&
+          &n_acceptor,molecule_type_index
+          n_acceptor_last=n_acceptor
+          atoms_grouped=.TRUE.
+         ENDIF
+        ENDDO
+        IF (.NOT.(successful_group_assignment)) CALL report_error(110,molecule_type_index)
+       ENDIF
+      CASE ("new_donor_group","donor_new_group","donor_group","donors_new_group")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,molecule_type_index
+       IF (ios/=0) THEN
+        CALL report_error(158,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A)')&
+        &"   no changes to atom groups."
+       ELSE
+        IF (grouped_by_elements) THEN
+         CALL report_error(163)
+         grouped_by_elements=.FALSE.
+        ELSE
+         IF (.NOT.(atoms_grouped)) THEN
+          WRITE(*,'("   turned on atom groups.")')
+          DO n_donor=1,N_donor_types,1
+           donor_list(n_donor)%N_groups=0
+          ENDDO
+         ENDIF
+        ENDIF
+        successful_group_assignment=.FALSE.
+        DO n_donor=1,N_donor_types,1
+         IF (donor_list(n_donor)%molecule_type_index==molecule_type_index) THEN
+          IF (successful_group_assignment) CALL report_error(0)
+          successful_group_assignment=.TRUE.
+          donor_list(n_donor)%N_groups=donor_list(n_donor)%N_groups+1
+          IF (VERBOSE_OUTPUT) &
+          &WRITE(*,'("   Added group ",I0," to donor #",I0," (molecule_type_index ",I0,")")')&
+          &donor_list(n_donor)%N_groups,&
+          &n_donor,molecule_type_index
+          n_donor_last=n_donor
+          atoms_grouped=.TRUE.
+         ENDIF
+        ENDDO
+        IF (.NOT.(successful_group_assignment)) CALL report_error(110,molecule_type_index)
+       ENDIF
       CASE ("print_connection_beads","print_beads","print_connections")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,print_connection_beads
@@ -16372,6 +16529,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
       CALL report_error(57,exit_status=nsteps)
       nsteps=give_number_of_timesteps()
      ENDIF
+     CALL showgroups()
     END SUBROUTINE read_body
 
     SUBROUTINE group_element_names()
@@ -16383,7 +16541,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      DO n_acceptor=1,N_acceptor_types,1
       group_number=0
       IF (DEVELOPERS_VERSION) THEN
-       WRITE(*,ADVANCE="NO",FMT='("  ! groups for acceptor # ",I0,":")') n_acceptor
+       WRITE(*,ADVANCE="NO",FMT='("  ! groups for acceptor #",I0,":")') n_acceptor
       ENDIF
       !set all group labels to be positive
       acceptor_list(n_acceptor)%atom_index_list(:,2)=1
@@ -16432,7 +16590,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      DO n_donor=1,N_donor_types,1
       group_number=0
       IF (DEVELOPERS_VERSION) THEN
-       WRITE(*,ADVANCE="NO",FMT='("  ! groups for donor # ",I0,":")') n_donor
+       WRITE(*,ADVANCE="NO",FMT='("  ! groups for donor #",I0,":")') n_donor
       ENDIF
       !set all group labels to be positive
       donor_list(n_donor)%atom_index_list(:,2)=1
@@ -16449,7 +16607,8 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
          donor_list(n_donor)%atom_index_list(donor_indexcounter,2)=group_number
          IF (DEVELOPERS_VERSION) THEN
           WRITE(*,*)
-          WRITE(*,ADVANCE="NO",FMT='("  !   group #",I0," (",A,") has atom indices ",I0)') -group_number,&
+          WRITE(*,ADVANCE="NO",FMT='("  !   group #",I0," (",A,") has atom indices ",I0)')&
+          &-group_number,&
           &TRIM(current_element),donor_list(n_donor)%&
           &atom_index_list(donor_indexcounter,1)
          ENDIF
@@ -16479,6 +16638,197 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      ENDDO
     END SUBROUTINE group_element_names
 
+    SUBROUTINE showgroups()
+    IMPLICIT NONE
+    INTEGER :: atom_counter,n_acceptor,n_donor,group_counter
+    LOGICAL :: firsttime,no_ungrouped_atoms
+     WRITE(*, FMT='(" For this analysis, the atoms will be grouped as follows.")')
+     DO n_acceptor=1,N_acceptor_types,1
+      IF (acceptor_list(n_acceptor)%N_atoms==1) THEN
+       IF (N_acceptor_types==1) THEN
+        WRITE(*,'("   Atom ",I0," (",A,") of molecule type ",I0," (",A,") was the sole acceptor.")')&
+        &acceptor_list(n_acceptor)%atom_index_list(1,1),&
+        &give_element_symbol(acceptor_list(n_acceptor)%molecule_type_index,&
+        &acceptor_list(n_acceptor)%atom_index_list(1,1)),&
+        &acceptor_list(n_acceptor)%molecule_type_index,&
+        &TRIM(give_sum_formula(acceptor_list(n_acceptor)%molecule_type_index))
+       ELSE
+        WRITE(*,'("   Acceptor #",I0," was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
+        &n_acceptor,&
+        &acceptor_list(n_acceptor)%atom_index_list(1,1),&
+        &give_element_symbol(acceptor_list(n_acceptor)%molecule_type_index,&
+        &acceptor_list(n_acceptor)%atom_index_list(1,1)),&
+        &acceptor_list(n_acceptor)%molecule_type_index,&
+        &TRIM(give_sum_formula(acceptor_list(n_acceptor)%molecule_type_index))
+       ENDIF
+       CYCLE
+      ENDIF
+      IF (acceptor_list(n_acceptor)%N_groups==0) THEN
+       WRITE(*,FMT='("   Acceptor #",I0," has no custom groups defined.")')n_acceptor
+      ELSE
+       WRITE(*, FMT='("   Groups for acceptor #",I0,":")') n_acceptor
+      ENDIF
+      DO group_counter=1,acceptor_list(n_acceptor)%N_groups
+       firsttime=.TRUE.
+       DO atom_counter=1,acceptor_list(n_acceptor)%N_atoms,1
+        IF (acceptor_list(n_acceptor)%atom_index_list(atom_counter,2)==-group_counter) THEN
+         IF (firsttime) THEN
+          firsttime=.FALSE.
+          IF (grouped_by_elements) THEN
+           WRITE(*,ADVANCE="NO",FMT='("     Group #",I0," (",A,") has atom indices ",I0)')&
+           &group_counter,&
+           &TRIM(give_element_symbol(acceptor_list(n_acceptor)%&
+           &molecule_type_index,acceptor_list(n_acceptor)%&
+           &atom_index_list(atom_counter,1))),&
+           &acceptor_list(n_acceptor)%atom_index_list(atom_counter,1)
+          ELSE
+           WRITE(*,ADVANCE="NO",FMT='("     Group #",I0," has atom indices ",I0," (",A,")")') &
+           &group_counter,acceptor_list(n_acceptor)%atom_index_list(atom_counter,1),&
+           &TRIM(give_element_symbol(acceptor_list(n_acceptor)%&
+           &molecule_type_index,acceptor_list(n_acceptor)%&
+           &atom_index_list(atom_counter,1)))
+          ENDIF
+         ELSE
+          IF (grouped_by_elements) THEN
+           WRITE(*,ADVANCE="NO",FMT='(", ",I0)') acceptor_list(n_acceptor)%&
+           &atom_index_list(atom_counter,1)
+          ELSE
+           WRITE(*,ADVANCE="NO",FMT='(", ",I0," (",A,")")')&
+           &acceptor_list(n_acceptor)%atom_index_list(atom_counter,1),&
+           &TRIM(give_element_symbol(acceptor_list(n_acceptor)%&
+           &molecule_type_index,acceptor_list(n_acceptor)%&
+           &atom_index_list(atom_counter,1)))
+          ENDIF
+         ENDIF
+        ENDIF
+       ENDDO
+       IF (firsttime) THEN
+        WRITE(*,FMT='("     Group #",I0," was empty (check input!).")')group_counter
+       ELSE
+        WRITE(*,'(".")')
+       ENDIF
+      ENDDO
+      IF (.NOT.(grouped_by_elements)) THEN
+       no_ungrouped_atoms=.TRUE.
+       firsttime=.TRUE.
+       DO atom_counter=1,acceptor_list(n_acceptor)%N_atoms,1
+        IF (acceptor_list(n_acceptor)%atom_index_list(atom_counter,2)>0) THEN
+         !sanity check
+         IF (acceptor_list(n_acceptor)%atom_index_list(atom_counter,2)/=&
+         &acceptor_list(n_acceptor)%atom_index_list(atom_counter,1)) CALL report_error(0)
+         no_ungrouped_atoms=.FALSE.
+         IF (firsttime) THEN
+          WRITE(*,FMT='("     Atoms not assigned to a group, treated as their own group:")')
+          WRITE(*,ADVANCE="NO",FMT='("       Atom indices ",I0)')&
+          &acceptor_list(n_acceptor)%atom_index_list(atom_counter,1)
+          firsttime=.FALSE.
+         ELSE
+          WRITE(*,ADVANCE="NO",FMT='(", ",I0)')&
+          &acceptor_list(n_acceptor)%atom_index_list(atom_counter,1)
+         ENDIF
+        ENDIF
+       ENDDO
+       IF (no_ungrouped_atoms) THEN
+        WRITE(*,'("     All atoms of this acceptor are assigned to a group.")')
+       ELSE
+        WRITE(*,'(".")')
+       ENDIF
+      ENDIF
+     ENDDO
+     DO n_donor=1,N_donor_types,1
+      IF (donor_list(n_donor)%N_atoms==1) THEN
+       IF (N_donor_types==1) THEN
+        WRITE(*,'(" Atom ",I0," (",A,") of molecule type ",I0," (",A,") was the sole donor.")')&
+        &donor_list(n_donor)%atom_index_list(1,1),&
+        &give_element_symbol(donor_list(n_donor)%molecule_type_index,&
+        &donor_list(n_donor)%atom_index_list(1,1)),&
+        &donor_list(n_donor)%molecule_type_index,&
+        &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+       ELSE
+        WRITE(*,'("   Donor #",I0," was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
+        &n_donor,&
+        &donor_list(n_donor)%atom_index_list(1,1),&
+        &give_element_symbol(donor_list(n_donor)%molecule_type_index,&
+        &donor_list(n_donor)%atom_index_list(1,1)),&
+        &donor_list(n_donor)%molecule_type_index,&
+        &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+       ENDIF
+       CYCLE
+      ENDIF
+      IF (donor_list(n_donor)%N_groups==0) THEN
+       WRITE(*,FMT='("   Donor #",I0," has no custom groups defined.")')n_donor
+      ELSE
+       WRITE(*, FMT='("   Groups for Donor #",I0,":")') n_donor
+      ENDIF
+      DO group_counter=1,donor_list(n_donor)%N_groups
+       firsttime=.TRUE.
+       DO atom_counter=1,donor_list(n_donor)%N_atoms,1
+        IF (donor_list(n_donor)%atom_index_list(atom_counter,2)==-group_counter) THEN
+         IF (firsttime) THEN
+          firsttime=.FALSE.
+          IF (grouped_by_elements) THEN
+           WRITE(*,ADVANCE="NO",FMT='("     Group #",I0," (",A,") has atom indices ",I0)')&
+           &group_counter,&
+           &TRIM(give_element_symbol(donor_list(n_donor)%&
+           &molecule_type_index,donor_list(n_donor)%&
+           &atom_index_list(atom_counter,1))),&
+           &donor_list(n_donor)%atom_index_list(atom_counter,1)
+          ELSE
+           WRITE(*,ADVANCE="NO",FMT='("     Group #",I0," has atom indices ",I0," (",A,")")') &
+           &group_counter,donor_list(n_donor)%atom_index_list(atom_counter,1),&
+           &TRIM(give_element_symbol(donor_list(n_donor)%&
+           &molecule_type_index,donor_list(n_donor)%&
+           &atom_index_list(atom_counter,1)))
+          ENDIF
+         ELSE
+          IF (grouped_by_elements) THEN
+           WRITE(*,ADVANCE="NO",FMT='(", ",I0)') donor_list(n_donor)%&
+           &atom_index_list(atom_counter,1)
+          ELSE
+           WRITE(*,ADVANCE="NO",FMT='(", ",I0," (",A,")")')&
+           &donor_list(n_donor)%atom_index_list(atom_counter,1),&
+           &TRIM(give_element_symbol(donor_list(n_donor)%&
+           &molecule_type_index,donor_list(n_donor)%&
+           &atom_index_list(atom_counter,1)))
+          ENDIF
+         ENDIF
+        ENDIF
+       ENDDO
+       IF (firsttime) THEN
+        WRITE(*,FMT='("     Group #",I0," was empty (check input!).")')group_counter
+       ELSE
+        WRITE(*,'(".")')
+       ENDIF
+      ENDDO
+      IF (.NOT.(grouped_by_elements)) THEN
+       no_ungrouped_atoms=.TRUE.
+       firsttime=.TRUE.
+       DO atom_counter=1,donor_list(n_donor)%N_atoms,1
+        IF (donor_list(n_donor)%atom_index_list(atom_counter,2)>0) THEN
+         !sanity check
+         IF (donor_list(n_donor)%atom_index_list(atom_counter,2)/=&
+         &donor_list(n_donor)%atom_index_list(atom_counter,1)) CALL report_error(0)
+         no_ungrouped_atoms=.FALSE.
+         IF (firsttime) THEN
+          WRITE(*,FMT='("     Atoms not assigned to a group, treated as their own group:")')
+          WRITE(*,ADVANCE="NO",FMT='("       Atom indices ",I0)')&
+          &donor_list(n_donor)%atom_index_list(atom_counter,1)
+          firsttime=.FALSE.
+         ELSE
+          WRITE(*,ADVANCE="NO",FMT='(", ",I0)')&
+          &donor_list(n_donor)%atom_index_list(atom_counter,1)
+         ENDIF
+        ENDIF
+       ENDDO
+       IF (no_ungrouped_atoms) THEN
+        WRITE(*,'("     All atoms of this donor are assigned to a group.")')
+       ELSE
+        WRITE(*,'(".")')
+       ENDIF
+      ENDIF
+     ENDDO
+    END SUBROUTINE showgroups
+
     SUBROUTINE read_acceptors_and_donors()
     IMPLICIT NONE
     INTEGER :: ios,molecule_type_index,atom_index,N_molecule_types,counter
@@ -16500,7 +16850,6 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     !initialise the counters to keep track of everything
     DA_clipboard(:)%molecule_type_index=0
     DA_clipboard(:)%N_atoms=0
-    DA_clipboard(:)%N_groups=0
     N_molecule_types=0
     READ(3,IOSTAT=ios,FMT=*) N_acceptors!read the number of acceptor atoms.
     IF (ios/=0) CALL report_error(155,exit_status=ios)
@@ -16562,6 +16911,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     IF (ALLOCATED(acceptor_list)) CALL report_error(0)
     ALLOCATE(acceptor_list(N_molecule_types),STAT=allocstatus)
     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    bytes_needed=bytes_needed+N_molecule_types*4
     DO n=1,N_molecule_types,1
      acceptor_list(n)%molecule_type_index=DA_clipboard(n)%molecule_type_index
      acceptor_list(n)%N_atoms=DA_clipboard(n)%N_atoms
@@ -16571,9 +16921,11 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      IF (ALLOCATED(acceptor_list(n)%cutoff_list)) CALL report_error(0)
      ALLOCATE(acceptor_list(n)%cutoff_list(acceptor_list(n)%N_atoms),STAT=allocstatus)
      IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     bytes_needed=bytes_needed+acceptor_list(n)%N_atoms+acceptor_list(n)%N_atoms*2
      !initialise
      acceptor_list(n)%atom_index_list(:,:)=0
      acceptor_list(n)%cutoff_list(:)=0.0
+     acceptor_list(n)%N_groups=0
     ENDDO
     REWIND 10
     DO n=1,N_acceptors,1
@@ -16682,6 +17034,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
     IF (ALLOCATED(donor_list)) CALL report_error(0)
     ALLOCATE(donor_list(N_molecule_types),STAT=allocstatus)
     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+    bytes_needed=bytes_needed+N_molecule_types*4
     DO n=1,N_molecule_types,1
      donor_list(n)%molecule_type_index=DA_clipboard(n)%molecule_type_index
      donor_list(n)%N_atoms=DA_clipboard(n)%N_atoms
@@ -16691,9 +17044,11 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      IF (ALLOCATED(donor_list(n)%cutoff_list)) CALL report_error(0)
      ALLOCATE(donor_list(n)%cutoff_list(donor_list(n)%N_atoms),STAT=allocstatus)
      IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+     bytes_needed=bytes_needed+donor_list(n)%N_atoms+donor_list(n)%N_atoms*2
      !initialise
      donor_list(n)%atom_index_list(:,:)=0
      donor_list(n)%cutoff_list(:)=0.0
+     donor_list(n)%N_groups=0
     ENDDO
     REWIND 10
     DO n=1,N_donors,1
@@ -16706,7 +17061,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
        DO atom_counter=1,donor_list(counter)%N_atoms,1
         IF (donor_list(counter)%atom_index_list(atom_counter,1)==0) THEN
          !found an empty spot for the atom index
-         donor_list(counter)%atom_index_list(atom_counter,1)=atom_index
+         donor_list(counter)%atom_index_list(atom_counter,:)=atom_index
          donor_list(counter)%cutoff_list(atom_counter)=cutoff_clip
          atom_index=0
         ENDIF
@@ -16768,15 +17123,33 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    ENDIF
   END SUBROUTINE finalise_speciation
 
-  SUBROUTINE trajectory_speciation_analysis()
+  SUBROUTINE trajectory_speciation_analysis_parallel()
   IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
   INTEGER :: stepcounter,acceptor_molecule_index,n_acceptor,n_donor,donor_indexcounter
   INTEGER :: donor_molecule_index,acceptor_indexcounter,allocstatus,deallocstatus
-  LOGICAL :: new_species_found,existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule
+  LOGICAL :: existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule
   LOGICAL,DIMENSION(:),ALLOCATABLE :: potential_species_match !first dimension goes over all the species
   TYPE(species) :: species_clipboard
   !reset the number of species logged to zero just in case.
   acceptor_list(:)%number_of_logged_species_in_acceptor_list=0
+  !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
+  !$OMP PRIVATE(species_clipboard,potential_species_match,stepcounter,n_acceptor,acceptor_molecule_index)&
+  !$OMP PRIVATE(n_donor,donor_molecule_index,donor_indexcounter,acceptor_indexcounter,neighbour_atom)&
+  !$OMP PRIVATE(existing_species,problematic_occurrence,neighbour_molecule)
+  !$OMP SINGLE
+  !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+  !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (speciation)"
+  !$  CALL timing_parallel_sections(.TRUE.)
+  !$ ENDIF
+  IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+  neighbour_atom_overflow=0
+  species_overflow=0
+  !$OMP END SINGLE
   !allocate memory for species clipboard
   IF (ALLOCATED(species_clipboard%connection)) CALL report_error(0)
   ALLOCATE(species_clipboard%connection(maximum_number_of_connections),STAT=allocstatus)
@@ -16794,12 +17167,11 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   IF (ALLOCATED(potential_species_match)) CALL report_error(0)
   ALLOCATE(potential_species_match(maximum_number_of_species),STAT=allocstatus)
   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-  neighbour_atom_overflow=0
-  species_overflow=0
   !Iterate over all acceptors.
-  DO n_acceptor=1,N_acceptor_types,1
-   !average over timesteps, a few should be enough.
-   DO stepcounter=1,nsteps,sampling_interval
+  !average over timesteps, a few should be enough.
+  !$OMP DO SCHEDULE(STATIC,1)
+  DO stepcounter=1,nsteps,sampling_interval
+   DO n_acceptor=1,N_acceptor_types,1
     !per ACCEPTOR molecule index, go over all its atoms and check if there are neighbour contributions.
     DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
      !everything inside THIS loop counts as neighbours towards one species!
@@ -16844,7 +17216,9 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
           !smaller than cutoff!!!
           IF (species_clipboard%number_of_logged_connections_in_species_list==maximum_number_of_connections) THEN
           !overflow
+          !$OMP CRITICAL(overflow_updates)
           neighbour_atom_overflow=neighbour_atom_overflow+1
+          !$OMP END CRITICAL(overflow_updates)
           ELSE
            neighbour_atom=.TRUE.
            species_clipboard%number_of_logged_connections_in_species_list=&
@@ -16885,54 +17259,15 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
       species_clipboard%last_occurrence=species_clipboard%connection
       species_clipboard%last_occurrence_acceptorindices(1)=n_acceptor
       species_clipboard%last_occurrence_acceptorindices(2)=acceptor_molecule_index
-      !First we need to make sure that atoms that are considered identical sites are treated as such.
-      !This needs to be called here already, it is necessary in ANY case, regardless whether new species or not.
-      !collapse_and_sort_atom_indices also assigns neighbour_molecule_starting_indices
-      CALL collapse_and_sort_atom_indices()
-      !Now to find out if this species already exists in the list.
-      !There are many possible different cases and conditions, and I will use a jump to skip the ones which are not necessary.
-      !I think in this case, the jump command is better and more easily understood than 1000 nestled if-then-else
-      !Very first case: species list is empty. need to add.
-      IF (acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list==0) THEN
-       new_species_found=.TRUE.
-       GOTO 60
-      ELSE
-       !There is already at least one entry - we now need to find out if there is an identical species already
-       new_species_found=.FALSE.
-      ENDIF
-      !The rest is really not trivial. We will use a list of potential matches, and eliminate them one after one.
-      potential_species_match(1:acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list)=.TRUE.
-      !This is the first rough check we can do - check if species have the same number of connections, number of neighbour atoms, number of neighbour molecules
-      CALL eliminate_number_mismatches()
-      !If there are no potential species matches left, then this is a new one!
-      IF (.NOT.(ANY(&
-      &potential_species_match(1:acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list)&
-      &))) THEN
-       new_species_found=.TRUE.
-       GOTO 60
-      ENDIF
-      !We now need to check all the molecules one by one,
-      !and also check if the atoms which are involved in these connections are the same.
-      !Molecule indices do not matter, so we need to check for permutations...
-      CALL eliminate_connection_mismatches()
-      !If there are no potential species matches left, then this is a new one!
-      IF (.NOT.(ANY(&
-      &potential_species_match(1:acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list)&
-      &))) THEN
-       new_species_found=.TRUE.
-       GOTO 60
-      ENDIF
-     60 IF (new_species_found) THEN
-       CALL append_species()
-      ELSE
-       IF (COUNT(potential_species_match(1:acceptor_list(n_acceptor)%&
-       &number_of_logged_species_in_acceptor_list))>1) CALL report_error(0)
-       CALL add_to_species()
-      ENDIF
+      !$OMP CRITICAL(acceptor_list_access)
+      CALL add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor,stepcounter)
+      !$OMP END CRITICAL(acceptor_list_access)
      ENDIF
     ENDDO
    ENDDO
+   IF (VERBOSE_OUTPUT) CALL print_progress()
   ENDDO
+  !$OMP END DO
   IF (ALLOCATED(species_clipboard%connection)) THEN
    DEALLOCATE(species_clipboard%connection,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
@@ -16958,14 +17293,301 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
   ELSE
    CALL report_error(0)
   ENDIF
+  !$OMP END PARALLEL
+  IF (((MAX((nsteps-1+sampling_interval)/sampling_interval,0))>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+  !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+  !$  WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
+  !$  CALL timing_parallel_sections(.FALSE.)
+  !$ ENDIF
+  END SUBROUTINE trajectory_speciation_analysis_parallel
+
+  SUBROUTINE add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor_in,stepcounter_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: n_acceptor_in,stepcounter_in
+  TYPE(species),INTENT(INOUT) :: species_clipboard
+  LOGICAL,DIMENSION(*),INTENT(INOUT) :: potential_species_match
+  LOGICAL :: new_species_found
+   !First we need to make sure that atoms that are considered identical sites are treated as such.
+   !This needs to be called here already, it is necessary in ANY case, regardless whether new species or not.
+   !collapse_and_sort_atom_indices also assigns neighbour_molecule_starting_indices
+   CALL collapse_and_sort_atom_indices(species_clipboard,n_acceptor_in)
+   !Now to find out if this species already exists in the list.
+   !There are many possible different cases and conditions, and I will use a jump to skip the ones which are not necessary.
+   !I think in this case, the jump command is better and more easily understood than 1000 nestled if-then-else
+   !Very first case: species list is empty. need to add.
+   IF (acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list==0) THEN
+    new_species_found=.TRUE.
+    GOTO 60
+   ELSE
+    !There is already at least one entry - we now need to find out if there is an identical species already
+    new_species_found=.FALSE.
+   ENDIF
+   !The rest is really not trivial. We will use a list of potential matches, and eliminate them one after one.
+   potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)=.TRUE.
+   !This is the first rough check we can do - check if species have the same number of connections, number of neighbour atoms, number of neighbour molecules
+   CALL eliminate_number_mismatches()
+   !If there are no potential species matches left, then this is a new one!
+   IF (.NOT.(ANY(&
+   &potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)&
+   &))) THEN
+    new_species_found=.TRUE.
+    GOTO 60
+   ENDIF
+   !We now need to check all the molecules one by one,
+   !and also check if the atoms which are involved in these connections are the same.
+   !Molecule indices do not matter, so we need to check for permutations...
+   CALL eliminate_connection_mismatches()
+   !If there are no potential species matches left, then this is a new one!
+   IF (.NOT.(ANY(&
+   &potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)&
+   &))) THEN
+    new_species_found=.TRUE.
+    GOTO 60
+   ENDIF
+  60 IF (new_species_found) THEN
+    CALL append_species()
+   ELSE
+    IF (COUNT(potential_species_match(1:acceptor_list(n_acceptor_in)%&
+    &number_of_logged_species_in_acceptor_list))>1) CALL report_error(0)
+    CALL add_to_species()
+   ENDIF
 
   CONTAINS
 
-   SUBROUTINE collapse_and_sort_atom_indices()
+   SUBROUTINE eliminate_connection_mismatches()
+   IMPLICIT NONE
+   INTEGER :: species_counter,clipboard_molecules,reference_species_molecules
+   INTEGER :: connections_firstindex_ref,extra_atom_entries_ref
+   INTEGER :: connections_firstindex_clip,extra_atom_entries_clip
+   INTEGER :: connection_counter
+   LOGICAL :: molecule_mismatch,successful_species_match
+loop_species:  DO species_counter=1,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
+     successful_species_match=.FALSE.
+     !only check potential matches, of course.
+     IF (.NOT.(potential_species_match(species_counter))) CYCLE loop_species
+     !Now, we need to check the possible permutations of clipboard and the current entry in the list_of_all_species
+     ! initialise the "lists to keep track" of pairs which are ok
+     species_clipboard%neighbour_molecule_starting_indices(1:species_clipboard%&
+     &total_number_of_neighbour_molecules)%unmatched_entry=.TRUE.
+     acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+     &neighbour_molecule_starting_indices(1:acceptor_list(n_acceptor_in)%&
+     &list_of_all_species(species_counter)%total_number_of_neighbour_molecules)%unmatched_entry=.TRUE.
+loop_clipboard:  DO clipboard_molecules=1,species_clipboard%total_number_of_neighbour_molecules
+      IF (.NOT.(species_clipboard%neighbour_molecule_starting_indices(clipboard_molecules)%unmatched_entry)) CYCLE loop_clipboard
+      !the number of molecules should be the same-This has been checked before by eliminate_number_mismatches
+loop_reference:   DO reference_species_molecules=1,species_clipboard%total_number_of_neighbour_molecules
+       IF ((.NOT.(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+       &neighbour_molecule_starting_indices(reference_species_molecules)%unmatched_entry)).OR.&
+       &(.NOT.(species_clipboard%neighbour_molecule_starting_indices(clipboard_molecules)%unmatched_entry))) CYCLE loop_reference
+       !At this point, we have selected two pairs of molecules, one from the clipboard and one from the reference.
+       !The idea is the following:
+       ! 1) we assume that they are the same, i.e. that there is no mismatche.
+       ! 2) we check all the connections.
+       ! 3) if there is ANY connection which differs in ANY of the indices 1/3/4, then they are NOT the same.
+       ! 4) if they are still the same after checking all connections (in other words, no mismatches were found),
+       ! 5) then we set the unmatched_entry of this pair to .FALSE. in both "lists to keept track"
+       molecule_mismatch=.FALSE. ! step 1)
+       !get the first indices of the respective molecules
+       connections_firstindex_ref=acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)&
+       &%neighbour_molecule_starting_indices(reference_species_molecules)%first_index_in_connection_list
+       connections_firstindex_clip=species_clipboard%neighbour_molecule_starting_indices&
+       &(clipboard_molecules)%first_index_in_connection_list
+       extra_atom_entries_ref=acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+       &neighbour_molecule_starting_indices(reference_species_molecules)%&
+       &extra_atom_entries_in_connection_list
+       extra_atom_entries_clip=species_clipboard%neighbour_molecule_starting_indices&
+       &(clipboard_molecules)%extra_atom_entries_in_connection_list
+       !can only be the same if they have the same number of connections
+       IF (extra_atom_entries_clip/=extra_atom_entries_ref) THEN
+        molecule_mismatch=.TRUE.
+       ELSE
+loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2) 
+         !The two molecules we want to compare have the same number of connection entries,
+         !But they differ in their starting position. connection_counter is the shift from that starting position.
+         IF ((acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+          &connection(connection_counter+connections_firstindex_ref)%indices(1)&
+          &/=&
+          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
+          &%indices(1))&
+          &.OR.&
+          &(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+          &connection(connection_counter+connections_firstindex_ref)%indices(3)&
+          &/=&
+          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
+          &%indices(3))&
+          &.OR.&
+          &(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+          &connection(connection_counter+connections_firstindex_ref)%indices(4)&
+          &/=&
+          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
+          &%indices(4))) THEN
+           molecule_mismatch=.TRUE.
+           EXIT loop_connections
+          ENDIF
+        ENDDO loop_connections
+       ENDIF
+       ! step 4)
+       IF (.NOT.(molecule_mismatch)) THEN
+        ! step 5) The pair was a match! remove this pair from the two lists.
+        species_clipboard%neighbour_molecule_starting_indices(clipboard_molecules)%unmatched_entry=.FALSE.
+        acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+        &neighbour_molecule_starting_indices(reference_species_molecules)%unmatched_entry=.FALSE.
+        IF ((.NOT.(ANY(species_clipboard%neighbour_molecule_starting_indices(1:species_clipboard%&
+        &total_number_of_neighbour_molecules)%unmatched_entry))).AND.&
+        &(.NOT.(ANY(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+        &neighbour_molecule_starting_indices(1:acceptor_list(n_acceptor_in)%&
+        &list_of_all_species(species_counter)%total_number_of_neighbour_molecules)%unmatched_entry)))) THEN
+         !All have been matched!
+         successful_species_match=.TRUE.
+         EXIT loop_clipboard
+        ENDIF
+       ENDIF
+      ENDDO loop_reference
+     ENDDO loop_clipboard
+     potential_species_match(species_counter)=successful_species_match
+    ENDDO loop_species
+   END SUBROUTINE eliminate_connection_mismatches
+
+   SUBROUTINE eliminate_number_mismatches()
+   IMPLICIT NONE
+   INTEGER :: species_counter
+!This can be replaced by a fancy "WHERE" statement! do this last when I have a working routine with all parts so I can compare performance...
+    !We do not need an initial check of potential_species_match because this subroutine is called first, after the initialisation of potential_species_match
+    DO species_counter=1,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
+     IF ((species_clipboard%number_of_logged_connections_in_species_list)/=&
+     &(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+     &number_of_logged_connections_in_species_list)) THEN
+      potential_species_match(species_counter)=.FALSE.
+     ELSE
+      IF ((species_clipboard%total_number_of_neighbour_atoms)/=&
+      &(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+      &total_number_of_neighbour_atoms)) THEN
+       potential_species_match(species_counter)=.FALSE.
+      ELSE
+       IF ((species_clipboard%total_number_of_neighbour_molecules)/=&
+       &(acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+       &total_number_of_neighbour_molecules)) THEN
+        potential_species_match(species_counter)=.FALSE.
+       ENDIF
+      ENDIF
+     ENDIF
+    ENDDO
+   END SUBROUTINE eliminate_number_mismatches
+
+   SUBROUTINE append_species()!appends the contents of the clipboard to the actual list
+   IMPLICIT NONE
+    !check for overflow
+    IF (acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list<maximum_number_of_species) THEN
+     acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list=&
+     &acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list+1
+     !append the new species to the list!
+     !transfer the connections and their count
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%number_of_logged_connections_in_species_list=&
+     &species_clipboard%number_of_logged_connections_in_species_list
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%connection=&
+     &species_clipboard%connection
+     !initialise (problematic) occurrences
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%problematic_occurrences=0
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%occurrences=1
+     !initialise the last/first occurrence - stepcounter
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%timestep_last_occurrence=stepcounter_in
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%timestep_first_occurrence=stepcounter_in
+     !initialise the last/first occurrence - indices of the acceptor
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%last_occurrence_acceptorindices(:)=&
+     &species_clipboard%last_occurrence_acceptorindices
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%first_occurrence_acceptorindices(:)=&
+     &species_clipboard%last_occurrence_acceptorindices
+     !transfer the last_occurrence
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%first_occurrence=species_clipboard%last_occurrence
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%last_occurrence=species_clipboard%last_occurrence
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%total_number_of_neighbour_atoms=&
+     &species_clipboard%total_number_of_neighbour_atoms
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%total_number_of_neighbour_molecules&
+     &=species_clipboard%total_number_of_neighbour_molecules
+     !update the starting indices
+     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
+     &number_of_logged_species_in_acceptor_list)%neighbour_molecule_starting_indices=&
+     &species_clipboard%neighbour_molecule_starting_indices
+    ELSE
+     species_overflow=species_overflow+1
+    ENDIF
+   END SUBROUTINE append_species
+
+   SUBROUTINE add_to_species()!appends the contents of the clipboard to the actual list
+   IMPLICIT NONE
+   INTEGER :: species_counter,connection_counter,problematic
+    DO species_counter=1,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
+     IF (potential_species_match(species_counter)) THEN
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%occurrences=&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%occurrences+1
+      !a problematic_occurrence is one where the molecule indices are the same, including the acceptor molecule index.
+      problematic=+1
+      IF (acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(2)==&
+      &species_clipboard%last_occurrence_acceptorindices(2)) THEN
+       inner: DO connection_counter=1,acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+        &number_of_logged_connections_in_species_list,1
+        IF(species_clipboard%connection(connection_counter)%indices(2)/=&
+        &acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
+        &last_occurrence(connection_counter)%indices(2)) THEN
+         problematic=-1
+         EXIT inner
+        ENDIF
+       ENDDO inner
+      ENDIF
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%problematic_occurrences=&
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%problematic_occurrences+problematic
+      !update the last occurrence - indices of the acceptor
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%timestep_last_occurrence=stepcounter_in
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(:)=&
+      &species_clipboard%last_occurrence_acceptorindices
+      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%last_occurrence=species_clipboard%last_occurrence
+     ENDIF
+    ENDDO
+   END SUBROUTINE add_to_species
+
+   !The following subroutine sorts connections_inout in ascending order from firstindex to lastindex.
+   !Here, the entry in position sorting_level is used for comparison.
+   SUBROUTINE sort_connections(connections_inout,sorting_level,firstindex,lastindex)
+   IMPLICIT NONE
+   TYPE(connections),DIMENSION(*),INTENT(INOUT) :: connections_inout
+   INTEGER,INTENT(IN) :: sorting_level,firstindex,lastindex
+   TYPE(connections) :: sorting_clipboard
+   INTEGER :: i,j
+    !Now, we need to sort the elements from "firstindex" to "lastindex"
+    !I chose insertionsort over quicksort for stability
+    DO i=firstindex+1,lastindex,1
+     !might be worth using just the indices here?
+     sorting_clipboard=connections_inout(i)
+     j=i
+     DO WHILE ((j>firstindex).AND.&
+     &(connections_inout(j-1)%indices(sorting_level)>&
+     &sorting_clipboard%indices(sorting_level)))
+      connections_inout(j)=connections_inout(j-1)
+      j=j-1
+     ENDDO
+     connections_inout(j)=sorting_clipboard
+    ENDDO
+   END SUBROUTINE sort_connections
+
+   SUBROUTINE collapse_and_sort_atom_indices(species_clipboard,n_acceptor_in)
    IMPLICIT NONE
    INTEGER :: current_donor_type,current_donor_molecule_index,connections_firstindex,connections_lastindex
    INTEGER :: current_donor_atom,atoms_firstindex,atoms_lastindex,molecule_counter
-   INTEGER :: connection_counter,connection_counter_atoms,species_counter
+   INTEGER :: connection_counter,connection_counter_atoms
+   INTEGER,INTENT(IN) :: n_acceptor_in
+   TYPE(species),INTENT(INOUT) :: species_clipboard
     !initialise neighbour_molecule_starting_indices
     species_clipboard%neighbour_molecule_starting_indices(:)%first_index_in_connection_list=0
     species_clipboard%neighbour_molecule_starting_indices(:)%extra_atom_entries_in_connection_list=0
@@ -16978,7 +17600,7 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
      &donor_list(species_clipboard%connection(connection_counter)%indices(1))%&
      &atom_index_list(species_clipboard%connection(connection_counter)%indices(3),2)
      species_clipboard%connection(connection_counter)%indices(4)=&
-     &acceptor_list(n_acceptor)%&
+     &acceptor_list(n_acceptor_in)%&
      &atom_index_list(species_clipboard%connection(connection_counter)%indices(4),2)
     ENDDO
     !Now, the atom indices should be converted to atom groups. let's sort them.
@@ -17049,234 +17671,7 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
     CALL sort_connections(species_clipboard%connection(:),4,atoms_firstindex,atoms_lastindex)
    END SUBROUTINE collapse_and_sort_atom_indices
 
-   SUBROUTINE eliminate_connection_mismatches()
-   IMPLICIT NONE
-   INTEGER :: species_counter,clipboard_molecules,reference_species_molecules
-   INTEGER :: connections_firstindex_ref,extra_atom_entries_ref
-   INTEGER :: connections_firstindex_clip,extra_atom_entries_clip
-   INTEGER :: connection_counter
-   LOGICAL :: molecule_mismatch,successful_species_match
-loop_species:  DO species_counter=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
-     successful_species_match=.FALSE.
-     !only check potential matches, of course.
-     IF (.NOT.(potential_species_match(species_counter))) CYCLE loop_species
-     !Now, we need to check the possible permutations of clipboard and the current entry in the list_of_all_species
-     ! initialise the "lists to keep track" of pairs which are ok
-     species_clipboard%neighbour_molecule_starting_indices(1:species_clipboard%&
-     &total_number_of_neighbour_molecules)%unmatched_entry=.TRUE.
-     acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-     &neighbour_molecule_starting_indices(1:acceptor_list(n_acceptor)%&
-     &list_of_all_species(species_counter)%total_number_of_neighbour_molecules)%unmatched_entry=.TRUE.
-loop_clipboard:  DO clipboard_molecules=1,species_clipboard%total_number_of_neighbour_molecules
-      IF (.NOT.(species_clipboard%neighbour_molecule_starting_indices(clipboard_molecules)%unmatched_entry)) CYCLE
-      !the number of molecules should be the same-This has been checked before by eliminate_number_mismatches
-      DO reference_species_molecules=1,species_clipboard%total_number_of_neighbour_molecules
-       IF (.NOT.(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-       &neighbour_molecule_starting_indices(reference_species_molecules)%unmatched_entry)) CYCLE
-       !At this point, we have selected two pairs of molecules, one from the clipboard and one from the reference.
-       !The idea is the following:
-       ! 1) we assume that they are the same, i.e. that there is no mismatche.
-       ! 2) we check all the connections.
-       ! 3) if there is ANY connection which differs in ANY of the indices 1/3/4, then they are NOT the same.
-       ! 4) if they are still the same after checking all connections (in other words, no mismatches were found),
-       ! 5) then we set the unmatched_entry of this pair to .FALSE. in both "lists to keept track"
-       molecule_mismatch=.FALSE. ! step 1)
-       !get the first indices of the respective molecules
-       connections_firstindex_ref=acceptor_list(n_acceptor)%list_of_all_species(species_counter)&
-       &%neighbour_molecule_starting_indices(reference_species_molecules)%first_index_in_connection_list
-       connections_firstindex_clip=species_clipboard%neighbour_molecule_starting_indices&
-       &(clipboard_molecules)%first_index_in_connection_list
-       extra_atom_entries_ref=acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-       &neighbour_molecule_starting_indices(reference_species_molecules)%&
-       &extra_atom_entries_in_connection_list
-       extra_atom_entries_clip=species_clipboard%neighbour_molecule_starting_indices&
-       &(clipboard_molecules)%extra_atom_entries_in_connection_list
-       !can only be the same if they have the same number of connections
-       IF (extra_atom_entries_clip/=extra_atom_entries_ref) THEN
-        molecule_mismatch=.TRUE.
-       ELSE
-loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2) 
-         !The two molecules we want to compare have the same number of connection entries,
-         !But they differ in their starting position. connection_counter is the shift from that starting position.
-         IF ((acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-          &connection(connection_counter+connections_firstindex_ref)%indices(1)&
-          &/=&
-          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
-          &%indices(1))&
-          &.OR.&
-          &(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-          &connection(connection_counter+connections_firstindex_ref)%indices(3)&
-          &/=&
-          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
-          &%indices(3))&
-          &.OR.&
-          &(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-          &connection(connection_counter+connections_firstindex_ref)%indices(4)&
-          &/=&
-          &species_clipboard%connection(connection_counter+connections_firstindex_clip)&
-          &%indices(4))) THEN
-           molecule_mismatch=.TRUE.
-           EXIT loop_connections
-          ENDIF
-        ENDDO loop_connections
-       ENDIF
-       ! step 4)
-       IF (.NOT.(molecule_mismatch)) THEN
-        ! step 5) The pair was a match! remove this pair from the two lists.
-        species_clipboard%neighbour_molecule_starting_indices(clipboard_molecules)%unmatched_entry=.FALSE.
-        acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-        &neighbour_molecule_starting_indices(reference_species_molecules)%unmatched_entry=.FALSE.
-        IF ((.NOT.(ANY(species_clipboard%neighbour_molecule_starting_indices(1:species_clipboard%&
-        &total_number_of_neighbour_molecules)%unmatched_entry))).AND.&
-        &(.NOT.(ANY(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-        &neighbour_molecule_starting_indices(1:acceptor_list(n_acceptor)%&
-        &list_of_all_species(species_counter)%total_number_of_neighbour_molecules)%unmatched_entry)))) THEN
-         !All have been matched!
-         successful_species_match=.TRUE.
-         EXIT loop_clipboard
-        ENDIF
-       ENDIF
-      ENDDO
-     ENDDO loop_clipboard
-     potential_species_match(species_counter)=successful_species_match
-    ENDDO loop_species
-   END SUBROUTINE eliminate_connection_mismatches
-
-
-   SUBROUTINE eliminate_number_mismatches()
-   IMPLICIT NONE
-   INTEGER :: species_counter
-!This can be replaced by a fancy "WHERE" statement! do this last when I have a working routine with all parts so I can compare performance...
-    !We do not need an initial check of potential_species_match because this subroutine is called first, after the initialisation of potential_species_match
-    DO species_counter=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
-     IF ((species_clipboard%number_of_logged_connections_in_species_list)/=&
-     &(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-     &number_of_logged_connections_in_species_list)) THEN
-      potential_species_match(species_counter)=.FALSE.
-     ELSE
-      IF ((species_clipboard%total_number_of_neighbour_atoms)/=&
-      &(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-      &total_number_of_neighbour_atoms)) THEN
-       potential_species_match(species_counter)=.FALSE.
-      ELSE
-       IF ((species_clipboard%total_number_of_neighbour_molecules)/=&
-       &(acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-       &total_number_of_neighbour_molecules)) THEN
-        potential_species_match(species_counter)=.FALSE.
-       ENDIF
-      ENDIF
-     ENDIF
-    ENDDO
-   END SUBROUTINE eliminate_number_mismatches
-
-   !The following subroutine sorts connections_inout in ascending order from firstindex to lastindex.
-   !Here, the entry in position sorting_level is used for comparison.
-   SUBROUTINE sort_connections(connections_inout,sorting_level,firstindex,lastindex)
-   IMPLICIT NONE
-   TYPE(connections),DIMENSION(*),INTENT(INOUT) :: connections_inout
-   INTEGER,INTENT(IN) :: sorting_level,firstindex,lastindex
-   TYPE(connections) :: sorting_clipboard
-   INTEGER :: i,j
-    !Now, we need to sort the elements from "firstindex" to "lastindex"
-    !I chose insertionsort over quicksort for stability
-    DO i=firstindex+1,lastindex,1
-     !might be worth using just the indices here?
-     sorting_clipboard=connections_inout(i)
-     j=i
-     DO WHILE ((j>firstindex).AND.&
-     &(connections_inout(j-1)%indices(sorting_level)>&
-     &sorting_clipboard%indices(sorting_level)))
-      connections_inout(j)=connections_inout(j-1)
-      j=j-1
-     ENDDO
-     connections_inout(j)=sorting_clipboard
-    ENDDO
-   END SUBROUTINE sort_connections
-
-   SUBROUTINE append_species()!appends the contents of the clipboard to the actual list
-   IMPLICIT NONE
-    !check for overflow
-    IF (acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list<maximum_number_of_species) THEN
-     acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list=&
-     &acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list+1
-     !append the new species to the list!
-     !transfer the connections and their count
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%number_of_logged_connections_in_species_list=&
-     &species_clipboard%number_of_logged_connections_in_species_list
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%connection=&
-     &species_clipboard%connection
-     !initialise (problematic) occurrences
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%problematic_occurrences=0
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%occurrences=1
-     !initialise the last/first occurrence - stepcounter
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%timestep_last_occurrence=stepcounter
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%timestep_first_occurrence=stepcounter
-     !initialise the last/first occurrence - indices of the acceptor
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%last_occurrence_acceptorindices(:)=&
-     &species_clipboard%last_occurrence_acceptorindices
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%first_occurrence_acceptorindices(:)=&
-     &species_clipboard%last_occurrence_acceptorindices
-     !transfer the last_occurrence
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%first_occurrence=species_clipboard%last_occurrence
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%last_occurrence=species_clipboard%last_occurrence
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%total_number_of_neighbour_atoms=&
-     &species_clipboard%total_number_of_neighbour_atoms
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%total_number_of_neighbour_molecules&
-     &=species_clipboard%total_number_of_neighbour_molecules
-     !update the starting indices
-     acceptor_list(n_acceptor)%list_of_all_species(acceptor_list(n_acceptor)%&
-     &number_of_logged_species_in_acceptor_list)%neighbour_molecule_starting_indices=&
-     &species_clipboard%neighbour_molecule_starting_indices
-    ELSE
-     species_overflow=species_overflow+1
-    ENDIF
-   END SUBROUTINE append_species
-
-   SUBROUTINE add_to_species()!appends the contents of the clipboard to the actual list
-   IMPLICIT NONE
-   INTEGER :: species_counter,connection_counter,problematic
-    DO species_counter=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
-     IF (potential_species_match(species_counter)) THEN
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%occurrences=&
-      &acceptor_list(n_acceptor)%list_of_all_species(species_counter)%occurrences+1
-      !a problematic_occurrence is one where the molecule indices are the same, including the acceptor molecule index.
-      problematic=+1
-      IF (acceptor_list(n_acceptor)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(2)==&
-      &species_clipboard%last_occurrence_acceptorindices(2)) THEN
-       inner: DO connection_counter=1,acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-        &number_of_logged_connections_in_species_list,1
-        IF(species_clipboard%connection(connection_counter)%indices(2)/=&
-        &acceptor_list(n_acceptor)%list_of_all_species(species_counter)%&
-        &last_occurrence(connection_counter)%indices(2)) THEN
-         problematic=-1
-         EXIT inner
-        ENDIF
-       ENDDO inner
-      ENDIF
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%problematic_occurrences=&
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%problematic_occurrences+problematic
-      !update the last occurrence - indices of the acceptor
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%timestep_last_occurrence=stepcounter
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(:)=&
-      &species_clipboard%last_occurrence_acceptorindices
-      acceptor_list(n_acceptor)%list_of_all_species(species_counter)%last_occurrence=species_clipboard%last_occurrence
-     ENDIF
-    ENDDO
-   END SUBROUTINE add_to_species
-
-  END SUBROUTINE trajectory_speciation_analysis
+  END SUBROUTINE add_clipboard_to_list
 
   SUBROUTINE report_species()
   IMPLICIT NONE
@@ -17294,525 +17689,628 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
     ENDDO
    ENDIF
 
-  CONTAINS
+  END SUBROUTINE report_species
 
-   SUBROUTINE print_acceptor_summary(n_acceptor_in)
-   IMPLICIT NONE
-   INTEGER,INTENT(IN) :: n_acceptor_in
-   INTEGER :: entry_counter,allocstatus,deallocstatus,best_index,species_output_counter
-   INTEGER :: n_donor,neighbour_entry_count,i,previous_donor_molecule,donor_type_counter,m
-   INTEGER :: species_atomcount,ios,atom_counter,species_charge,group_number,connection_counter,N_beads,N_beads_total
-   INTEGER :: acceptorgroup,donorgroup,connections_firstindex,extra_atom_entries,species_molecules
-   LOGICAL :: connected
-   REAL :: total_occurrence,best_value,distance,species_realcharge,base_atom(3),tip_atom(3),connection_vector(3),beadspan
-   REAL,PARAMETER :: bead_clearance=0.5,bead_distance=0.4
-   REAL(KIND=WORKING_PRECISION) :: acceptor_centre(3),shift(3)
-   REAL,DIMENSION(:),ALLOCATABLE :: occurrences
-   CHARACTER(LEN=1024) :: filename_speciation_output
-   CHARACTER(LEN=1024) :: filename_speciation_statistics
-   CHARACTER(LEN=1024) :: species_output_header
-   CHARACTER(LEN=2) :: element_name
-    WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-    &//"acceptor",n_acceptor_in,"_speciation_statistics.dat"
-    OPEN(UNIT=4,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
-    IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(4,'(" This file contains speciation statistics for acceptors coordinated by donors.")')
-    IF (acceptor_list(n_acceptor_in)%N_atoms==1) THEN
-     WRITE(4,'(" Atom ",I0," (",A,") of molecule type ",I0," (",A,") was the acceptor.")')&
-     &acceptor_list(n_acceptor_in)%atom_index_list(1,1),&
-     &give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
-     &acceptor_list(n_acceptor_in)%atom_index_list(1,1)),&
+  SUBROUTINE print_acceptor_summary(n_acceptor_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: n_acceptor_in
+  INTEGER :: entry_counter,allocstatus,deallocstatus,best_index,species_output_counter
+  INTEGER :: neighbour_entry_count,i,previous_donor_molecule,donor_type_counter,m
+  INTEGER :: species_atomcount,ios,atom_counter,species_charge,group_number,connection_counter,N_beads,N_beads_total
+  INTEGER :: acceptorgroup,donorgroup,connections_firstindex,extra_atom_entries,species_molecules
+  LOGICAL :: connected,no_ungrouped_atoms,firsttime
+  REAL :: total_occurrence,best_value,distance,species_realcharge,base_atom(3),tip_atom(3),connection_vector(3),beadspan
+  REAL,PARAMETER :: bead_clearance=0.5,bead_distance=0.4
+  REAL(KIND=WORKING_PRECISION) :: acceptor_centre(3),shift(3)
+  REAL,DIMENSION(:),ALLOCATABLE :: occurrences
+  CHARACTER(LEN=1024) :: filename_speciation_output
+  CHARACTER(LEN=1024) :: filename_speciation_statistics
+  CHARACTER(LEN=1024) :: species_output_header
+  CHARACTER(LEN=2) :: element_name
+   WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+   &//"acceptor",n_acceptor_in,"_speciation_statistics.dat"
+   OPEN(UNIT=4,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
+   IF (ios/=0) CALL report_error(26,exit_status=ios)
+   WRITE(4,'(" This file contains speciation statistics for acceptors coordinated by donors.")')
+   IF (acceptor_list(n_acceptor_in)%N_atoms==1) THEN
+    WRITE(4,'(" This acceptor was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
+    &acceptor_list(n_acceptor_in)%atom_index_list(1,1),&
+    &give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &acceptor_list(n_acceptor_in)%atom_index_list(1,1)),&
+    &acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+   ELSE
+    IF (atoms_grouped) THEN
+     WRITE(4,'(" Molecule type ",I0," (",A,") was the acceptor.")')&
      &acceptor_list(n_acceptor_in)%molecule_type_index,&
      &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
-    ELSE
-     IF (atoms_grouped) THEN
-      WRITE(4,'(" Molecule type ",I0," (",A,") was the acceptor, with the following atom groups:")')&
-      &acceptor_list(n_acceptor_in)%molecule_type_index,&
-      &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
-      DO group_number=1,acceptor_list(n_acceptor_in)%N_groups,1
-       WRITE(4,ADVANCE="NO",FMT='("      Group #",I0,", atom indices")')group_number
-       DO i=1,acceptor_list(n_acceptor_in)%N_atoms,1
-        IF (group_number==-acceptor_list(n_acceptor_in)%atom_index_list(i,2)) THEN
-         WRITE(4,ADVANCE="NO",FMT='(" ",I0,"(",A,")")')&
+     IF (acceptor_list(n_acceptor_in)%N_groups==0) THEN
+      WRITE(4,FMT='("   This acceptor (#",I0,") has no custom groups defined.")')n_acceptor_in
+     ELSE
+      WRITE(4, FMT='("   Groups for this acceptor (#",I0,"):")') n_acceptor_in
+     ENDIF
+     DO group_number=1,acceptor_list(n_acceptor_in)%N_groups,1
+      no_ungrouped_atoms=.TRUE.
+      firsttime=.TRUE.
+      DO i=1,acceptor_list(n_acceptor_in)%N_atoms,1
+       IF (group_number==-acceptor_list(n_acceptor_in)%atom_index_list(i,2)) THEN
+        IF (firsttime) THEN
+         firsttime=.FALSE.
+         WRITE(4,ADVANCE="NO",FMT='("     Group #",I0,", atom indices ",I0,"(",A,")")')&
+         &group_number,acceptor_list(n_acceptor_in)%atom_index_list(i,1),&
+         &TRIM(give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
+         &acceptor_list(n_acceptor_in)%atom_index_list(i,1)))
+        ELSE
+         WRITE(4,ADVANCE="NO",FMT='(", ",I0,"(",A,")")')&
          &acceptor_list(n_acceptor_in)%atom_index_list(i,1),&
          &TRIM(give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
          &acceptor_list(n_acceptor_in)%atom_index_list(i,1)))
         ENDIF
-       ENDDO
-       WRITE(4,*)
+       ENDIF
       ENDDO
-     ELSE
-      WRITE(4,'(" Molecule type ",I0," (",A,") was the acceptor, with the following atom indices:")')&
-      &acceptor_list(n_acceptor_in)%molecule_type_index,&
-      &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
-      DO i=1,acceptor_list(n_acceptor_in)%N_atoms,1
-       WRITE(4,FMT='("      Atom index ",I0," (",A,")")')&
-       &acceptor_list(n_acceptor_in)%atom_index_list(i,1),&
-       &TRIM(give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%atom_index_list(i,1)))
-      ENDDO
-     ENDIF
-    ENDIF
-    WRITE(4,'(" The donor molecule types and atom types are given at the bottom.")')
-    WRITE(4,'(" For this acceptor, ",I0," different species were observed,")')&
-    &acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list
-    WRITE(4,'(" Which are now given in order of decreasing probability:")')
-    IF (ALLOCATED(occurrences)) CALL report_error(0)
-    ALLOCATE(occurrences(acceptor_list(n_acceptor_in)%&
-    &Number_of_logged_species_in_acceptor_list),STAT=allocstatus)
-    IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
-    WRITE(*,'("molecule type ",I0," (",A,").")')&
-    &acceptor_list(n_acceptor_in)%molecule_type_index,&
-    &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
-    WRITE(*,'("   For this acceptor, ",I0," different species were observed:")')&
-    &acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list
-    total_occurrence=0.0
-    DO entry_counter=1,acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list,1
-     occurrences(entry_counter)=FLOAT(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(entry_counter)%occurrences)
-     total_occurrence=total_occurrence+occurrences(entry_counter)
-    ENDDO
-    total_occurrence=total_occurrence+FLOAT(species_overflow)
-    !Now, print species in order of decreasing occurrence
-    !I am going to brute force this since I do not want to sort them.
-    species_output_counter=0
-    DO WHILE (ANY(occurrences(:)>0.0))
-     !There is an unused entry left!
-     species_output_counter=species_output_counter+1
-     !laboriously pick out the best one and report it
-     best_index=1
-     best_value=0.0
-     DO entry_counter=1,acceptor_list(n_acceptor_in)%&
-     &Number_of_logged_species_in_acceptor_list,1
-      IF (occurrences(entry_counter)>best_value) THEN
-       best_value=occurrences(entry_counter)
-       best_index=entry_counter
+      IF (firsttime) THEN
+       WRITE(4,FMT='("     Group #",I0," was empty.")')group_number
+      ELSE
+       WRITE(4,'(".")')
       ENDIF
      ENDDO
-     !Remove the best_index
-     occurrences(best_index)=-1.0
-     !Report the best index
-     WRITE(4,'("   -------")')
+     IF (.NOT.(grouped_by_elements)) THEN
+      no_ungrouped_atoms=.TRUE.
+      firsttime=.TRUE.
+      DO i=1,acceptor_list(n_acceptor_in)%N_atoms,1
+       IF (acceptor_list(n_acceptor_in)%atom_index_list(i,2)>0) THEN
+        !sanity check
+        IF (acceptor_list(n_acceptor_in)%atom_index_list(i,2)/=&
+        &acceptor_list(n_acceptor_in)%atom_index_list(i,1)) CALL report_error(0)
+        no_ungrouped_atoms=.FALSE.
+        IF (firsttime) THEN
+         WRITE(4,FMT='("     Atoms not assigned to a group, treated as their own group:")')
+         WRITE(4,ADVANCE="NO",FMT='("       Atom indices ",I0)')&
+         &acceptor_list(n_acceptor_in)%atom_index_list(i,1)
+         firsttime=.FALSE.
+        ELSE
+         WRITE(4,ADVANCE="NO",FMT='(", ",I0)')&
+         &acceptor_list(n_acceptor_in)%atom_index_list(i,1)
+        ENDIF
+       ENDIF
+      ENDDO
+      IF (no_ungrouped_atoms) THEN
+       WRITE(4,'("     All atoms of this acceptor were assigned to a group.")')
+      ELSE
+       WRITE(4,'(".")')
+      ENDIF
+     ENDIF
+    ELSE
+     WRITE(4,'(" Molecule type ",I0," (",A,") was the acceptor, with the following atom indices:")')&
+     &acceptor_list(n_acceptor_in)%molecule_type_index,&
+     &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+     DO i=1,acceptor_list(n_acceptor_in)%N_atoms,1
+      WRITE(4,FMT='("      Atom index ",I0," (",A,")")')&
+      &acceptor_list(n_acceptor_in)%atom_index_list(i,1),&
+      &TRIM(give_element_symbol(acceptor_list(n_acceptor_in)%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%atom_index_list(i,1)))
+     ENDDO
+    ENDIF
+   ENDIF
+   WRITE(4,'(" The donor molecule types and atom types are given at the bottom.")')
+   WRITE(4,'(" For this acceptor, ",I0," different species were observed,")')&
+   &acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list
+   WRITE(4,'(" Which are now given in order of decreasing probability:")')
+   IF (ALLOCATED(occurrences)) CALL report_error(0)
+   ALLOCATE(occurrences(acceptor_list(n_acceptor_in)%&
+   &Number_of_logged_species_in_acceptor_list),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
+   WRITE(*,'("molecule type ",I0," (",A,").")')&
+   &acceptor_list(n_acceptor_in)%molecule_type_index,&
+   &TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+   WRITE(*,'("   For this acceptor, ",I0," different species were observed:")')&
+   &acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list
+   total_occurrence=0.0
+   DO entry_counter=1,acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list,1
+    occurrences(entry_counter)=FLOAT(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(entry_counter)%occurrences)
+    total_occurrence=total_occurrence+occurrences(entry_counter)
+   ENDDO
+   total_occurrence=total_occurrence+FLOAT(species_overflow)
+   !Now, print species in order of decreasing occurrence
+   !I am going to brute force this since I do not want to sort them.
+   species_output_counter=0
+   DO WHILE (ANY(occurrences(:)>0.0))
+    !There is an unused entry left!
+    species_output_counter=species_output_counter+1
+    !laboriously pick out the best one and report it
+    best_index=1
+    best_value=0.0
+    DO entry_counter=1,acceptor_list(n_acceptor_in)%&
+    &Number_of_logged_species_in_acceptor_list,1
+     IF (occurrences(entry_counter)>best_value) THEN
+      best_value=occurrences(entry_counter)
+      best_index=entry_counter
+     ENDIF
+    ENDDO
+    !Remove the best_index
+    occurrences(best_index)=-1.0
+    !Report the best index
+    WRITE(4,'("   -------")')
+    IF (FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &occurrences)/total_occurrence>0.01) THEN
+     WRITE(4,'("   Species #(",I0,") in ",F0.1,"% of the cases.")')&
+     &species_output_counter,100.0*FLOAT(&
+     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)/total_occurrence
+    ELSE
+     WRITE(4,'("     Species #(",I0,") in ",I0," cases (less than 1%).")')&
+     &species_output_counter,&
+     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences
+    ENDIF
+    IF (species_output_counter<6) THEN
      IF (FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
      &occurrences)/total_occurrence>0.01) THEN
-      WRITE(4,'("   Species #(",I0,") in ",F0.1,"% of the cases.")')&
+      WRITE(*,'("     Species #(",I0,") in ",F0.1,"% of the cases.")')&
       &species_output_counter,100.0*FLOAT(&
       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)/total_occurrence
      ELSE
-      WRITE(4,'("     Species #(",I0,") in ",I0," cases (less than 1%).")')&
+      WRITE(*,'("     Species #(",I0,") in ",I0," cases (less than 1%).")')&
       &species_output_counter,&
       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences
      ENDIF
-     IF (species_output_counter<6) THEN
-      IF (FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &occurrences)/total_occurrence>0.01) THEN
-       WRITE(*,'("     Species #(",I0,") in ",F0.1,"% of the cases.")')&
-       &species_output_counter,100.0*FLOAT(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)/total_occurrence
-      ELSE
-       WRITE(*,'("     Species #(",I0,") in ",I0," cases (less than 1%).")')&
-       &species_output_counter,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences
-      ENDIF
-     ELSE
-      IF (species_output_counter==6) WRITE(*,'("     (Only the first 5 printed here)")')
-     ENDIF
-     WRITE(4,'("   This species has a total of ",I0," connections,")')&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &number_of_logged_connections_in_species_list
-     WRITE(4,'("   with a total of ",I0," neighbour atoms in ",I0," neighbour molecules:")')&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &total_number_of_neighbour_atoms,&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &total_number_of_neighbour_molecules
-     !calculate the formal total charge
-     !Initialise with the acceptor charge
-     species_charge=give_charge_of_molecule(&
-     &acceptor_list(n_acceptor_in)%molecule_type_index)
-     DO species_molecules=1,acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-     &%total_number_of_neighbour_molecules
-      connections_firstindex=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-      &%neighbour_molecule_starting_indices(species_molecules)%first_index_in_connection_list
-      extra_atom_entries=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &neighbour_molecule_starting_indices(species_molecules)%&
-      &extra_atom_entries_in_connection_list
-      WRITE(4,'("     Molecule of type ",I0,"(",A,") with ",I0," connections:")')&
-      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-      &%connection(connections_firstindex)%indices(1))%molecule_type_index,&
-      &TRIM(give_sum_formula(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-      &%connection(connections_firstindex)%indices(1))%molecule_type_index)),&
-      &extra_atom_entries+1
+    ELSE
+     IF (species_output_counter==6) WRITE(*,'("     (Only the first 5 printed here)")')
+    ENDIF
+    WRITE(4,'("   This species has a total of ",I0," connections,")')&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &number_of_logged_connections_in_species_list
+    WRITE(4,'("   with a total of ",I0," neighbour atoms in ",I0," neighbour molecules:")')&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &total_number_of_neighbour_atoms,&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &total_number_of_neighbour_molecules
+    !calculate the formal total charge
+    !Initialise with the acceptor charge
+    species_charge=give_charge_of_molecule(&
+    &acceptor_list(n_acceptor_in)%molecule_type_index)
+    DO species_molecules=1,acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+    &%total_number_of_neighbour_molecules
+     connections_firstindex=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+     &%neighbour_molecule_starting_indices(species_molecules)%first_index_in_connection_list
+     extra_atom_entries=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+     &neighbour_molecule_starting_indices(species_molecules)%&
+     &extra_atom_entries_in_connection_list
+     WRITE(4,'("     Molecule of type ",I0,"(",A,") with ",I0," connections:")')&
+     &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+     &%connection(connections_firstindex)%indices(1))%molecule_type_index,&
+     &TRIM(give_sum_formula(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+     &%connection(connections_firstindex)%indices(1))%molecule_type_index)),&
+     &extra_atom_entries+1
+     IF (atoms_grouped) THEN
       DO connection_counter=0,extra_atom_entries
        acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
        &%connection(connection_counter+connections_firstindex)%indices(4)
        donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
        &%connection(connection_counter+connections_firstindex)%indices(3)
-       WRITE(4,'("       atom group ",I0,"(donor) to atom group ",I0," (acceptor)")')&
+       WRITE(4,'("       atom group ",I0," (donor) to atom group ",I0," (acceptor)")')&
        &-donorgroup,-acceptorgroup
       ENDDO
-      !update charge with this neighbour molecule
-      species_charge=species_charge+&
-      &give_charge_of_molecule(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-      &%connection(connections_firstindex)%indices(1))%molecule_type_index)
-     ENDDO
-     WRITE(4,'("   The similarity across all was ",SP,F5.2,SS,".")')&
-     &-1.0*FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &problematic_occurrences)/FLOAT(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
-     WRITE(4,'("   The total formal charge including the acceptor was ",SP,I0,SS,".")')&
-     &species_charge
-     !print the first and last occurrence
-     !Note that we are still in the "best_index" loop
-     WRITE(filename_speciation_output,'(A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-     &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_first.xyz"
-     OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
-     IF (ios/=0) CALL report_error(26,exit_status=ios)
-     WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_first_occurrence,FLOAT(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
-     !Make sure we do not print doubles, but include the acceptor
-     species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
-     previous_donor_molecule=0
-     !SANITY CHECK
-     IF (acceptor_list(acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%first_occurrence_acceptorindices(1))&
-     &%molecule_type_index/=acceptor_list(n_acceptor_in)%molecule_type_index) CALL report_error(0)
-     DO connection_counter=1,acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%&
-     &number_of_logged_connections_in_species_list,1
-      !Is this a new molecule? if so, we will need to reset the atom index, too
-      IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &first_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
-       species_atomcount=species_atomcount+&
-       &give_number_of_atoms_per_molecule(donor_list&
-       &(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(1))%molecule_type_index)
-       previous_donor_molecule=&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(2)
-      ENDIF
-     ENDDO
-     !put the acceptor in the origin
-     acceptor_centre(:)=give_center_of_mass(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_first_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
-     &acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%first_occurrence_acceptorindices(2))
-     !Write a scratch file with the beads and count their number. needs to be added to species_atomcount
-     N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
-     IF (print_connection_beads) THEN
-      INQUIRE(UNIT=10,OPENED=connected)
-      IF (connected) CALL report_error(27,exit_status=10)
-      OPEN(UNIT=10,STATUS="SCRATCH")
-      !rewind scratch file
-      REWIND 10
-     ENDIF
-     !Append all the molecules that are part of this species
-     !Make sure we do not print doubles, but include the acceptor
-     CALL write_molecule(10,&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_first_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%first_occurrence_acceptorindices(2),&
-     &include_header=.FALSE.,translate_by=-acceptor_centre(:))
-     previous_donor_molecule=0
-     DO connection_counter=1,acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%&
-     &number_of_logged_connections_in_species_list,1
-      !Is this a new molecule? if so, we will need to reset the atom index, too
-      IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &first_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
-       previous_donor_molecule=&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(2)
-       !get the shift vector... needed for PBC
-       distance=give_smallest_distance_squared(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_first_occurrence,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_first_occurrence,&
-       &acceptor_list(n_acceptor_in)%molecule_type_index,&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%first_occurrence_acceptorindices(2),&
-       &previous_donor_molecule,&
-       &shift)
-       !finally, write output
-       CALL write_molecule(10,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_first_occurrence,donor_list(acceptor_list(n_acceptor_in)%&
-       &list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &previous_donor_molecule,&
-       &include_header=.FALSE.,translate_by=shift(:)-acceptor_centre(:))
-      ENDIF
-      IF (print_connection_beads) THEN
-       !Add beads connecting the two atom vectors
-       base_atom=give_atom_position(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_first_occurrence,&
-       &acceptor_list(n_acceptor_in)%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence_acceptorindices(2),&
-       &acceptor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence_acceptorindices(1))%atom_index_list(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(4),1))
-       tip_atom=shift(:)+give_atom_position(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_first_occurrence,&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(2),&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(1))%atom_index_list(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &first_occurrence(connection_counter)%indices(3),1))
-       connection_vector=tip_atom-base_atom
-       distance=SQRT(SUM(connection_vector(:)**2))
-       connection_vector=connection_vector/distance !this should now be a unit vector
-       beadspan=distance-2.0*bead_clearance
-       IF (beadspan>0.0) THEN
-        !How many beads should we add?
-        N_beads=INT(beadspan/bead_distance)
-        N_beads_total=N_beads_total+N_beads+1
-        !Convert it back to a REAL so it is nice...
-        beadspan=FLOAT(N_beads)*bead_distance
-        !... the reason we need this is to update the bead_clearance to (distance-beadspan)/2.0
-        base_atom=base_atom+connection_vector*((distance-beadspan)/2.0)
-        !Adding beads
-        DO m=0,N_beads
-         WRITE(10,*) "Z ",base_atom+connection_vector*FLOAT(m)*bead_distance-acceptor_centre(:)
-        ENDDO
-       ENDIF
-      ENDIF
-     ENDDO
-     !Transfer the scratch file
-     REWIND 10
-     WRITE(3,'(I0)')species_atomcount+N_beads_total
-     WRITE(3,'(A)')TRIM(species_output_header)
-     DO m=1,species_atomcount+N_beads_total
-      READ(10,*) element_name,base_atom
-      WRITE(3,*) TRIM(element_name),base_atom
-     ENDDO
-     CLOSE(UNIT=10)
-     WRITE(3,*)
-     WRITE(3,*)
-     ENDFILE 3
-     CLOSE(UNIT=3)
-     !very inefficient in terms of amount of code:
-     !I now double everything from the "first occurrence"
-     !Note that we are still in the "best_index" loop
-     WRITE(filename_speciation_output,'(A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-     &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_last.xyz"
-     OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
-     IF (ios/=0) CALL report_error(26,exit_status=ios)
-     WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_last_occurrence,FLOAT(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
-     !Make sure we do not print doubles, but include the acceptor
-     species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
-     previous_donor_molecule=0
-     !SANITY CHECK
-     IF (acceptor_list(acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%last_occurrence_acceptorindices(1))&
-     &%molecule_type_index/=acceptor_list(n_acceptor_in)%molecule_type_index) CALL report_error(0)
-     DO connection_counter=1,acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%&
-     &number_of_logged_connections_in_species_list,1
-      !Is this a new molecule? if so, we will need to reset the atom index, too
-      IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &last_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
-       species_atomcount=species_atomcount+&
-       &give_number_of_atoms_per_molecule(donor_list&
-       &(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(1))%molecule_type_index)
-       previous_donor_molecule=&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(2)
-      ENDIF
-     ENDDO
-     !put the acceptor in the origin
-     acceptor_centre(:)=give_center_of_mass(&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_last_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
-     &acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%last_occurrence_acceptorindices(2))
-     !Write a scratch file with the beads and count their number. needs to be added to species_atomcount
-     N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
-     IF (print_connection_beads) THEN
-      INQUIRE(UNIT=10,OPENED=connected)
-      IF (connected) CALL report_error(27,exit_status=10)
-      OPEN(UNIT=10,STATUS="SCRATCH")
-      !rewind scratch file
-      REWIND 10
-     ENDIF
-     !Append all the molecules that are part of this species
-     !Make sure we do not print doubles, but include the acceptor
-     CALL write_molecule(10,&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-     &timestep_last_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
-     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%last_occurrence_acceptorindices(2),&
-     &include_header=.FALSE.,translate_by=-acceptor_centre(:))
-     previous_donor_molecule=0
-     DO connection_counter=1,acceptor_list(n_acceptor_in)%&
-     &list_of_all_species(best_index)%&
-     &number_of_logged_connections_in_species_list,1
-      !Is this a new molecule? if so, we will need to reset the atom index, too
-      IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &last_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
-       previous_donor_molecule=&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(2)
-       !get the shift vector... needed for PBC
-       distance=give_smallest_distance_squared(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_last_occurrence,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_last_occurrence,&
-       &acceptor_list(n_acceptor_in)%molecule_type_index,&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%last_occurrence_acceptorindices(2),&
-       &previous_donor_molecule,&
-       &shift)
-       !finally, write output
-       CALL write_molecule(10,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_last_occurrence,donor_list(acceptor_list(n_acceptor_in)%&
-       &list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &previous_donor_molecule,&
-       &include_header=.FALSE.,translate_by=shift(:)-acceptor_centre(:))
-      ENDIF
-      IF (print_connection_beads) THEN
-       !Add beads connecting the two atom vectors
-       base_atom=give_atom_position(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_last_occurrence,&
-       &acceptor_list(n_acceptor_in)%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence_acceptorindices(2),&
-       &acceptor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence_acceptorindices(1))%atom_index_list(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(4),1))
-       tip_atom=shift(:)+give_atom_position(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &timestep_last_occurrence,&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(2),&
-       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(1))%atom_index_list(&
-       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &last_occurrence(connection_counter)%indices(3),1))
-       connection_vector=tip_atom-base_atom
-       distance=SQRT(SUM(connection_vector(:)**2))
-       connection_vector=connection_vector/distance !this should now be a unit vector
-       beadspan=distance-2.0*bead_clearance
-       IF (beadspan>0.0) THEN
-        !How many beads should we add?
-        N_beads=INT(beadspan/bead_distance)
-        N_beads_total=N_beads_total+N_beads+1
-        !Convert it back to a REAL so it is nice...
-        beadspan=FLOAT(N_beads)*bead_distance
-        !... the reason we need this is to update the bead_clearance to (distance-beadspan)/2.0
-        base_atom=base_atom+connection_vector*((distance-beadspan)/2.0)
-        !Adding beads
-        DO m=0,N_beads
-         WRITE(10,*) "Z ",base_atom+connection_vector*FLOAT(m)*bead_distance-acceptor_centre(:)
-        ENDDO
-       ENDIF
-      ENDIF
-     ENDDO
-     !Transfer the scratch file
-     REWIND 10
-     WRITE(3,'(I0)')species_atomcount+N_beads_total
-     WRITE(3,'(A)')TRIM(species_output_header)
-     DO m=1,species_atomcount+N_beads_total
-      READ(10,*) element_name,base_atom
-      WRITE(3,*) TRIM(element_name),base_atom
-     ENDDO
-     CLOSE(UNIT=10)
-     WRITE(3,*)
-     WRITE(3,*)
-     ENDFILE 3
-     CLOSE(UNIT=3)
-    ENDDO
-    IF (species_overflow>0) THEN
-     IF (FLOAT(species_overflow)/total_occurrence>0.01) THEN
-      WRITE(*,'("     There was species overflow amounting to ",F0.1,"%")')&
-      &100.0*FLOAT(species_overflow)/total_occurrence
      ELSE
-      WRITE(*,'("     There was species overflow amounting to ",E9.3)')&
-      &FLOAT(species_overflow)/total_occurrence
+      DO connection_counter=0,extra_atom_entries
+       acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+       &%connection(connection_counter+connections_firstindex)%indices(4)
+       donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+       &%connection(connection_counter+connections_firstindex)%indices(3)
+       WRITE(4,'("       atom index ",I0," (donor) to atom index ",I0," (acceptor)")')&
+       &donorgroup,acceptorgroup
+      ENDDO
      ENDIF
+     !update charge with this neighbour molecule
+     species_charge=species_charge+&
+     &give_charge_of_molecule(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+     &%connection(connections_firstindex)%indices(1))%molecule_type_index)
+    ENDDO
+    WRITE(4,'("   The similarity across all was ",SP,F5.2,SS,".")')&
+    &-1.0*FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &problematic_occurrences)/FLOAT(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
+    WRITE(4,'("   The total formal charge including the acceptor was ",SP,I0,SS,".")')&
+    &species_charge
+    !print the first and last occurrence
+    !Note that we are still in the "best_index" loop
+    WRITE(filename_speciation_output,'(A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_first.xyz"
+    OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_first_occurrence,FLOAT(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
+    !Make sure we do not print doubles, but include the acceptor
+    species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
+    previous_donor_molecule=0
+    !SANITY CHECK
+    IF (acceptor_list(acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%first_occurrence_acceptorindices(1))&
+    &%molecule_type_index/=acceptor_list(n_acceptor_in)%molecule_type_index) CALL report_error(0)
+    DO connection_counter=1,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%&
+    &number_of_logged_connections_in_species_list,1
+     !Is this a new molecule? if so, we will need to reset the atom index, too
+     IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+     &first_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
+      species_atomcount=species_atomcount+&
+      &give_number_of_atoms_per_molecule(donor_list&
+      &(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(1))%molecule_type_index)
+      previous_donor_molecule=&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(2)
+     ENDIF
+    ENDDO
+    !put the acceptor in the origin
+    acceptor_centre(:)=give_center_of_mass(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_first_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%first_occurrence_acceptorindices(2))
+    !Write a scratch file with the beads and count their number. needs to be added to species_atomcount
+    N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
+    IF (print_connection_beads) THEN
+     INQUIRE(UNIT=10,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=10)
+     OPEN(UNIT=10,STATUS="SCRATCH")
+     !rewind scratch file
+     REWIND 10
     ENDIF
-    WRITE(*,'(A,I0,A)') "   Detailed statistics written to '"&
-    &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor",n_acceptor_in,"_speciation_statistics.dat'"
-    WRITE(*,'(A,I0,A)')&
-    &"   First observed structure per species written to '"&
-    &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor"&
-    &,n_acceptor_in,"_speciesX_first.xyz'"
-    WRITE(*,'(A,I0,A)')&
-    &"   Last observed structure per species written to '"&
-    &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor"&
-    &,n_acceptor_in,"_speciesX_last.xyz'"
-    IF (ALLOCATED(occurrences)) THEN
-     DEALLOCATE(occurrences,STAT=deallocstatus)
-     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    !Append all the molecules that are part of this species
+    !Make sure we do not print doubles, but include the acceptor
+    CALL write_molecule(10,&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_first_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%first_occurrence_acceptorindices(2),&
+    &include_header=.FALSE.,translate_by=-acceptor_centre(:))
+    previous_donor_molecule=0
+    DO connection_counter=1,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%&
+    &number_of_logged_connections_in_species_list,1
+     !Is this a new molecule? if so, we will need to reset the atom index, too
+     IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+     &first_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
+      previous_donor_molecule=&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(2)
+      !get the shift vector... needed for PBC
+      distance=give_smallest_distance_squared(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_first_occurrence,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_first_occurrence,&
+      &acceptor_list(n_acceptor_in)%molecule_type_index,&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%first_occurrence_acceptorindices(2),&
+      &previous_donor_molecule,&
+      &shift)
+      !finally, write output
+      CALL write_molecule(10,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_first_occurrence,donor_list(acceptor_list(n_acceptor_in)%&
+      &list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &previous_donor_molecule,&
+      &include_header=.FALSE.,translate_by=shift(:)-acceptor_centre(:))
+     ENDIF
+     IF (print_connection_beads) THEN
+      !Add beads connecting the two atom vectors
+      base_atom=give_atom_position(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_first_occurrence,&
+      &acceptor_list(n_acceptor_in)%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence_acceptorindices(2),&
+      &acceptor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence_acceptorindices(1))%atom_index_list(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(4),1))
+      tip_atom=shift(:)+give_atom_position(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_first_occurrence,&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(2),&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(1))%atom_index_list(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &first_occurrence(connection_counter)%indices(3),1))
+      connection_vector=tip_atom-base_atom
+      distance=SQRT(SUM(connection_vector(:)**2))
+      connection_vector=connection_vector/distance !this should now be a unit vector
+      beadspan=distance-2.0*bead_clearance
+      IF (beadspan>0.0) THEN
+       !How many beads should we add?
+       N_beads=INT(beadspan/bead_distance)
+       N_beads_total=N_beads_total+N_beads+1
+       !Convert it back to a REAL so it is nice...
+       beadspan=FLOAT(N_beads)*bead_distance
+       !... the reason we need this is to update the bead_clearance to (distance-beadspan)/2.0
+       base_atom=base_atom+connection_vector*((distance-beadspan)/2.0)
+       !Adding beads
+       DO m=0,N_beads
+        WRITE(10,*) "Z ",base_atom+connection_vector*FLOAT(m)*bead_distance-acceptor_centre(:)
+       ENDDO
+      ENDIF
+     ENDIF
+    ENDDO
+    !Transfer the scratch file
+    REWIND 10
+    WRITE(3,'(I0)')species_atomcount+N_beads_total
+    WRITE(3,'(A)')TRIM(species_output_header)
+    DO m=1,species_atomcount+N_beads_total
+     READ(10,*) element_name,base_atom
+     WRITE(3,*) TRIM(element_name),base_atom
+    ENDDO
+    CLOSE(UNIT=10)
+    WRITE(3,*)
+    WRITE(3,*)
+    ENDFILE 3
+    CLOSE(UNIT=3)
+    !very inefficient in terms of amount of code:
+    !I now double everything from the "first occurrence"
+    !Note that we are still in the "best_index" loop
+    WRITE(filename_speciation_output,'(A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+   &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_last.xyz"
+    OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_last_occurrence,FLOAT(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
+    !Make sure we do not print doubles, but include the acceptor
+    species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
+    previous_donor_molecule=0
+    !SANITY CHECK
+    IF (acceptor_list(acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%last_occurrence_acceptorindices(1))&
+    &%molecule_type_index/=acceptor_list(n_acceptor_in)%molecule_type_index) CALL report_error(0)
+    DO connection_counter=1,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%&
+    &number_of_logged_connections_in_species_list,1
+     !Is this a new molecule? if so, we will need to reset the atom index, too
+     IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+     &last_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
+      species_atomcount=species_atomcount+&
+      &give_number_of_atoms_per_molecule(donor_list&
+      &(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(1))%molecule_type_index)
+      previous_donor_molecule=&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(2)
+     ENDIF
+    ENDDO
+    !put the acceptor in the origin
+    acceptor_centre(:)=give_center_of_mass(&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_last_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%last_occurrence_acceptorindices(2))
+    !Write a scratch file with the beads and count their number. needs to be added to species_atomcount
+    N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
+    IF (print_connection_beads) THEN
+     INQUIRE(UNIT=10,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=10)
+     OPEN(UNIT=10,STATUS="SCRATCH")
+     !rewind scratch file
+     REWIND 10
+    ENDIF
+    !Append all the molecules that are part of this species
+    !Make sure we do not print doubles, but include the acceptor
+    CALL write_molecule(10,&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_last_occurrence,acceptor_list(n_acceptor_in)%molecule_type_index,&
+    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%last_occurrence_acceptorindices(2),&
+    &include_header=.FALSE.,translate_by=-acceptor_centre(:))
+    previous_donor_molecule=0
+    DO connection_counter=1,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%&
+    &number_of_logged_connections_in_species_list,1
+     !Is this a new molecule? if so, we will need to reset the atom index, too
+     IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+     &last_occurrence(connection_counter)%indices(2)/=previous_donor_molecule) THEN
+      previous_donor_molecule=&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(2)
+      !get the shift vector... needed for PBC
+      distance=give_smallest_distance_squared(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_last_occurrence,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_last_occurrence,&
+      &acceptor_list(n_acceptor_in)%molecule_type_index,&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%last_occurrence_acceptorindices(2),&
+      &previous_donor_molecule,&
+      &shift)
+      !finally, write output
+      CALL write_molecule(10,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_last_occurrence,donor_list(acceptor_list(n_acceptor_in)%&
+      &list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &previous_donor_molecule,&
+      &include_header=.FALSE.,translate_by=shift(:)-acceptor_centre(:))
+     ENDIF
+     IF (print_connection_beads) THEN
+      !Add beads connecting the two atom vectors
+      base_atom=give_atom_position(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_last_occurrence,&
+      &acceptor_list(n_acceptor_in)%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence_acceptorindices(2),&
+      &acceptor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence_acceptorindices(1))%atom_index_list(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(4),1))
+      tip_atom=shift(:)+give_atom_position(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &timestep_last_occurrence,&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(1))%molecule_type_index,&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(2),&
+      &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(1))%atom_index_list(&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &last_occurrence(connection_counter)%indices(3),1))
+      connection_vector=tip_atom-base_atom
+      distance=SQRT(SUM(connection_vector(:)**2))
+      connection_vector=connection_vector/distance !this should now be a unit vector
+      beadspan=distance-2.0*bead_clearance
+      IF (beadspan>0.0) THEN
+       !How many beads should we add?
+       N_beads=INT(beadspan/bead_distance)
+       N_beads_total=N_beads_total+N_beads+1
+       !Convert it back to a REAL so it is nice...
+       beadspan=FLOAT(N_beads)*bead_distance
+       !... the reason we need this is to update the bead_clearance to (distance-beadspan)/2.0
+       base_atom=base_atom+connection_vector*((distance-beadspan)/2.0)
+       !Adding beads
+       DO m=0,N_beads
+        WRITE(10,*) "Z ",base_atom+connection_vector*FLOAT(m)*bead_distance-acceptor_centre(:)
+       ENDDO
+      ENDIF
+     ENDIF
+    ENDDO
+    !Transfer the scratch file
+    REWIND 10
+    WRITE(3,'(I0)')species_atomcount+N_beads_total
+    WRITE(3,'(A)')TRIM(species_output_header)
+    DO m=1,species_atomcount+N_beads_total
+     READ(10,*) element_name,base_atom
+     WRITE(3,*) TRIM(element_name),base_atom
+    ENDDO
+    CLOSE(UNIT=10)
+    WRITE(3,*)
+    WRITE(3,*)
+    ENDFILE 3
+    CLOSE(UNIT=3)
+   ENDDO
+   IF (species_overflow>0) THEN
+    IF (FLOAT(species_overflow)/total_occurrence>0.01) THEN
+     WRITE(*,'("     There was species overflow amounting to ",F0.1,"%")')&
+     &100.0*FLOAT(species_overflow)/total_occurrence
     ELSE
-     CALL report_error(0)
+     WRITE(*,'("     There was species overflow amounting to ",E9.3)')&
+     &FLOAT(species_overflow)/total_occurrence
     ENDIF
-    WRITE(4,*)
-    WRITE(4,'(" The donors of this analysis were:")')
-    DO donor_type_counter=1,N_donor_types,1
-     IF (donor_list(donor_type_counter)%N_atoms==1) THEN
-      WRITE(4,'(" Atom ",I0," (",A,") of molecule type ",I0," (",A,") was the donor.")')&
+   ENDIF
+   WRITE(*,'(A,I0,A)') "   Detailed statistics written to '"&
+   &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor",n_acceptor_in,"_speciation_statistics.dat'"
+   WRITE(*,'(A,I0,A)')&
+   &"   First observed structure per species written to '"&
+   &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor"&
+   &,n_acceptor_in,"_speciesX_first.xyz'"
+   WRITE(*,'(A,I0,A)')&
+   &"   Last observed structure per species written to '"&
+   &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor"&
+   &,n_acceptor_in,"_speciesX_last.xyz'"
+   IF (ALLOCATED(occurrences)) THEN
+    DEALLOCATE(occurrences,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+   WRITE(4,*)
+   WRITE(4,'(" The donors of this analysis were:")')
+   DO donor_type_counter=1,N_donor_types,1
+    IF (donor_list(donor_type_counter)%N_atoms==1) THEN
+     IF (N_donor_types==1) THEN
+      WRITE(4,'(" Atom ",I0," (",A,") of molecule type ",I0," (",A,") was the sole donor.")')&
       &donor_list(donor_type_counter)%atom_index_list(1,1),&
       &give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
       &donor_list(donor_type_counter)%atom_index_list(1,1)),&
       &donor_list(donor_type_counter)%molecule_type_index,&
       &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
      ELSE
-      IF (atoms_grouped) THEN
-       WRITE(4,'(" Molecule type ",I0," (",A,") was the donor, with the following atom groups:")')&
-       &donor_list(donor_type_counter)%molecule_type_index,&
-       &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
-       DO group_number=1,donor_list(donor_type_counter)%N_groups,1
-        WRITE(4,ADVANCE="NO",FMT='("      Group #",I0,", atom indices")')group_number
-        DO i=1,donor_list(donor_type_counter)%N_atoms,1
-         IF (group_number==-donor_list(donor_type_counter)%atom_index_list(i,2)) THEN
-          WRITE(4,ADVANCE="NO",FMT='(" ",I0,"(",A,")")')&
+      WRITE(4,'("   Donor #",I0," was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
+      &donor_type_counter,&
+      &donor_list(donor_type_counter)%atom_index_list(1,1),&
+      &give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
+      &donor_list(donor_type_counter)%atom_index_list(1,1)),&
+      &donor_list(donor_type_counter)%molecule_type_index,&
+      &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
+     ENDIF
+    ELSE
+     IF (atoms_grouped) THEN
+      WRITE(4,'("   Donor #",I0," was molecule type ",I0," (",A,"), with the following atom groups:")')&
+      &donor_type_counter,&
+      &donor_list(donor_type_counter)%molecule_type_index,&
+      &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
+      DO group_number=1,donor_list(donor_type_counter)%N_groups,1
+       firsttime=.TRUE.
+       DO i=1,donor_list(donor_type_counter)%N_atoms,1
+        IF (group_number==-donor_list(donor_type_counter)%atom_index_list(i,2)) THEN
+         IF (firsttime) THEN
+          firsttime=.FALSE.
+          WRITE(4,ADVANCE="NO",FMT='("     Group #",I0,", atom indices ",I0,"(",A,")")')&
+          &group_number,donor_list(donor_type_counter)%atom_index_list(i,1),&
+          &TRIM(give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
+          &donor_list(donor_type_counter)%atom_index_list(i,1)))
+         ELSE
+          WRITE(4,ADVANCE="NO",FMT='(", ",I0,"(",A,")")')&
           &donor_list(donor_type_counter)%atom_index_list(i,1),&
           &TRIM(give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
           &donor_list(donor_type_counter)%atom_index_list(i,1)))
          ENDIF
-        ENDDO
-        WRITE(4,*)
+        ENDIF
        ENDDO
-      ELSE
-       WRITE(4,'(" Molecule type ",I0," (",A,") was the donor, with the following atom indices:")')&
-       &donor_list(donor_type_counter)%molecule_type_index,&
-       &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
+       IF (firsttime) THEN
+        WRITE(4,FMT='("     Group #",I0," was empty.")')group_number
+       ELSE
+        WRITE(4,'(".")')
+       ENDIF
+      ENDDO
+      IF (.NOT.(grouped_by_elements)) THEN
+       no_ungrouped_atoms=.TRUE.
+       firsttime=.TRUE.
        DO i=1,donor_list(donor_type_counter)%N_atoms,1
-        WRITE(4,FMT='("      Atom index ",I0," (",A,")")')&
-        &donor_list(donor_type_counter)%atom_index_list(i,1),&
-        &TRIM(give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
-        &donor_list(donor_type_counter)%atom_index_list(i,1)))
+        IF (donor_list(donor_type_counter)%atom_index_list(i,2)>0) THEN
+         !sanity check
+         IF (donor_list(donor_type_counter)%atom_index_list(i,2)/=&
+         &donor_list(donor_type_counter)%atom_index_list(i,1)) CALL report_error(0)
+         no_ungrouped_atoms=.FALSE.
+         IF (firsttime) THEN
+          WRITE(4,FMT='("     Atoms not assigned to a group, treated as their own group:")')
+          WRITE(4,ADVANCE="NO",FMT='("       Atom indices ",I0)')&
+          &donor_list(donor_type_counter)%atom_index_list(i,1)
+          firsttime=.FALSE.
+         ELSE
+          WRITE(4,ADVANCE="NO",FMT='(", ",I0)')&
+          &donor_list(donor_type_counter)%atom_index_list(i,1)
+         ENDIF
+        ENDIF
        ENDDO
+       IF (no_ungrouped_atoms) THEN
+        WRITE(4,'("     All atoms of this donor were assigned to a group.")')
+       ELSE
+        WRITE(4,'(".")')
+       ENDIF
       ENDIF
+     ELSE
+      WRITE(4,'("   Donor #",I0," was molecule type ",I0," (",A,"), with the following atom indices:")')&
+      &donor_type_counter,&
+      &donor_list(donor_type_counter)%molecule_type_index,&
+      &TRIM(give_sum_formula(donor_list(donor_type_counter)%molecule_type_index))
+      DO i=1,donor_list(donor_type_counter)%N_atoms,1
+       WRITE(4,FMT='("     Atom index ",I0," (",A,")")')&
+       &donor_list(donor_type_counter)%atom_index_list(i,1),&
+       &TRIM(give_element_symbol(donor_list(donor_type_counter)%molecule_type_index,&
+       &donor_list(donor_type_counter)%atom_index_list(i,1)))
+      ENDDO
      ENDIF
-    ENDDO
-    ENDFILE 4
-    CLOSE(UNIT=4)
-   END SUBROUTINE print_acceptor_summary
-
-  END SUBROUTINE report_species
+    ENDIF
+   ENDDO
+   ENDFILE 4
+   CLOSE(UNIT=4)
+  END SUBROUTINE print_acceptor_summary
 
   SUBROUTINE perform_speciation_analysis()
   IMPLICIT NONE
@@ -17820,9 +18318,14 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
    IF ((ERROR_CODE/=33).AND.(ERROR_CODE/=159).AND.(ERROR_CODE/=157)) THEN
     WRITE(*,'(" Using ",I0," timesteps in intervals of ",I0," for averaging.")')&
     &MAX((nsteps-1+sampling_interval)/sampling_interval,0),sampling_interval
+    IF (VERBOSE_OUTPUT) THEN
+     WRITE(*,ADVANCE="NO",FMT='(" The main data structures occupy approximately ")')
+     CALL print_memory_requirement(FLOAT(bytes_needed)*(4.0/1024.0d0))
+     WRITE(*,'(".")')
+    ENDIF
     WRITE(*,'(" Starting speciation analysis.")')
     CALL refresh_IO()
-    CALL trajectory_speciation_analysis
+    CALL trajectory_speciation_analysis_parallel()
     IF (neighbour_atom_overflow>0) CALL report_error(160,exit_status=neighbour_atom_overflow)
     IF (species_overflow>0) CALL report_error(161,exit_status=species_overflow)
     CALL report_species()
@@ -17890,7 +18393,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 24_Feb_2024"
+ PRINT *, "   Date of Release: 27_Feb_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -21096,6 +21599,17 @@ INTEGER :: ios,n
      ENDIF
      CALL add_reference(2)
      CALL add_reference(4)
+    CASE ("speciation","species") !Module SPECIATION
+     IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+     BACKSPACE 7
+     READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
+     IF (ios/=0) THEN
+      CALL report_error(19,exit_status=ios)
+      EXIT
+     ENDIF
+     FILENAME_SPECIATION_INPUT=dummy
+     WRITE(*,*) "Speciation module invoked."
+     CALL perform_speciation_analysis()
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
