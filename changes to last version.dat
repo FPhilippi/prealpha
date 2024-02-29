@@ -1,5 +1,9 @@
+29.02.2024
+	Simplified statistics output for the speciation module, updated manual
 27.02.2024
 	Improved speciation module, which is now also parallelised.
+24.02.2024
+	Improved capability of speciation module. No user interface yet.
 17.02.2024:
 	Introduced speciation module. This module calculates speciation statistics.
 06.02.2024:

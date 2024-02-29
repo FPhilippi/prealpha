@@ -14,7 +14,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	IMPLICIT NONE
 	PRIVATE
 	!default values
-	INTEGER,PARAMETER :: nsteps_default=1 !how many steps to use from trajectory
+	INTEGER,PARAMETER :: nsteps_default=100 !how many steps to use from trajectory
 	INTEGER,PARAMETER :: sampling_interval_default=1
 	INTEGER,PARAMETER :: maximum_number_of_species_default=11!how many different species do we want to allow?
 	INTEGER,PARAMETER :: maximum_number_of_neighbour_molecules_default=10
@@ -84,6 +84,49 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 	CONTAINS
 
+!WRITING input file to unit 8, which shouldn't be open.
+		!has to be compliant with 'read_velocity_correlation_body' in 'AUTOCORRELATION' module
+		SUBROUTINE user_speciation_input&
+		&(parallelisation_possible,parallelisation_requested,nsteps_in,filename_speciation)
+		IMPLICIT NONE
+		CHARACTER (LEN=*) :: filename_speciation
+		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
+		INTEGER,INTENT(IN) :: nsteps_in
+		INTEGER :: ios
+		LOGICAL :: connected
+			PRINT *,"Generating input for speciation analysis."
+			PRINT *,"A good range of analysis covers usually 1000 steps in total, distributed over the whole trajectory."
+			PRINT *,"Up to which step number of the trajectory do you want the analysis to run?"
+			WRITE(*,'(" The default is currently set to ",I0,".")') nsteps_default
+			nsteps=user_input_integer(1,(nsteps_in-1))
+			PRINT *,"Every how many steps would you like to use?"
+			WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+			sampling_interval=user_input_integer(1,nsteps_in)
+			parallelisation_possible=.TRUE.
+			IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+				PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+				parallelisation_requested=user_input_logical()
+			ENDIF
+			
+			
+			
+			WRITE(*,FMT='(A)',ADVANCE="NO") " opening speciation input file..."
+			INQUIRE(UNIT=8,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=8)
+			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_speciation),IOSTAT=ios)
+			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			WRITE(8,'(A)') " conductivity ### type of analysis"
+			!WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+			WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used")') sampling_interval
+			WRITE(8,*) "quit"
+			WRITE(8,*)
+			WRITE(8,*) "This is an input file to calculate speciation statistics and dump structures."
+			WRITE(8,*) "To actually perform the implied calculation, it has to be referenced in 'general.inp'."
+			ENDFILE 8
+			CLOSE(UNIT=8)
+			WRITE(*,*) "done"
+		END SUBROUTINE user_speciation_input
+
 		SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
 		IMPLICIT NONE
 			nsteps=nsteps_default
@@ -106,7 +149,6 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		LOGICAL :: file_exists,connected
 		INTEGER :: ios,allocstatus,n,m,acceptor_maxatoms,donor_maxatoms,a,b
 		REAL :: real_space_distance
-		CHARACTER(LEN=32) :: inputstring
 			! first, check if file exists.
 			INQUIRE(FILE=TRIM(PATH_INPUT)//TRIM(FILENAME_SPECIATION_INPUT),EXIST=file_exists)
 			IF (file_exists) THEN
@@ -1217,7 +1259,7 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 			CALL collapse_and_sort_atom_indices(species_clipboard,n_acceptor_in)
 			!Now to find out if this species already exists in the list.
 			!There are many possible different cases and conditions, and I will use a jump to skip the ones which are not necessary.
-			!I think in this case, the jump command is better and more easily understood than 1000 nestled if-then-else
+			!I think in this case, the jump command is better and more easily understood than 1000 nestled if-THEN-else
 			!Very first case: species list is empty. need to add.
 			IF (acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list==0) THEN
 				new_species_found=.TRUE.
@@ -1230,7 +1272,7 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 			potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)=.TRUE.
 			!This is the first rough check we can do - check if species have the same number of connections, number of neighbour atoms, number of neighbour molecules
 			CALL eliminate_number_mismatches()
-			!If there are no potential species matches left, then this is a new one!
+			!If there are no potential species matches left, THEN this is a new one!
 			IF (.NOT.(ANY(&
 			&potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)&
 			&))) THEN
@@ -1241,7 +1283,7 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 			!and also check if the atoms which are involved in these connections are the same.
 			!Molecule indices do not matter, so we need to check for permutations...
 			CALL eliminate_connection_mismatches()
-			!If there are no potential species matches left, then this is a new one!
+			!If there are no potential species matches left, THEN this is a new one!
 			IF (.NOT.(ANY(&
 			&potential_species_match(1:acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list)&
 			&))) THEN
@@ -1287,9 +1329,9 @@ loop_reference:			DO reference_species_molecules=1,species_clipboard%total_numbe
 							!The idea is the following:
 							! 1) we assume that they are the same, i.e. that there is no mismatche.
 							! 2) we check all the connections.
-							! 3) if there is ANY connection which differs in ANY of the indices 1/3/4, then they are NOT the same.
+							! 3) if there is ANY connection which differs in ANY of the indices 1/3/4, THEN they are NOT the same.
 							! 4) if they are still the same after checking all connections (in other words, no mismatches were found),
-							! 5) then we set the unmatched_entry of this pair to .FALSE. in both "lists to keept track"
+							! 5) THEN we set the unmatched_entry of this pair to .FALSE. in both "lists to keept track"
 							molecule_mismatch=.FALSE. ! step 1)
 							!get the first indices of the respective molecules
 							connections_firstindex_ref=acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)&
@@ -1525,7 +1567,7 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 						molecule_counter=molecule_counter+1
 						!sort donor atoms from connections_firstindex to connections_lastindex.
 						CALL sort_connections(species_clipboard%connection(:),3,connections_firstindex,connections_lastindex)
-						!then, sort acceptor atoms - to be able to do so, we need to find the first and last donor atoms...
+						!THEN, sort acceptor atoms - to be able to do so, we need to find the first and last donor atoms...
 						current_donor_atom=species_clipboard%connection(connections_firstindex)%indices(3)
 						atoms_firstindex=connections_firstindex
 						DO connection_counter_atoms=connections_firstindex,connections_lastindex-1
@@ -1557,7 +1599,7 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				&connections_lastindex-connections_firstindex
 				!sort donor atoms from connections_firstindex to connections_lastindex.
 				CALL sort_connections(species_clipboard%connection(:),3,connections_firstindex,connections_lastindex)	
-				!then, sort acceptor atoms - to be able to do so, we need to find the first and last donor atoms...
+				!THEN, sort acceptor atoms - to be able to do so, we need to find the first and last donor atoms...
 				current_donor_atom=species_clipboard%connection(connections_firstindex)%indices(3)
 				atoms_firstindex=connections_firstindex
 				DO connection_counter_atoms=connections_firstindex,connections_lastindex-1
@@ -1599,11 +1641,13 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN) :: n_acceptor_in
 		INTEGER :: entry_counter,allocstatus,deallocstatus,best_index,species_output_counter
-		INTEGER :: neighbour_entry_count,i,previous_donor_molecule,donor_type_counter,m
-		INTEGER :: species_atomcount,ios,atom_counter,species_charge,group_number,connection_counter,N_beads,N_beads_total
+		INTEGER :: i,previous_donor_molecule,donor_type_counter,m,double_connections_counter
+		INTEGER :: species_atomcount,ios,species_charge,group_number,connection_counter,N_beads,N_beads_total
 		INTEGER :: acceptorgroup,donorgroup,connections_firstindex,extra_atom_entries,species_molecules
+		INTEGER :: species_molecules_doubles,extra_atom_entries_2,donorgroup_2,acceptorgroup_2,connections_firstindex_2
+		INTEGER :: donortype_2,donortype
 		LOGICAL :: connected,no_ungrouped_atoms,firsttime
-		REAL :: total_occurrence,best_value,distance,species_realcharge,base_atom(3),tip_atom(3),connection_vector(3),beadspan
+		REAL :: total_occurrence,best_value,distance,base_atom(3),tip_atom(3),connection_vector(3),beadspan
 		REAL,PARAMETER :: bead_clearance=0.5,bead_distance=0.4
 		REAL(KIND=WORKING_PRECISION) :: acceptor_centre(3),shift(3)
 		REAL,DIMENSION(:),ALLOCATABLE :: occurrences
@@ -1772,6 +1816,9 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				!Initialise with the acceptor charge
 				species_charge=give_charge_of_molecule(&
 				&acceptor_list(n_acceptor_in)%molecule_type_index)
+				!Make sure we report similar entries together
+				acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+				&%neighbour_molecule_starting_indices(:)%unmatched_entry=.TRUE.
 				DO species_molecules=1,acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
 				&%total_number_of_neighbour_molecules
 					connections_firstindex=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
@@ -1779,37 +1826,87 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 					extra_atom_entries=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
 					&neighbour_molecule_starting_indices(species_molecules)%&
 					&extra_atom_entries_in_connection_list
-					WRITE(4,'("     Molecule of type ",I0,"(",A,") with ",I0," connections:")')&
-					&donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-					&%connection(connections_firstindex)%indices(1))%molecule_type_index,&
-					&TRIM(give_sum_formula(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-					&%connection(connections_firstindex)%indices(1))%molecule_type_index)),&
-					&extra_atom_entries+1
-					IF (atoms_grouped) THEN
-						DO connection_counter=0,extra_atom_entries
-							acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-							&%connection(connection_counter+connections_firstindex)%indices(4)
-							donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-							&%connection(connection_counter+connections_firstindex)%indices(3)
-							WRITE(4,'("       atom group ",I0," (donor) to atom group ",I0," (acceptor)")')&
-							&-donorgroup,-acceptorgroup
-						ENDDO
-					ELSE
-						DO connection_counter=0,extra_atom_entries
-							acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-							&%connection(connection_counter+connections_firstindex)%indices(4)
-							donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
-							&%connection(connection_counter+connections_firstindex)%indices(3)
-							WRITE(4,'("       atom index ",I0," (donor) to atom index ",I0," (acceptor)")')&
-							&donorgroup,acceptorgroup
-						ENDDO
-					ENDIF
 					!update charge with this neighbour molecule
 					species_charge=species_charge+&
 					&give_charge_of_molecule(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
 					&%connection(connections_firstindex)%indices(1))%molecule_type_index)
+					IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+					&%neighbour_molecule_starting_indices(species_molecules)%unmatched_entry) THEN
+						double_connections_counter=1
+doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(n_acceptor_in)%&
+						&list_of_all_species(best_index)%total_number_of_neighbour_molecules,1
+							!Compare the two molecules in species_molecules and species_molecules_doubles
+							connections_firstindex_2=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+							&%neighbour_molecule_starting_indices(species_molecules_doubles)%first_index_in_connection_list
+							extra_atom_entries_2=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+							&neighbour_molecule_starting_indices(species_molecules_doubles)%&
+							&extra_atom_entries_in_connection_list
+							IF (extra_atom_entries/=extra_atom_entries_2) CYCLE doublespecies
+							!Only get to this point for the same number of extra_atom_entries!
+							DO connection_counter=0,extra_atom_entries
+								!First, get the acceptor and donor group of the "reference" molecule in species_molecules
+								donortype=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex)%indices(1)
+								acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex)%indices(4)
+								donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex)%indices(3)
+								!THEN, compare with the acceptor and donor group of the "observed" molecule in species_molecules_doubles
+								donortype_2=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex_2)%indices(1)
+								acceptorgroup_2=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex_2)%indices(4)
+								donorgroup_2=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+								&%connection(connection_counter+connections_firstindex_2)%indices(3)
+								IF ((donorgroup/=donorgroup_2)&
+								&.OR.(acceptorgroup/=acceptorgroup_2)&
+								&.OR.(donortype/=donortype_2)) CYCLE doublespecies
+							ENDDO
+							!Only get to this point for the same connections in the two compared molecules!
+							double_connections_counter=double_connections_counter+1
+							acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+							&neighbour_molecule_starting_indices(species_molecules_doubles)%unmatched_entry=.FALSE.
+						ENDDO doublespecies
+						!Still in "unmatched_entry", but now we know how many double entries. Need to cycle through again...
+						IF (double_connections_counter>1) THEN
+							WRITE(4,ADVANCE="NO",FMT='("     ",I0," Molecules of type ")') double_connections_counter
+						ELSE
+							WRITE(4,ADVANCE="NO",FMT='("     One molecule of type ")')
+						ENDIF
+						WRITE(4,ADVANCE="NO",FMT='(I0,"(",A,") with ")')&
+						&donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+						&%connection(connections_firstindex)%indices(1))%molecule_type_index,&
+						&TRIM(give_sum_formula(donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+						&%connection(connections_firstindex)%indices(1))%molecule_type_index))
+						IF (extra_atom_entries==0) THEN
+							WRITE(4,ADVANCE="NO",FMT='("one connection")')
+						ELSE
+							WRITE(4,ADVANCE="NO",FMT='(I0," connections")')extra_atom_entries+1
+						ENDIF
+						IF (double_connections_counter>1) THEN
+							WRITE(4,'(" each:")')
+						ELSE
+							WRITE(4,'(":")')
+						ENDIF
+						DO connection_counter=0,extra_atom_entries
+							acceptorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+							&%connection(connection_counter+connections_firstindex)%indices(4)
+							donorgroup=acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+							&%connection(connection_counter+connections_firstindex)%indices(3)
+							IF (donorgroup<0) THEN
+								WRITE(4,ADVANCE="NO",FMT='("       atom group ",I0," (donor) ")')-donorgroup
+							ELSE
+								WRITE(4,ADVANCE="NO",FMT='("       atom index ",I0," (donor) ")')donorgroup
+							ENDIF
+							IF (acceptorgroup<0) THEN
+								WRITE(4,'("to atom group ",I0," (acceptor)")')-acceptorgroup
+							ELSE
+								WRITE(4,'("to atom index ",I0," (acceptor)")')acceptorgroup
+							ENDIF
+						ENDDO
+					ENDIF
 				ENDDO
-				WRITE(4,'("   The similarity across all was ",SP,F5.2,SS,".")')&
+				IF (DEVELOPERS_VERSION) WRITE(4,'(" ! The similarity across all was ",SP,F5.2,SS,".")')&
 				&-1.0*FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
 				&problematic_occurrences)/FLOAT(&
 				&acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
@@ -1855,13 +1952,11 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				&list_of_all_species(best_index)%first_occurrence_acceptorindices(2))
 				!Write a scratch file with the beads and count their number. needs to be added to species_atomcount
 				N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
-				IF (print_connection_beads) THEN
-					INQUIRE(UNIT=10,OPENED=connected)
-					IF (connected) CALL report_error(27,exit_status=10)
-					OPEN(UNIT=10,STATUS="SCRATCH")
-					!rewind scratch file
-					REWIND 10
-				ENDIF
+				INQUIRE(UNIT=10,OPENED=connected)
+				IF (connected) CALL report_error(27,exit_status=10)
+				OPEN(UNIT=10,STATUS="SCRATCH")
+				!rewind scratch file
+				REWIND 10
 				!Append all the molecules that are part of this species
 				!Make sure we do not print doubles, but include the acceptor
 				CALL write_molecule(10,&
@@ -1996,13 +2091,11 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				&list_of_all_species(best_index)%last_occurrence_acceptorindices(2))
 				!Write a scratch file with the beads and count their number. needs to be added to species_atomcount
 				N_beads_total=0 !This needs to be outside the following IF-THEN-ELSE, because we add it to the header
-				IF (print_connection_beads) THEN
-					INQUIRE(UNIT=10,OPENED=connected)
-					IF (connected) CALL report_error(27,exit_status=10)
-					OPEN(UNIT=10,STATUS="SCRATCH")
-					!rewind scratch file
-					REWIND 10
-				ENDIF
+				INQUIRE(UNIT=10,OPENED=connected)
+				IF (connected) CALL report_error(27,exit_status=10)
+				OPEN(UNIT=10,STATUS="SCRATCH")
+				!rewind scratch file
+				REWIND 10
 				!Append all the molecules that are part of this species
 				!Make sure we do not print doubles, but include the acceptor
 				CALL write_molecule(10,&
