@@ -1,4 +1,4 @@
-! RELEASED ON 29_Feb_2024 AT 22:24
+! RELEASED ON 06_Mar_2024 AT 20:07
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -280,6 +280,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !163 existing element groups are kept / overwritten
  !164 no group defined for this atom
  !165 atom assigned twice to a group
+ !166 need time_series for autocorrelation
+ !167 could not read the time_series file - return.
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -933,7 +935,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  SERIOUS WARNING 160: Neighbour overflow occurred in Module SPECIATION."
      WRITE(*,*) "--> consider increasing N_neighbours"
     CASE (161)
-     WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 161: Species overflow occurred in Module SPECIATION."
      WRITE(*,*) "--> consider increasing N_species"
     CASE (162)
      WRITE(*,*) " #  WARNING 162: Overwriting existing atom groups in Module SPECIATION."
@@ -949,6 +952,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      error_count=error_count-1
      WRITE(*,*) " #  NOTICE 165: An atom_index was assigned twice."
      WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+    CASE (166)
+     WRITE(*,*) " #  ERROR 166: 'time_series' is required for 'autocorrelation'."
+     WRITE(*,*) "--> please add 'time_series T' to the body of your speciation input file."
+    CASE (167)
+     WRITE(*,*) " #  ERROR 167: 'xxx_time_series.dat' could not be read."
+     WRITE(*,*) "--> did the previous analysis terminate normally? check if file is compromised."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -16115,7 +16124,10 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
  INTEGER,PARAMETER :: maximum_number_of_species_default=11!how many different species do we want to allow?
  INTEGER,PARAMETER :: maximum_number_of_neighbour_molecules_default=10
  INTEGER,PARAMETER :: maximum_number_of_connections_default=10
+ INTEGER,PARAMETER :: tmax_default=10000
  LOGICAL,PARAMETER :: print_connection_beads_default=.FALSE.
+ LOGICAL,PARAMETER :: calculate_autocorrelation_default=.FALSE.
+ LOGICAL,PARAMETER :: use_logarithmic_spacing_default=.FALSE.
  !variables
  INTEGER :: nsteps=nsteps_default !how many steps to use from trajectory
  INTEGER :: sampling_interval=sampling_interval_default
@@ -16124,10 +16136,12 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
  INTEGER :: N_acceptor_types
  INTEGER :: N_donor_types
  INTEGER :: bytes_needed
- INTEGER :: species_overflow
+ INTEGER :: tmax
  INTEGER :: neighbour_atom_overflow
  LOGICAL :: atoms_grouped,grouped_by_elements
  LOGICAL :: print_connection_beads=print_connection_beads_default
+ LOGICAL :: calculate_autocorrelation=calculate_autocorrelation_default
+ LOGICAL :: use_logarithmic_spacing=use_logarithmic_spacing_default
  REAL,DIMENSION(:,:,:,:),ALLOCATABLE :: squared_cutoff_list !the squared cutoffs. The dimensions are: entry of acceptor_list -- entry of acceptor atom_index_list -- entry of donor_list -- entry of donor atom_index_list.
  TYPE,PRIVATE :: connections
   !This one saves a specific pair of atoms as being connected.
@@ -16146,10 +16160,10 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   INTEGER :: extra_atom_entries_in_connection_list
  END TYPE neighbour_molecule_status
  TYPE,PRIVATE :: species
-  INTEGER(KIND=WORKING_PRECISION) :: problematic_occurrences ! plus one if not the same as "last_occurrence", minus one otherwise
   INTEGER :: total_number_of_neighbour_atoms ! For example, "4" for Li[DME]2
   INTEGER :: total_number_of_neighbour_molecules ! For example, "2" for Li[DME]2
   INTEGER(KIND=WORKING_PRECISION) :: occurrences ! For example, "I have found this species 34857 times"
+  INTEGER :: rank !1 for the most probable, 2 for the next, 3 for the third most probable, and so one.
   INTEGER :: timestep_first_occurrence, timestep_last_occurrence
   TYPE(neighbour_molecule_status),DIMENSION(:),ALLOCATABLE :: neighbour_molecule_starting_indices !allocated up to maximum_number_of_connections but filled only up to total_number_of_neighbour_molecules with the starting indices of said molecules.
   TYPE(connections),DIMENSION(:),ALLOCATABLE :: first_occurrence
@@ -16159,11 +16173,12 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   INTEGER :: number_of_logged_connections_in_species_list !this is equal to the total number of connections and serves as one of the three descriptors
   TYPE(connections),DIMENSION(:),ALLOCATABLE :: connection !First dimension goes from 1 to number_of_logged_connections_in_species_list and is allocated up to maximum_number_of_connections.
  END TYPE species
-
  TYPE,PRIVATE :: donors_and_acceptors
   INTEGER :: N_atoms!array size of atom_index_list and cutoff_list
   INTEGER :: N_groups!how many atom groups
   INTEGER :: molecule_type_index
+  INTEGER :: species_overflow
+  INTEGER(KIND=WORKING_PRECISION) :: no_neighbour_occurrences!how many times NO species was found
   INTEGER,DIMENSION(:,:),ALLOCATABLE :: atom_index_list !First dimension is listing all relevant atom_index up to N_atoms.
   !the second dimension is 1/2 for the actual atom_index/atom_group.
   !All atoms with the same atom_group number are treated as identical.
@@ -16173,6 +16188,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
  END TYPE donors_and_acceptors
  TYPE(donors_and_acceptors),DIMENSION(:),ALLOCATABLE :: acceptor_list !First dimension counts the acceptor molecule types
  TYPE(donors_and_acceptors),DIMENSION(:),ALLOCATABLE :: donor_list    !First dimension counts the donor molecule types
+ REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: average_h!the occurrences, including "species 0" for the overflows
  LOGICAL :: dumpfirst=.TRUE.
  LOGICAL :: dumplast=.TRUE.
  !PRIVATE/PUBLIC declarations
@@ -16237,6 +16253,9 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    grouped_by_elements=.FALSE.
    print_connection_beads=print_connection_beads_default
    bytes_needed=0
+   tmax=tmax_default
+   calculate_autocorrelation=calculate_autocorrelation_default
+   use_logarithmic_spacing=use_logarithmic_spacing_default
   END SUBROUTINE set_defaults
 
   !initialises the speciation module by reading the specified input file.
@@ -16295,7 +16314,6 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
       &neighbour_molecule_starting_indices(maximum_number_of_connections),STAT=allocstatus)
       IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
      ENDDO
-     acceptor_list(n)%list_of_all_species(:)%problematic_occurrences=0
      acceptor_list(n)%list_of_all_species(:)%occurrences=0
      acceptor_list(n)%list_of_all_species(:)%timestep_last_occurrence=0
      acceptor_list(n)%list_of_all_species(:)%timestep_first_occurrence=0
@@ -16524,6 +16542,30 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'print_connection_beads' to ",&
         &print_connection_beads
        ENDIF
+      CASE ("logarithmic_spacing","logarithmic","log_spacing","use_logarithmic_spacing","use_log")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,use_logarithmic_spacing
+       IF (ios/=0) THEN
+        CALL report_error(158,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+        &"   setting 'use_logarithmic_spacing' to default (=",use_logarithmic_spacing_default,")"
+        use_logarithmic_spacing=use_logarithmic_spacing_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_logarithmic_spacing' to ",&
+        &use_logarithmic_spacing
+       ENDIF
+      CASE ("correlate","autocorrelation","time_correlation","calculate_autocorrelation")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,calculate_autocorrelation
+       IF (ios/=0) THEN
+        CALL report_error(158,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+        &"   setting 'calculate_autocorrelation' to default (=",calculate_autocorrelation_default,")"
+        calculate_autocorrelation=calculate_autocorrelation_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'calculate_autocorrelation' to ",&
+        &calculate_autocorrelation
+       ENDIF
       CASE ("maximum_number_of_species","species","N_species")
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,maximum_number_of_species
@@ -16534,6 +16576,16 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
         maximum_number_of_species=maximum_number_of_species_default
        ELSE
         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'maximum_number_of_species' to ",maximum_number_of_species
+       ENDIF
+      CASE ("tmax")
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
+       IF (ios/=0) THEN
+        CALL report_error(24,exit_status=ios)
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "   setting 'tmax' to default (=",tmax_default,")"
+        tmax=tmax_default
+       ELSE
+        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'tmax' to ",tmax
        ENDIF
       CASE ("sampling_interval")
        BACKSPACE 3
@@ -16564,12 +16616,17 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
        IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
       END SELECT
      ENDDO
+     !first, check for sensible input.
      IF (nsteps<1) THEN
       CALL report_error(57,exit_status=nsteps)
       nsteps=1
      ELSEIF (nsteps>give_number_of_timesteps()) THEN
       CALL report_error(57,exit_status=nsteps)
       nsteps=give_number_of_timesteps()
+     ENDIF
+     IF ((tmax>MAX((nsteps-1+sampling_interval)/sampling_interval,0)-1).OR.(tmax<1)) THEN
+      tmax=MAX((nsteps-1+sampling_interval)/sampling_interval,0)-1
+      CALL report_error(28,exit_status=INT(tmax))
      ENDIF
      CALL showgroups()
     END SUBROUTINE read_body
@@ -16968,6 +17025,8 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      acceptor_list(n)%atom_index_list(:,:)=0
      acceptor_list(n)%cutoff_list(:)=0.0
      acceptor_list(n)%N_groups=0
+     acceptor_list(n)%no_neighbour_occurrences=0
+     acceptor_list(n)%species_overflow=0
     ENDDO
     REWIND 10
     DO n=1,N_acceptors,1
@@ -17172,26 +17231,53 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   !$  INTEGER :: OMP_get_num_threads
   !$  END FUNCTION OMP_get_num_threads
   !$ END INTERFACE
-  INTEGER :: stepcounter,acceptor_molecule_index,n_acceptor,n_donor,donor_indexcounter
-  INTEGER :: donor_molecule_index,acceptor_indexcounter,allocstatus,deallocstatus
-  LOGICAL :: existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule
+  INTEGER :: stepcounter,acceptor_molecule_index,n_acceptor,n_donor,donor_indexcounter,ios,maxmol
+  INTEGER :: donor_molecule_index,acceptor_indexcounter,allocstatus,deallocstatus,observed_species_number
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: all_observed_species_for_timestep
+  LOGICAL :: existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule,connected
   LOGICAL,DIMENSION(:),ALLOCATABLE :: potential_species_match !first dimension goes over all the species
   TYPE(species) :: species_clipboard
+  CHARACTER(LEN=1024) :: filename_time_series
   !reset the number of species logged to zero just in case.
   acceptor_list(:)%number_of_logged_species_in_acceptor_list=0
+  neighbour_atom_overflow=0
+  !opening the units for the time series
+  IF (calculate_autocorrelation) THEN
+   maxmol=0
+   DO n_acceptor=1,N_acceptor_types,1
+    INQUIRE(UNIT=10+n_acceptor,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=10+n_acceptor)
+    WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"acceptor",n_acceptor,"_time_series.dat"
+    OPEN(UNIT=10+n_acceptor,FILE=TRIM(filename_time_series),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(10+n_acceptor,'(" This file contains the species NUMBER (ordering is different to output!).")')
+    WRITE(10+n_acceptor,'(" The leftmost column is the time, after that one column per molecule index.")')
+    WRITE(10+n_acceptor,ADVANCE="NO",FMT='("timeline")')
+    DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
+     WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')acceptor_molecule_index
+    ENDDO
+    WRITE(10+n_acceptor,*)
+    IF (maxmol<give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index))&
+    &maxmol=give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index)
+   ENDDO
+  ENDIF
   !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
   !$OMP PRIVATE(species_clipboard,potential_species_match,stepcounter,n_acceptor,acceptor_molecule_index)&
-  !$OMP PRIVATE(n_donor,donor_molecule_index,donor_indexcounter,acceptor_indexcounter,neighbour_atom)&
-  !$OMP PRIVATE(existing_species,problematic_occurrence,neighbour_molecule)
+  !$OMP PRIVATE(n_donor,donor_molecule_index,donor_indexcounter,acceptor_indexcounter,neighbour_atom,observed_species_number)&
+  !$OMP PRIVATE(existing_species,problematic_occurrence,neighbour_molecule,all_observed_species_for_timestep)
   !$OMP SINGLE
   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
   !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (speciation)"
   !$  CALL timing_parallel_sections(.TRUE.)
   !$ ENDIF
   IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
-  neighbour_atom_overflow=0
-  species_overflow=0
   !$OMP END SINGLE
+  IF (calculate_autocorrelation) THEN
+   IF (ALLOCATED(all_observed_species_for_timestep)) CALL report_error(0)
+   ALLOCATE(all_observed_species_for_timestep(N_acceptor_types,maxmol),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
+  ENDIF
   !allocate memory for species clipboard
   IF (ALLOCATED(species_clipboard%connection)) CALL report_error(0)
   ALLOCATE(species_clipboard%connection(maximum_number_of_connections),STAT=allocstatus)
@@ -17211,7 +17297,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
   !Iterate over all acceptors.
   !average over timesteps, a few should be enough.
-  !$OMP DO SCHEDULE(STATIC,1)
+  !$OMP DO SCHEDULE(STATIC,1) ORDERED
   DO stepcounter=1,nsteps,sampling_interval
    DO n_acceptor=1,N_acceptor_types,1
     !per ACCEPTOR molecule index, go over all its atoms and check if there are neighbour contributions.
@@ -17302,14 +17388,49 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
       species_clipboard%last_occurrence_acceptorindices(1)=n_acceptor
       species_clipboard%last_occurrence_acceptorindices(2)=acceptor_molecule_index
       !$OMP CRITICAL(acceptor_list_access)
-      CALL add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor,stepcounter)
+      CALL add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor,stepcounter,observed_species_number)
+      !$OMP END CRITICAL(acceptor_list_access)
+     ELSE
+      observed_species_number=0
+      !$OMP CRITICAL(acceptor_list_access)
+      acceptor_list(n_acceptor)%no_neighbour_occurrences=&
+      &acceptor_list(n_acceptor)%no_neighbour_occurrences+1
       !$OMP END CRITICAL(acceptor_list_access)
      ENDIF
+     !This would be a good point to append the species corresponding to acceptor_molecule_index to the time series
+     IF (calculate_autocorrelation) all_observed_species_for_timestep(n_acceptor,acceptor_molecule_index)=observed_species_number
     ENDDO
    ENDDO
    IF (VERBOSE_OUTPUT) CALL print_progress()
+   IF (calculate_autocorrelation) THEN
+    !$OMP ORDERED
+    DO n_acceptor=1,N_acceptor_types,1
+     WRITE(10+n_acceptor,ADVANCE="NO",FMT='(I0)')&
+     &(stepcounter-1)*TIME_SCALING_FACTOR
+     DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
+      WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')&
+      &all_observed_species_for_timestep(n_acceptor,acceptor_molecule_index)
+     ENDDO
+     WRITE(10+n_acceptor,*)
+    ENDDO
+    !$OMP END ORDERED
+   ENDIF
   ENDDO
   !$OMP END DO
+  !close units for the time series
+  IF (calculate_autocorrelation) THEN
+   DO n_acceptor=1,N_acceptor_types,1
+    CLOSE(UNIT=10+n_acceptor)
+   ENDDO
+  ENDIF
+  IF (calculate_autocorrelation) THEN
+   IF (ALLOCATED(all_observed_species_for_timestep)) THEN
+    DEALLOCATE(all_observed_species_for_timestep,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+  ENDIF
   IF (ALLOCATED(species_clipboard%connection)) THEN
    DEALLOCATE(species_clipboard%connection,STAT=deallocstatus)
    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
@@ -17343,9 +17464,10 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
   !$ ENDIF
   END SUBROUTINE trajectory_speciation_analysis_parallel
 
-  SUBROUTINE add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor_in,stepcounter_in)
+  SUBROUTINE add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor_in,stepcounter_in,observed_species_number)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: n_acceptor_in,stepcounter_in
+  INTEGER,INTENT(OUT) :: observed_species_number
   TYPE(species),INTENT(INOUT) :: species_clipboard
   LOGICAL,DIMENSION(*),INTENT(INOUT) :: potential_species_match
   LOGICAL :: new_species_found
@@ -17390,7 +17512,7 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
     CALL append_species()
    ELSE
     IF (COUNT(potential_species_match(1:acceptor_list(n_acceptor_in)%&
-    &number_of_logged_species_in_acceptor_list))>1) CALL report_error(0)
+    &number_of_logged_species_in_acceptor_list))/=1) CALL report_error(0)
     CALL add_to_species()
    ENDIF
 
@@ -17522,6 +17644,7 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
     IF (acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list<maximum_number_of_species) THEN
      acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list=&
      &acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list+1
+     observed_species_number=acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
      !append the new species to the list!
      !transfer the connections and their count
      acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
@@ -17530,9 +17653,7 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
      acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
      &number_of_logged_species_in_acceptor_list)%connection=&
      &species_clipboard%connection
-     !initialise (problematic) occurrences
-     acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
-     &number_of_logged_species_in_acceptor_list)%problematic_occurrences=0
+     !initialise occurrences
      acceptor_list(n_acceptor_in)%list_of_all_species(acceptor_list(n_acceptor_in)%&
      &number_of_logged_species_in_acceptor_list)%occurrences=1
      !initialise the last/first occurrence - stepcounter
@@ -17563,33 +17684,19 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
      &number_of_logged_species_in_acceptor_list)%neighbour_molecule_starting_indices=&
      &species_clipboard%neighbour_molecule_starting_indices
     ELSE
-     species_overflow=species_overflow+1
+     acceptor_list(n_acceptor_in)%species_overflow=acceptor_list(n_acceptor_in)%species_overflow+1
+     observed_species_number=0
     ENDIF
    END SUBROUTINE append_species
 
    SUBROUTINE add_to_species()!appends the contents of the clipboard to the actual list
    IMPLICIT NONE
-   INTEGER :: species_counter,connection_counter,problematic
+   INTEGER :: species_counter,connection_counter
     DO species_counter=1,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
      IF (potential_species_match(species_counter)) THEN
+      observed_species_number=species_counter
       acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%occurrences=&
       &acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%occurrences+1
-      !a problematic_occurrence is one where the molecule indices are the same, including the acceptor molecule index.
-      problematic=+1
-      IF (acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(2)==&
-      &species_clipboard%last_occurrence_acceptorindices(2)) THEN
-       inner: DO connection_counter=1,acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
-        &number_of_logged_connections_in_species_list,1
-        IF(species_clipboard%connection(connection_counter)%indices(2)/=&
-        &acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%&
-        &last_occurrence(connection_counter)%indices(2)) THEN
-         problematic=-1
-         EXIT inner
-        ENDIF
-       ENDDO inner
-      ENDIF
-      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%problematic_occurrences=&
-      acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%problematic_occurrences+problematic
       !update the last occurrence - indices of the acceptor
       acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%timestep_last_occurrence=stepcounter_in
       acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%last_occurrence_acceptorindices(:)=&
@@ -17715,24 +17822,6 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
 
   END SUBROUTINE add_clipboard_to_list
 
-  SUBROUTINE report_species()
-  IMPLICIT NONE
-  INTEGER :: n_acceptor
-   !Iterate over all acceptors. Usually, this is probably one.
-   IF (N_acceptor_types==1) THEN
-    WRITE(*,ADVANCE="NO",FMT='(" There was one acceptor: ")')
-    CALL print_acceptor_summary(1)
-   ELSE
-    WRITE(*,'(" There were ",I0," acceptor molecules:")') N_acceptor_types
-    DO n_acceptor=1,N_acceptor_types,1
-     WRITE(*,ADVANCE="NO",FMT='("  Acceptor ",I0,"/",I0," was ")')&
-     &n_acceptor,N_acceptor_types
-     CALL print_acceptor_summary(n_acceptor)
-    ENDDO
-   ENDIF
-
-  END SUBROUTINE report_species
-
   SUBROUTINE print_acceptor_summary(n_acceptor_in)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: n_acceptor_in
@@ -17855,7 +17944,21 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
     &acceptor_list(n_acceptor_in)%list_of_all_species(entry_counter)%occurrences)
     total_occurrence=total_occurrence+occurrences(entry_counter)
    ENDDO
-   total_occurrence=total_occurrence+FLOAT(species_overflow)
+   total_occurrence=total_occurrence+FLOAT(acceptor_list(n_acceptor_in)%species_overflow)
+   total_occurrence=total_occurrence+FLOAT(acceptor_list(n_acceptor_in)%no_neighbour_occurrences)
+   IF (calculate_autocorrelation) THEN
+    !save the average_h for later. basically the same as the occurrences
+    IF (ALLOCATED(average_h)) CALL report_error(0)
+    ALLOCATE(average_h(0:acceptor_list(n_acceptor_in)%&
+    &Number_of_logged_species_in_acceptor_list),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
+    average_h(0)=DFLOAT(acceptor_list(n_acceptor_in)%species_overflow+&
+    &acceptor_list(n_acceptor_in)%no_neighbour_occurrences)/total_occurrence
+    DO entry_counter=1,acceptor_list(n_acceptor_in)%Number_of_logged_species_in_acceptor_list,1
+     average_h(entry_counter)=&
+     &DFLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(entry_counter)%occurrences)/total_occurrence
+    ENDDO
+   ENDIF
    !Now, print species in order of decreasing occurrence
    !I am going to brute force this since I do not want to sort them.
    species_output_counter=0
@@ -17872,6 +17975,7 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
       best_index=entry_counter
      ENDIF
     ENDDO
+    acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%rank=species_output_counter
     !Remove the best_index
     occurrences(best_index)=-1.0
     !Report the best index
@@ -18002,10 +18106,6 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
       ENDDO
      ENDIF
     ENDDO
-    IF (DEVELOPERS_VERSION) WRITE(4,'(" ! The similarity across all was ",SP,F5.2,SS,".")')&
-    &-1.0*FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-    &problematic_occurrences)/FLOAT(&
-    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
     WRITE(4,'("   The total formal charge including the acceptor was ",SP,I0,SS,".")')&
     &species_charge
     !print the first and last occurrence
@@ -18286,14 +18386,25 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
     ENDFILE 3
     CLOSE(UNIT=3)
    ENDDO
-   IF (species_overflow>0) THEN
-    IF (FLOAT(species_overflow)/total_occurrence>0.01) THEN
+   IF ((acceptor_list(n_acceptor_in)%species_overflow)>0) THEN
+    IF (FLOAT((acceptor_list(n_acceptor_in)%species_overflow))/total_occurrence>0.01) THEN
      WRITE(*,'("     There was species overflow amounting to ",F0.1,"%")')&
-     &100.0*FLOAT(species_overflow)/total_occurrence
+     &100.0*FLOAT(acceptor_list(n_acceptor_in)%species_overflow)/total_occurrence
     ELSE
      WRITE(*,'("     There was species overflow amounting to ",E9.3)')&
-     &FLOAT(species_overflow)/total_occurrence
+     &FLOAT(acceptor_list(n_acceptor_in)%species_overflow)/total_occurrence
     ENDIF
+   ENDIF
+   IF ((acceptor_list(n_acceptor_in)%no_neighbour_occurrences)>0) THEN
+    IF (FLOAT((acceptor_list(n_acceptor_in)%no_neighbour_occurrences))/total_occurrence>0.01) THEN
+     WRITE(*,'("     There were ",F0.1,"% acceptor molecules without any neighbouring donors.")')&
+     &100.0*FLOAT(acceptor_list(n_acceptor_in)%no_neighbour_occurrences)/total_occurrence
+    ELSE
+     WRITE(*,'("     There were ",I0," acceptor molecules without neighbouring donors (less than 1%).")')&
+     &acceptor_list(n_acceptor_in)%no_neighbour_occurrences
+    ENDIF
+   ELSE
+    WRITE(*,'("     There were no acceptor molecules without neighbouring donors.")')
    ENDIF
    WRITE(*,'(A,I0,A)') "   Detailed statistics written to '"&
    &//TRIM(ADJUSTL(OUTPUT_PREFIX))//"acceptor",n_acceptor_in,"_speciation_statistics.dat'"
@@ -18405,8 +18516,303 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    CLOSE(UNIT=4)
   END SUBROUTINE print_acceptor_summary
 
+  !The following subroutine was borrowed from MODULE AUTOCORRELATION - needed quite a few adjustments so I put it here
+  SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG(n_acceptor_in)
+  IMPLICIT NONE
+  INTEGER,INTENT(IN) :: n_acceptor_in
+  CHARACTER(LEN=1024) :: filename_time_series
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER :: timeline,logarithmic_entry_counter,entries
+  REAL(WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: autocorrelation_function
+  !the quantity C(t), which is calculated as uncorrected and then afterwards corrected.
+  !here, the first dimension are the timesteps, and the second dimension are the possible species.
+  REAL(WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: temp_function !running over the possible species.
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: molecule_speciesarray !This array essentially contains the information in the time_series file. first dimension is timestep, second dimension are the molecule indices.
+  INTEGER,DIMENSION(:),ALLOCATABLE :: timesteps_array !which timestep is this entry in autocorrelation_function?
+  INTEGER :: allocstatus,deallocstatus,ios,stepcounter,species_counter,dummy,molecule_counter
+  LOGICAL :: connected
+   WRITE(*,'("   Calculating species autocorrelation function for this acceptor:")')
+   !allocate memory for the molecule_speciesarray and fill from file.
+   IF (ALLOCATED(molecule_speciesarray)) CALL report_error(0)
+   ALLOCATE(molecule_speciesarray(MAX((nsteps-1+sampling_interval)/sampling_interval,0),&
+   &give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   INQUIRE(UNIT=3,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=3)
+   WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+   &//"acceptor",n_acceptor_in,"_time_series.dat"
+   OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
+   IF (ios/=0) CALL report_error(26,exit_status=ios)
+   !the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval". skip the first three lines.
+   READ(3,IOSTAT=ios,FMT=*)
+            IF (ios/=0) CALL report_error(167,exit_status=ios)
+   READ(3,IOSTAT=ios,FMT=*)
+            IF (ios/=0) CALL report_error(167,exit_status=ios)
+   READ(3,IOSTAT=ios,FMT=*)
+            IF (ios/=0) CALL report_error(167,exit_status=ios)
+   WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
+   DO stepcounter=1,MAX((nsteps-1+sampling_interval)/sampling_interval,0),1
+    !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
+    READ(3,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
+    !sanity check
+    IF (dummy/=(stepcounter-1)*TIME_SCALING_FACTOR*sampling_interval) CALL report_error(0)
+    IF (ios/=0) THEN
+     CALL report_error(167,exit_status=ios)
+     DEALLOCATE(molecule_speciesarray,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ENDIF
+   ENDDO
+   CLOSE(UNIT=3)
+   !Count how many entries we will need. safer than me trying to get that number with maths.
+   timeline=0
+   entries=0
+   DO WHILE (timeline<tmax)
+    IF (use_logarithmic_spacing) THEN
+     timeline=timeline+MAX(INT(LOG(FLOAT(timeline))),1)
+    ELSE
+     timeline=timeline+1
+    ENDIF
+    IF (timeline>tmax) timeline=tmax
+    entries=entries+1
+   ENDDO
+   IF (use_logarithmic_spacing) THEN
+    WRITE(*,'("     Logarithmic spacing, autocorrelation function will have ",I0," entries up to ",I0,".")')&
+    &entries,tmax
+   ELSE
+    WRITE(*,'("     Linear spacing, autocorrelation function will have ",I0," entries up to ",I0,".")')&
+    &entries,tmax
+   ENDIF
+   !allocate memory for the timesteps (from t=0 to t=tmax)
+   IF (ALLOCATED(timesteps_array)) CALL report_error(0)
+   ALLOCATE(timesteps_array(0:entries),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   timeline=0
+   entries=0
+   timesteps_array(0)=0
+   !get the entries again - this is needed, because I do not want to work with pointers and dynamic stuff.
+   DO WHILE (timeline<tmax)
+    IF (use_logarithmic_spacing) THEN
+     timeline=timeline+MAX(INT(LOG(FLOAT(timeline))),1)
+    ELSE
+     timeline=timeline+1
+    ENDIF
+    IF (timeline>tmax) timeline=tmax
+    entries=entries+1
+    timesteps_array(entries)=timeline
+   ENDDO
+   !allocate memory for the autocorrelation_function (from t=0 to t=tmax)
+   IF (ALLOCATED(autocorrelation_function)) CALL report_error(0)
+   ALLOCATE(autocorrelation_function(0:entries,0:acceptor_list(n_acceptor_in)%&
+   &number_of_logged_species_in_acceptor_list),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   !initialise autocorrelation_function.
+   autocorrelation_function(:,:)=0.0_DP
+   !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(temp_function,timeline,logarithmic_entry_counter,stepcounter)&
+   !$OMP PRIVATE (species_counter,allocstatus)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE (*,ADVANCE="NO",FMT='(A,I0)') "     ### Parallel execution on ",OMP_get_num_threads()
+   !$  WRITE (*,'(A)') " threads (intermittent autocorrelation function)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))>100)&
+    &WRITE(*,ADVANCE="NO",FMT='("    ")')
+    CALL print_progress(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))
+    IF ((give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))>100)&
+    &WRITE(*,ADVANCE="NO",FMT='("    ")')
+   ENDIF
+   !$OMP END SINGLE
+   !allocate the temporary autocorrelation function
+   IF (ALLOCATED(temp_function)) CALL report_error(0)
+   ALLOCATE(temp_function(0:acceptor_list(n_acceptor_in)%&
+   &number_of_logged_species_in_acceptor_list),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   !iterate over molecules and pass chunks to the subroutine that iterates over stepcounter
+   !$OMP DO SCHEDULE(STATIC,1)
+   DO molecule_counter=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index),1
+    !'timeline' is the argument of the autocorrelation_function, i.e. the time shift of the original function.
+    !for example, if the current shift is timeline=1000, and there are 10000 timesteps in total,
+    !then the argument has to be evaluated from (h(0+0)-<h>)(h(0+1000)-<h>) up to (h(9000+0)-<h>)(h(9000+1000)-<h>)
+    !timeline=0 is 1.0 for all
+    DO logarithmic_entry_counter=0,entries,1
+     timeline=timesteps_array(logarithmic_entry_counter)
+     !inner loop iterates over the whole chunk, i.e. the subset of the autocorr_array for the molecule in question.
+     temp_function(:)=0.0d0
+     DO stepcounter=1,tmax-timeline+1,1
+      !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
+      !this is the central part of the whole autocorrelation process.
+      !because we have the species, it should look something like this.....
+      DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
+       IF (molecule_speciesarray(stepcounter,molecule_counter)==species_counter)THEN
+        !h(t0) is one
+        IF (molecule_speciesarray(stepcounter+timeline,molecule_counter)==species_counter)THEN
+         !h(t0+t) is one
+         temp_function(species_counter)=temp_function(species_counter)+&
+         &(1.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
+        ELSE
+         !h(t0+t) is zero
+         temp_function(species_counter)=temp_function(species_counter)+&
+         &(1.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
+        ENDIF
+       ELSE
+        !h(t0) is zero
+        IF (molecule_speciesarray(stepcounter+timeline,molecule_counter)==species_counter)THEN
+         !h(t0+t) is one
+         temp_function(species_counter)=temp_function(species_counter)+&
+         &(0.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
+        ELSE
+         !h(t0+t) is zero
+         temp_function(species_counter)=temp_function(species_counter)+&
+         &(0.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
+        ENDIF
+       ENDIF
+      ENDDO
+     ENDDO
+     !Normalise result. For the above example, this would be division by 9000
+     !$OMP CRITICAL(autocorrelation_updates)
+     autocorrelation_function(logarithmic_entry_counter,:)=&
+     &autocorrelation_function(logarithmic_entry_counter,:)+temp_function(:)/DFLOAT(tmax-timeline+1)
+     !$OMP END CRITICAL(autocorrelation_updates)
+    ENDDO! End of outer loop over time shifts
+    !$OMP CRITICAL(progress)
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL(progress)
+   ENDDO
+   !$OMP END DO
+   DEALLOCATE(temp_function,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   !$OMP END PARALLEL
+   IF (((give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))>100)&
+   &.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,ADVANCE="NO",FMT='("     ### End of parallelised section, took ")')
+   !$  CALL timing_parallel_sections(.FALSE.)
+   !$ ENDIF
+   !normalise autocorrelation_function by number of molecules
+   autocorrelation_function(:,:)=autocorrelation_function(:,:)/&
+   &DFLOAT(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))
+   !print / report autocorrelation function
+   CALL report_autocorrelation_function()
+   DEALLOCATE(timesteps_array,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   DEALLOCATE(autocorrelation_function,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   DEALLOCATE(molecule_speciesarray,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   IF (ALLOCATED(average_h)) THEN
+    DEALLOCATE(average_h,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+
+   CONTAINS
+
+    SUBROUTINE report_autocorrelation_function
+    !Output formats - AUTOCORRELATION module
+    IMPLICIT NONE
+    CHARACTER(LEN=12) :: species_number_output
+    CHARACTER(LEN=1024) :: filename_autocorrelationlog
+    REAL :: h_low,h_high,h_stdev,h_local
+     WRITE(filename_autocorrelationlog,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+     &//"acceptor",n_acceptor_in,"_species_autocorrelation.dat"
+     IF (VERBOSE_OUTPUT) WRITE(*,'(A,A,A)') "     writing autocorrelation function into file '",&
+     &TRIM(ADJUSTL(filename_autocorrelationlog)),"'"
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     OPEN(UNIT=3,FILE=TRIM(ADJUSTL(filename_autocorrelationlog)),IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(3,*) "This file contains the intermittent autocorrelation function based on the input file '"&
+     &,TRIM(FILENAME_SPECIATION_INPUT),"'"
+   !  IF (VERBOSE_OUTPUT) WRITE(*,'(" normalise autocorrelation function: dividing by ",F5.3)') 0.0
+     WRITE(3,*) "One column per species, apart from the first column. First, some statistics across molecules are printed:"
+     WRITE(3,*) "Standard deviation, average/lowest/highest <h>. This is followed by normalisation and species numbers."
+     WRITE(3,*) "After that, first column = timeline, other columns are C(t)=<(h(t0+t)-<h>)(h(t0)-<h>)>/<(h(t0)-<h>)**2>"!up until here, autocorrelation_function is not normalised
+     !sanity check
+     IF (MAX((nsteps-1+sampling_interval)/sampling_interval,0)/=&
+     &SIZE(molecule_speciesarray(:,1))) CALL report_error(0)
+     !calculate the standard deviation, lowest, and highest average per molecule.
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<h>_stdev"
+     DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      h_stdev=0.0
+      DO molecule_counter=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)
+       !how many times was this particular molecule of kind "species_counter"?
+       h_local=FLOAT(COUNT(molecule_speciesarray(:,molecule_counter)==species_counter))/&
+       &FLOAT(SIZE(molecule_speciesarray(:,molecule_counter)))
+       h_stdev=h_stdev+(h_local-average_h(species_counter))**2
+      ENDDO
+      h_stdev=h_stdev/(FLOAT(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)-1))
+      h_stdev=SQRT(h_stdev)
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)') h_stdev
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<h>"
+     DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)') average_h(species_counter)
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<h>_low"
+     DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      h_low=1.0
+      DO molecule_counter=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)
+       !how many times was this particular molecule of kind "species_counter"?
+       h_local=FLOAT(COUNT(molecule_speciesarray(:,molecule_counter)==species_counter))/&
+       &FLOAT(SIZE(molecule_speciesarray(:,molecule_counter)))
+       IF (h_local<h_low) h_low=h_local
+      ENDDO
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)') h_low
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<h>_high"
+     DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      h_high=0.0
+      DO molecule_counter=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)
+       !how many times was this particular molecule of kind "species_counter"?
+       h_local=FLOAT(COUNT(molecule_speciesarray(:,molecule_counter)==species_counter))/&
+       &FLOAT(SIZE(molecule_speciesarray(:,molecule_counter)))
+       IF (h_local>h_high) h_high=h_local
+      ENDDO
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)') h_high
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<(h(t0)-<h>)^2>"
+     DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)')autocorrelation_function(0,species_counter)
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "timeline"
+     WRITE(species_number_output,'("#",I0)') 0
+     WRITE(3,ADVANCE="NO",FMT='(A15)') species_number_output
+     DO species_counter=1,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+      WRITE(species_number_output,'("#",I0)')&
+      &acceptor_list(n_acceptor_in)%list_of_all_species(species_counter)%rank
+      WRITE(3,ADVANCE="NO",FMT='(A15)') species_number_output
+     ENDDO
+     WRITE(3,*)
+     DO logarithmic_entry_counter=0,entries,1
+      timeline=timesteps_array(logarithmic_entry_counter)
+      WRITE(3,ADVANCE="NO",FMT='(I15)') timeline*TIME_SCALING_FACTOR*sampling_interval
+      DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list
+       WRITE(3,ADVANCE="NO",FMT='(F15.10)')&
+       &SNGL(autocorrelation_function(logarithmic_entry_counter,species_counter)&
+       &/autocorrelation_function(0,species_counter))
+      ENDDO
+      WRITE(3,*)
+     ENDDO
+     ENDFILE 3
+     CLOSE(UNIT=3)
+    END SUBROUTINE report_autocorrelation_function
+
+  END SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG
+
   SUBROUTINE perform_speciation_analysis()
   IMPLICIT NONE
+  INTEGER :: n_acceptor
    CALL initialise_speciation()
    IF ((ERROR_CODE/=33).AND.(ERROR_CODE/=159).AND.(ERROR_CODE/=157)) THEN
     WRITE(*,'(" Using ",I0," timesteps in intervals of ",I0," for averaging.")')&
@@ -18420,8 +18826,26 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
     CALL refresh_IO()
     CALL trajectory_speciation_analysis_parallel()
     IF (neighbour_atom_overflow>0) CALL report_error(160,exit_status=neighbour_atom_overflow)
-    IF (species_overflow>0) CALL report_error(161,exit_status=species_overflow)
-    CALL report_species()
+    IF (ANY(acceptor_list(:)%species_overflow>0))&
+    &CALL report_error(161,exit_status=SUM(acceptor_list(:)%species_overflow))
+    !Iterate over all acceptors. Usually, this is probably one.
+    IF (N_acceptor_types==1) THEN
+     WRITE(*,ADVANCE="NO",FMT='(" There was one acceptor: ")')
+     CALL print_acceptor_summary(1) !allocates average_h
+     IF (calculate_autocorrelation) THEN
+      CALL calculate_autocorrelation_function_from_master_array_LOG(1) !deallocates average_h
+     ENDIF
+    ELSE
+     WRITE(*,'(" There were ",I0," acceptor molecules:")') N_acceptor_types
+     DO n_acceptor=1,N_acceptor_types,1
+      WRITE(*,ADVANCE="NO",FMT='("  Acceptor ",I0,"/",I0," was ")')&
+      &n_acceptor,N_acceptor_types
+      CALL print_acceptor_summary(n_acceptor)
+      IF (calculate_autocorrelation) THEN
+       CALL calculate_autocorrelation_function_from_master_array_LOG(n_acceptor)
+      ENDIF
+     ENDDO
+    ENDIF
     CALL finalise_speciation()
    ELSE
     ERROR_CODE=ERROR_CODE_DEFAULT
@@ -18486,7 +18910,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 29_Feb_2024"
+ PRINT *, "   Date of Release: 06_Mar_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -21952,6 +22376,7 @@ INTEGER :: ios,n
    WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
    WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
    WRITE(*,*) '   DISTANCE        "',TRIM(FILENAME_DISTANCE_INPUT),'"'
+   WRITE(*,*) '   SPECIATION      "',TRIM(FILENAME_SPECIATION_INPUT),'"'
    WRITE(*,*) "Paths:"
    WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
    WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

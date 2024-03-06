@@ -1400,12 +1400,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					PRINT *," 4  - turn on time output."
 				ENDIF
 				IF (VERBOSE_OUTPUT) THEN
-					PRINT *," 5  - turn off verbose output."
+					PRINT *," 5  - turn off verbose output (not recommended)."
 				ELSE
 					PRINT *," 5  - turn on verbose output."
 				ENDIF
 				IF (ERROR_OUTPUT) THEN
-					PRINT *," 6  - turn off error output."
+					PRINT *," 6  - turn off error output (not recommended)."
 				ELSE
 					PRINT *," 6  - turn on error output."
 				ENDIF
@@ -1655,7 +1655,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 							CYCLE
 							
 						ENDIF
-						CALL user_conductivity_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,&
+						CALL user_conductivity_input(parallelisation_possible,parallelisation_requested,nsteps,&
 						&filename_conductivity)
 						IF (parallelisation_requested) THEN
 							CALL append_string("parallel_operation T ### turn on parallel operation")
@@ -3521,6 +3521,7 @@ INTEGER :: ios,n
 			WRITE(*,*) '   DIFFUSION       "',TRIM(FILENAME_DIFFUSION_INPUT),'"'
 			WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
 			WRITE(*,*) '   DISTANCE        "',TRIM(FILENAME_DISTANCE_INPUT),'"'
+			WRITE(*,*) '   SPECIATION      "',TRIM(FILENAME_SPECIATION_INPUT),'"'
 			WRITE(*,*) "Paths:"
 			WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
 			WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

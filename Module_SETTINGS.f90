@@ -279,6 +279,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!163 existing element groups are kept / overwritten
 	!164 no group defined for this atom
 	!165 atom assigned twice to a group
+	!166 need time_series for autocorrelation
+	!167 could not read the time_series file - return.
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -932,7 +934,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  SERIOUS WARNING 160: Neighbour overflow occurred in Module SPECIATION."
 					WRITE(*,*) "--> consider increasing N_neighbours"
 				CASE (161)
-					WRITE(*,*) " #  WARNING 161: Species overflow occurred in Module SPECIATION."
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 161: Species overflow occurred in Module SPECIATION."
 					WRITE(*,*) "--> consider increasing N_species"
 				CASE (162)
 					WRITE(*,*) " #  WARNING 162: Overwriting existing atom groups in Module SPECIATION."
@@ -948,6 +951,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					error_count=error_count-1
 					WRITE(*,*) " #  NOTICE 165: An atom_index was assigned twice."
 					WRITE(*,*) "--> carefully check that your atom groups are what you think they are."
+				CASE (166)
+					WRITE(*,*) " #  ERROR 166: 'time_series' is required for 'autocorrelation'."
+					WRITE(*,*) "--> please add 'time_series T' to the body of your speciation input file."
+				CASE (167)
+					WRITE(*,*) " #  ERROR 167: 'xxx_time_series.dat' could not be read."
+					WRITE(*,*) "--> did the previous analysis terminate normally? check if file is compromised."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
