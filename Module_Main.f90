@@ -17,6 +17,7 @@ CHARACTER(LEN=*),PARAMETER :: filename_conductivity="conductivity.inp"!correlati
 CHARACTER(LEN=*),PARAMETER :: filename_msd="diffusion.inp" !diffusion module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_distribution="distribution.inp" !distribution module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_distance="distance.inp" !distance module standard filename
+CHARACTER(LEN=*),PARAMETER :: filename_speciation="speciation.inp"
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
 	CALL set_default_masses()
@@ -548,6 +549,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    - distances used in FFC theory, using eq (6) and (13) in the ESI of J. Phys. Chem. Lett., 2020, 11, 2165–2170."
 			PRINT *,"    - standard deviations of closest distances and exponentially weighed distances."
 			PRINT *
+			PRINT *,"   Coordination Species:"
+			PRINT *,"   Automatically identifies and reports species based on a set of acceptor and donor atoms."
+			PRINT *,"   Only one molecule type can be acceptor at a time, but many molecule types can be donors."
+			PRINT *,"   (you can specify several molecule_type_index as acceptors at once but they will be automatically separated)"
+			PRINT *,"   This feature also has the capability of calculating species lifetimes."
+			PRINT *,"   To this end, the intermittent binary autocorrelation function has been implemented too."
+			PRINT *
 			PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
 			PRINT *,"Some of the more demanding routines exist also in a parallelised version."
 			PRINT *,"(see option '4' in the main menu for more information about parallelisation)"
@@ -1056,6 +1064,42 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'exponent': sets the exponent 'k' for the exponentially weighed average."
 			PRINT *," - 'standard_deviation': expects a logical ('T' or 'F')."
 			PRINT *,"    If 'T', then the standard deviation is - where reasonable - calculated."
+			PRINT *
+			PRINT *,"Speciation Input File:"
+			PRINT *,"The first line must contain the number of acceptor atoms N_acceptors you want to specify."
+			PRINT *,"Then, the following N_acceptors lines must contain two integers followed by one real number:"
+			PRINT *,"molecule_type_index - atom_index - cutoff."
+			PRINT *,"The, you need to have a line with the number of donor atoms N_donors you want to specify."
+			PRINT *,"Similar to the acceptors, this line is followed by N_donors lines describing the donor atoms."
+			PRINT *,"If two atoms are closer than the sum of their cutoffs, then they are considered as connected."
+			PRINT *,"After the acceptor and donor description, you may enter these switches"
+			PRINT *," - 'quit' Terminates the analysis. Lines after this switch are ignored."
+			PRINT *," - 'nsteps': Followed by one integer, which is interpreted as the highest timestep number to consider."
+			PRINT *," - 'sampling_interval': Expects one integer - the sampling interval,"
+			PRINT *,"    i.e. every this many steps of the trajectory will be used."
+			PRINT *," - 'maximum number of species': Expects one integer."
+			PRINT *,"    This is the maximum number of species that will be printed for one acceptor."
+			PRINT *," - 'N_neighbours': Expects one integer - the maximum number of neighbours,"
+			PRINT *,"    i.e. how many connections one acceptor may have."
+			PRINT *,"    If you encounter a neighbour_overflow error, you must increase this number."
+			PRINT *," - 'print_beads': expects a logical ('T' or 'F'). If 'T',"
+			PRINT *,"    then beads are printed along the path of each connection in the species.xyz files."
+			PRINT *," - 'new_acceptor_group' and 'new_donor_group': these switches expect one"
+			PRINT *,"    integer, which is the molecule type index, and make a new group for acceptors or donors,"
+			PRINT *,"    respectively - see also the next item."
+			PRINT *," - 'assign_to_acceptor_group' and 'assign_to_donor_group':"
+			PRINT *,"    Expects an integer, which is the atom index. This atom index is then"
+			PRINT *,"    considered part of the current group."
+			PRINT *," - 'group_elements': Doesn’t need any other input. If this switch is encountered,"
+			PRINT *,"    then prealpha will automatically create groups and assign atoms so that atoms"
+			PRINT *,"    with the same element symbol are treated together (for a given molecule type)."
+			PRINT *," - 'autocorrelation': expects a logical ('T' or 'F'). If 'T', then the "
+			PRINT *,"    binary intermittent autocorrelation function for each species is calculated and reported."
+			PRINT *," - 'log_spacing': expects a logical ('T' or 'F'). If 'T', then the time steps of the"
+			PRINT *,"    autocorrelation function are printed logarithmically (warmly recommended)."
+			PRINT *," - 'tmax':"
+			PRINT *,"    Expects an integer, which is then taken as the maximum number of steps"
+			PRINT *,"    into the future for the time correlation function."
 			PRINT *
 		END SUBROUTINE explain_input_files
 
@@ -1746,6 +1790,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		USE AUTOCORRELATION
 		USE DISTRIBUTION
 		USE DISTANCE
+		USE SPECIATION
 		IMPLICIT NONE
 		LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
 		INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index
@@ -1809,7 +1854,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 29 - Reduce the trajectory to centre of charge."
 				PRINT *," 30 - Write the full trajectory in a specific format."
 				PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
-				SELECT CASE (user_input_integer(0,31))
+				PRINT *," 32 - Calculate coordination species statistics and lifetimes."
+				SELECT CASE (user_input_integer(0,32))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2455,6 +2501,24 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 						!enough information for the analysis.
 						SKIP_ANALYSIS=.FALSE.
 					ENDIF
+				CASE (32)!speciation module.
+					smalltask=.FALSE.
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					CALL user_speciation_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_speciation)
+					IF (parallelisation_requested) THEN
+						CALL append_string("parallel_operation T ### turn on parallel operation")
+						WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+						CALL append_string(fstring)
+					ENDIF
+					CALL append_string('speciation "'//TRIM(OUTPUT_PREFIX)//&
+					&TRIM(filename_speciation)//'" ### calculate speciation statistics')
+					!enough information for the analysis.
+					SKIP_ANALYSIS=.FALSE.
 				CASE DEFAULT
 					CALL report_error(0)
 				END SELECT

@@ -1,4 +1,4 @@
-! RELEASED ON 06_Mar_2024 AT 20:07
+! RELEASED ON 08_Mar_2024 AT 14:43
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -16192,22 +16192,24 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
  LOGICAL :: dumpfirst=.TRUE.
  LOGICAL :: dumplast=.TRUE.
  !PRIVATE/PUBLIC declarations
- PUBLIC :: perform_speciation_analysis
+ PUBLIC :: perform_speciation_analysis,user_speciation_input
 
  CONTAINS
 
 !WRITING input file to unit 8, which shouldn't be open.
   !has to be compliant with 'read_velocity_correlation_body' in 'AUTOCORRELATION' module
   SUBROUTINE user_speciation_input&
-  &(parallelisation_possible,parallelisation_requested,nsteps_in,filename_speciation)
+  &(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps_in,filename_speciation)
   IMPLICIT NONE
   CHARACTER (LEN=*) :: filename_speciation
   LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
-  INTEGER,INTENT(IN) :: nsteps_in
-  INTEGER :: ios
+  INTEGER,INTENT(IN) :: nsteps_in,number_of_molecules
+  INTEGER :: ios,atom_counter,howmanyatoms,inputinteger1,inputinteger2,maxmol
+  REAL :: inputreal
   LOGICAL :: connected
    PRINT *,"Generating input for speciation analysis."
    PRINT *,"A good range of analysis covers usually 1000 steps in total, distributed over the whole trajectory."
+   PRINT *,"HOWEVER, if you want the lifetimes, you should cover the whole trajectory!"
    PRINT *,"Up to which step number of the trajectory do you want the analysis to run?"
    WRITE(*,'(" The default is currently set to ",I0,".")') nsteps_default
    nsteps=user_input_integer(1,(nsteps_in-1))
@@ -16215,24 +16217,113 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
    sampling_interval=user_input_integer(1,nsteps_in)
    parallelisation_possible=.TRUE.
-   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
-    PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
-    parallelisation_requested=user_input_logical()
-   ENDIF
-   
-   
-   
+   maxmol=number_of_molecules
+   IF (number_of_molecules==-1) maxmol=10000!unknown molecule number... expect the worst.
    WRITE(*,FMT='(A)',ADVANCE="NO") " opening speciation input file..."
    INQUIRE(UNIT=8,OPENED=connected)
    IF (connected) CALL report_error(27,exit_status=8)
    OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_speciation),IOSTAT=ios)
    IF (ios/=0) CALL report_error(46,exit_status=ios)
-   WRITE(8,'(A)') " conductivity ### type of analysis"
-   !WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
-   WRITE(8,'(" sampling_interval ",I0," ### every so many timesteps will be used")') sampling_interval
+   PRINT *,"How many acceptor atoms do you want to specify?"
+   howmanyatoms=user_input_integer(1,20)
+   WRITE(8,'(" ",I0," acceptors")') howmanyatoms
+   DO atom_counter=1,howmanyatoms
+    WRITE(*,'(" Reading information for acceptor atom ",I0," / ",I0,":")') atom_counter,howmanyatoms
+    PRINT *,"Please enter the molecule_type_index of the molecule this atom belongs to:"
+    inputinteger1=user_input_integer(1,maxmol)
+    PRINT *,"Please enter the atom_index of this atom:"
+    inputinteger2=user_input_integer(1,10000)
+    PRINT *,"Please enter the corresponding cutoff distance of this atom:"
+    inputreal=user_input_real(-2.0,15.0)
+    WRITE(8,'(" ",I0," ",I0," ",F0.3)') inputinteger1,inputinteger2,inputreal
+   ENDDO
+   PRINT *,"How many donor atoms do you want to specify?"
+   howmanyatoms=user_input_integer(1,40)
+   WRITE(8,'(" ",I0," donors")') howmanyatoms
+   DO atom_counter=1,howmanyatoms
+    WRITE(*,'(" Reading information for donor atom ",I0," / ",I0,":")') atom_counter,howmanyatoms
+    PRINT *,"Please enter the molecule_type_index of the molecule this atom belongs to:"
+    inputinteger1=user_input_integer(1,maxmol)
+    PRINT *,"Please enter the atom_index of this atom:"
+    inputinteger2=user_input_integer(1,10000)
+    PRINT *,"Please enter the corresponding cutoff distance of this atom:"
+    inputreal=user_input_real(-2.0,15.0)
+    WRITE(8,'(" ",I0," ",I0," ",F0.3)') inputinteger1,inputinteger2,inputreal
+   ENDDO
+   PRINT *,"Do you want to group atoms (y) or use every atom_index as its own group?"
+   IF (user_input_logical()) THEN
+    PRINT *,"Do you want to group atoms by element symbol (y) or specify groups manually (n)?"
+    IF (user_input_logical()) THEN
+     WRITE(8,*) "group_elements"
+    ELSE
+     PRINT *,"Do you want to create a new acceptor group (y/n)?"
+     DO WHILE (user_input_logical())
+      PRINT *,"For which molecule_type_index do you want to create this group?"
+      inputinteger1=user_input_integer(1,maxmol)
+      WRITE(8,'(" new_acceptor_group",I0)') inputinteger1
+      PRINT *,"How many atoms do you want to group together?"
+      howmanyatoms=user_input_integer(1,40)
+      DO atom_counter=1,howmanyatoms
+       WRITE(*,'(" Please enter the atom_index for atom ",I0," / ",I0," of this group:")')&
+       &atom_counter,howmanyatoms
+       inputinteger2=user_input_integer(1,maxmol)
+       WRITE(8,'(" assign_to_acceptor_group",I0)') inputinteger2
+      ENDDO
+      PRINT *,"Do you want to add *another* new acceptor group (y/n)?"
+     ENDDO
+     PRINT *,"Do you want to create a new donor group (y/n)?"
+     DO WHILE (user_input_logical())
+      PRINT *,"For which molecule_type_index do you want to create this group?"
+      inputinteger1=user_input_integer(1,maxmol)
+      WRITE(8,'(" new_donor_group",I0)') inputinteger1
+      PRINT *,"How many atoms do you want to group together?"
+      howmanyatoms=user_input_integer(1,40)
+      DO atom_counter=1,howmanyatoms
+       WRITE(*,'(" Please enter the atom_index for atom ",I0," / ",I0," of this group:")')&
+       &atom_counter,howmanyatoms
+       inputinteger2=user_input_integer(1,maxmol)
+       WRITE(8,'(" assign_to_donor_group",I0)') inputinteger2
+      ENDDO
+      PRINT *,"Do you want to add *another* new donor group (y/n)?"
+     ENDDO
+    ENDIF
+   ENDIF
+   PRINT *,"How many species do you want to allow per acceptor molecule type?"
+   inputinteger1=user_input_integer(1,100)
+   WRITE(8,'(" N_species ",I0," ### maximum number of species per acceptor molecule type")') inputinteger1
+   PRINT *,"How many neighbour connections do you want to allow per acceptor molecule?"
+   inputinteger1=user_input_integer(1,200)
+   WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
+   PRINT *,"Now let's talk about species lifetimes."
+   PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
+   calculate_autocorrelation=user_input_logical()
+   IF (calculate_autocorrelation) THEN
+    WRITE(8,'(" autocorrelation T ### calculate species time correlation")')
+    PRINT *,"Do you want to use logarithmic spacing of timesteps (ca 8-10x faster) (y/n)?"
+    IF (user_input_logical()) THEN
+     WRITE(8,'(" use_log T ### logarithmic spacing of timesteps for autocorrelation")')
+    ELSE
+     WRITE(8,'(" use_log F ### linear spacing of timesteps for autocorrelation, maximum resolution")')
+    ENDIF
+    PRINT *,"Please enter the maximum time shift of the correlation function."
+    tmax=user_input_integer(1,nsteps-1)
+    WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+   ELSE
+    WRITE(8,'(" autocorrelation F ### skip the autocorrelation")')
+   ENDIF
+   PRINT *,"Do you want to print beads indicating the connections in the example xyz files (y/n)?"
+   IF (user_input_logical()) THEN
+    WRITE(8,'(" print_beads T ### show the connections as beads in the output .xyz files")')
+   ELSE
+    WRITE(8,'(" print_beads F ### do not indicate connections in the output .xyz files")')
+   ENDIF
+   IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+    PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+    parallelisation_requested=user_input_logical()
+   ENDIF
    WRITE(8,*) "quit"
    WRITE(8,*)
-   WRITE(8,*) "This is an input file to calculate speciation statistics and dump structures."
+   WRITE(8,*) "This is an input file to calculate speciation statistics, lifetimes, and dump structures."
    WRITE(8,*) "To actually perform the implied calculation, it has to be referenced in 'general.inp'."
    ENDFILE 8
    CLOSE(UNIT=8)
@@ -17237,7 +17328,6 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   LOGICAL :: existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule,connected
   LOGICAL,DIMENSION(:),ALLOCATABLE :: potential_species_match !first dimension goes over all the species
   TYPE(species) :: species_clipboard
-  CHARACTER(LEN=1024) :: filename_time_series
   !reset the number of species logged to zero just in case.
   acceptor_list(:)%number_of_logged_species_in_acceptor_list=0
   neighbour_atom_overflow=0
@@ -17247,16 +17337,16 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    DO n_acceptor=1,N_acceptor_types,1
     INQUIRE(UNIT=10+n_acceptor,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=10+n_acceptor)
-    WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-    &//"acceptor",n_acceptor,"_time_series.dat"
-    OPEN(UNIT=10+n_acceptor,FILE=TRIM(filename_time_series),IOSTAT=ios)
+    ! WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    ! &//"acceptor",n_acceptor,"_time_series.dat"
+    OPEN(UNIT=10+n_acceptor,STATUS="SCRATCH",IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(10+n_acceptor,'(" This file contains the species NUMBER (ordering is different to output!).")')
-    WRITE(10+n_acceptor,'(" The leftmost column is the time, after that one column per molecule index.")')
-    WRITE(10+n_acceptor,ADVANCE="NO",FMT='("timeline")')
-    DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
-     WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')acceptor_molecule_index
-    ENDDO
+    ! WRITE(10+n_acceptor,'(" This file contains the species NUMBER (ordering is different to output!).")')
+    ! WRITE(10+n_acceptor,'(" The leftmost column is the time, after that one column per molecule index.")')
+    ! WRITE(10+n_acceptor,ADVANCE="NO",FMT='("timeline")')
+    ! DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
+     ! WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')acceptor_molecule_index
+    ! ENDDO
     WRITE(10+n_acceptor,*)
     IF (maxmol<give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index))&
     &maxmol=give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index)
@@ -17417,12 +17507,6 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
    ENDIF
   ENDDO
   !$OMP END DO
-  !close units for the time series
-  IF (calculate_autocorrelation) THEN
-   DO n_acceptor=1,N_acceptor_types,1
-    CLOSE(UNIT=10+n_acceptor)
-   ENDDO
-  ENDIF
   IF (calculate_autocorrelation) THEN
    IF (ALLOCATED(all_observed_species_for_timestep)) THEN
     DEALLOCATE(all_observed_species_for_timestep,STAT=deallocstatus)
@@ -18114,10 +18198,13 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
     &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_first.xyz"
     OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
-    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-    &timestep_first_occurrence,FLOAT(&
-    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
+    WRITE(species_output_header,'(A,I0," ",I0," ",I0," ",I0," xx.xx",A)')&
+    &"Try 'dump_cut T ",acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_first_occurrence,acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_first_occurrence,&
+    &acceptor_list(n_acceptor_in)%molecule_type_index,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%first_occurrence_acceptorindices(2)&
+    &,"' (choose a good cutoff distance xx.xx)"
     !Make sure we do not print doubles, but include the acceptor
     species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
     previous_donor_molecule=0
@@ -18253,10 +18340,17 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    &//"acceptor",n_acceptor_in,"_species",species_output_counter,"_last.xyz"
     OPEN(UNIT=3,FILE=TRIM(filename_speciation_output),IOSTAT=ios)
     IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
-    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-    &timestep_last_occurrence,FLOAT(&
-    &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
+    WRITE(species_output_header,'(A,I0," ",I0," ",I0," ",I0," xx.xx",A)')&
+    &"Try 'dump_cut T ",acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_last_occurrence,acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    &timestep_last_occurrence,&
+    &acceptor_list(n_acceptor_in)%molecule_type_index,acceptor_list(n_acceptor_in)%&
+    &list_of_all_species(best_index)%last_occurrence_acceptorindices(2)&
+    &,"' (choose a good cutoff distance xx.xx)"
+    ! WRITE(species_output_header,'("Timestep=",I0,", Occurrence=",E9.3)')&
+    ! &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+    ! &timestep_last_occurrence,FLOAT(&
+    ! &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)
     !Make sure we do not print doubles, but include the acceptor
     species_atomcount=give_number_of_atoms_per_molecule(acceptor_list(n_acceptor_in)%molecule_type_index)
     previous_donor_molecule=0
@@ -18520,7 +18614,6 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
   SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG(n_acceptor_in)
   IMPLICIT NONE
   INTEGER,INTENT(IN) :: n_acceptor_in
-  CHARACTER(LEN=1024) :: filename_time_series
   !$ INTERFACE
   !$  FUNCTION OMP_get_num_threads()
   !$  INTEGER :: OMP_get_num_threads
@@ -18541,23 +18634,18 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    ALLOCATE(molecule_speciesarray(MAX((nsteps-1+sampling_interval)/sampling_interval,0),&
    &give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)),STAT=allocstatus)
    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-   INQUIRE(UNIT=3,OPENED=connected)
-   IF (connected) CALL report_error(27,exit_status=3)
-   WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-   &//"acceptor",n_acceptor_in,"_time_series.dat"
-   OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
+   ! INQUIRE(UNIT=3,OPENED=connected)
+   ! IF (connected) CALL report_error(27,exit_status=3)
+   ! WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+   ! &//"acceptor",n_acceptor_in,"_time_series.dat"
+   ! OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
    IF (ios/=0) CALL report_error(26,exit_status=ios)
-   !the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval". skip the first three lines.
-   READ(3,IOSTAT=ios,FMT=*)
-            IF (ios/=0) CALL report_error(167,exit_status=ios)
-   READ(3,IOSTAT=ios,FMT=*)
-            IF (ios/=0) CALL report_error(167,exit_status=ios)
-   READ(3,IOSTAT=ios,FMT=*)
-            IF (ios/=0) CALL report_error(167,exit_status=ios)
-   WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
+   !the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval".
+   REWIND 10+n_acceptor_in
+   ! WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
    DO stepcounter=1,MAX((nsteps-1+sampling_interval)/sampling_interval,0),1
     !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
-    READ(3,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
+    READ(10+n_acceptor_in,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
     !sanity check
     IF (dummy/=(stepcounter-1)*TIME_SCALING_FACTOR*sampling_interval) CALL report_error(0)
     IF (ios/=0) THEN
@@ -18566,7 +18654,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
     ENDIF
    ENDDO
-   CLOSE(UNIT=3)
+   CLOSE(UNIT=10+n_acceptor_in)
    !Count how many entries we will need. safer than me trying to get that number with maths.
    timeline=0
    entries=0
@@ -18824,7 +18912,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
     ENDIF
     WRITE(*,'(" Starting speciation analysis.")')
     CALL refresh_IO()
-    CALL trajectory_speciation_analysis_parallel()
+    CALL trajectory_speciation_analysis_parallel() !opens UNIT=10+n_acceptor
     IF (neighbour_atom_overflow>0) CALL report_error(160,exit_status=neighbour_atom_overflow)
     IF (ANY(acceptor_list(:)%species_overflow>0))&
     &CALL report_error(161,exit_status=SUM(acceptor_list(:)%species_overflow))
@@ -18833,7 +18921,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
      WRITE(*,ADVANCE="NO",FMT='(" There was one acceptor: ")')
      CALL print_acceptor_summary(1) !allocates average_h
      IF (calculate_autocorrelation) THEN
-      CALL calculate_autocorrelation_function_from_master_array_LOG(1) !deallocates average_h
+      CALL calculate_autocorrelation_function_from_master_array_LOG(1) !deallocates average_h, closes UNIT=10+n_acceptor
      ENDIF
     ELSE
      WRITE(*,'(" There were ",I0," acceptor molecules:")') N_acceptor_types
@@ -18842,7 +18930,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
       &n_acceptor,N_acceptor_types
       CALL print_acceptor_summary(n_acceptor)
       IF (calculate_autocorrelation) THEN
-       CALL calculate_autocorrelation_function_from_master_array_LOG(n_acceptor)
+       CALL calculate_autocorrelation_function_from_master_array_LOG(n_acceptor) !deallocates average_h, closes UNIT=10+n_acceptor
       ENDIF
      ENDDO
     ENDIF
@@ -18872,6 +18960,7 @@ CHARACTER(LEN=*),PARAMETER :: filename_conductivity="conductivity.inp"!correlati
 CHARACTER(LEN=*),PARAMETER :: filename_msd="diffusion.inp" !diffusion module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_distribution="distribution.inp" !distribution module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_distance="distance.inp" !distance module standard filename
+CHARACTER(LEN=*),PARAMETER :: filename_speciation="speciation.inp"
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
  CALL set_default_masses()
@@ -18910,7 +18999,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 06_Mar_2024"
+ PRINT *, "   Date of Release: 08_Mar_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -19402,6 +19491,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    - exponentially weighed averaged distances ( weighed with exp(-k*r) )"
    PRINT *,"    - distances used in FFC theory, using eq (6) and (13) in the ESI of J. Phys. Chem. Lett., 2020, 11, 2165–2170."
    PRINT *,"    - standard deviations of closest distances and exponentially weighed distances."
+   PRINT *
+   PRINT *,"   Coordination Species:"
+   PRINT *,"   Automatically identifies and reports species based on a set of acceptor and donor atoms."
+   PRINT *,"   Only one molecule type can be acceptor at a time, but many molecule types can be donors."
+   PRINT *,"   (you can specify several molecule_type_index as acceptors at once but they will be automatically separated)"
+   PRINT *,"   This feature also has the capability of calculating species lifetimes."
+   PRINT *,"   To this end, the intermittent binary autocorrelation function has been implemented too."
    PRINT *
    PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
    PRINT *,"Some of the more demanding routines exist also in a parallelised version."
@@ -19911,6 +20007,42 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *," - 'exponent': sets the exponent 'k' for the exponentially weighed average."
    PRINT *," - 'standard_deviation': expects a logical ('T' or 'F')."
    PRINT *,"    If 'T', then the standard deviation is - where reasonable - calculated."
+   PRINT *
+   PRINT *,"Speciation Input File:"
+   PRINT *,"The first line must contain the number of acceptor atoms N_acceptors you want to specify."
+   PRINT *,"Then, the following N_acceptors lines must contain two integers followed by one real number:"
+   PRINT *,"molecule_type_index - atom_index - cutoff."
+   PRINT *,"The, you need to have a line with the number of donor atoms N_donors you want to specify."
+   PRINT *,"Similar to the acceptors, this line is followed by N_donors lines describing the donor atoms."
+   PRINT *,"If two atoms are closer than the sum of their cutoffs, then they are considered as connected."
+   PRINT *,"After the acceptor and donor description, you may enter these switches"
+   PRINT *," - 'quit' Terminates the analysis. Lines after this switch are ignored."
+   PRINT *," - 'nsteps': Followed by one integer, which is interpreted as the highest timestep number to consider."
+   PRINT *," - 'sampling_interval': Expects one integer - the sampling interval,"
+   PRINT *,"    i.e. every this many steps of the trajectory will be used."
+   PRINT *," - 'maximum number of species': Expects one integer."
+   PRINT *,"    This is the maximum number of species that will be printed for one acceptor."
+   PRINT *," - 'N_neighbours': Expects one integer - the maximum number of neighbours,"
+   PRINT *,"    i.e. how many connections one acceptor may have."
+   PRINT *,"    If you encounter a neighbour_overflow error, you must increase this number."
+   PRINT *," - 'print_beads': expects a logical ('T' or 'F'). If 'T',"
+   PRINT *,"    then beads are printed along the path of each connection in the species.xyz files."
+   PRINT *," - 'new_acceptor_group' and 'new_donor_group': these switches expect one"
+   PRINT *,"    integer, which is the molecule type index, and make a new group for acceptors or donors,"
+   PRINT *,"    respectively - see also the next item."
+   PRINT *," - 'assign_to_acceptor_group' and 'assign_to_donor_group':"
+   PRINT *,"    Expects an integer, which is the atom index. This atom index is then"
+   PRINT *,"    considered part of the current group."
+   PRINT *," - 'group_elements': Doesn’t need any other input. If this switch is encountered,"
+   PRINT *,"    then prealpha will automatically create groups and assign atoms so that atoms"
+   PRINT *,"    with the same element symbol are treated together (for a given molecule type)."
+   PRINT *," - 'autocorrelation': expects a logical ('T' or 'F'). If 'T', then the "
+   PRINT *,"    binary intermittent autocorrelation function for each species is calculated and reported."
+   PRINT *," - 'log_spacing': expects a logical ('T' or 'F'). If 'T', then the time steps of the"
+   PRINT *,"    autocorrelation function are printed logarithmically (warmly recommended)."
+   PRINT *," - 'tmax':"
+   PRINT *,"    Expects an integer, which is then taken as the maximum number of steps"
+   PRINT *,"    into the future for the time correlation function."
    PRINT *
   END SUBROUTINE explain_input_files
 
@@ -20601,6 +20733,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   USE AUTOCORRELATION
   USE DISTRIBUTION
   USE DISTANCE
+  USE SPECIATION
   IMPLICIT NONE
   LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
   INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index
@@ -20664,7 +20797,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     PRINT *," 29 - Reduce the trajectory to centre of charge."
     PRINT *," 30 - Write the full trajectory in a specific format."
     PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
-    SELECT CASE (user_input_integer(0,31))
+    PRINT *," 32 - Calculate coordination species statistics and lifetimes."
+    SELECT CASE (user_input_integer(0,32))
     CASE (0)!done here.
      EXIT
     CASE (1)!dihedral condition analysis
@@ -21310,6 +21444,24 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       !enough information for the analysis.
       SKIP_ANALYSIS=.FALSE.
      ENDIF
+    CASE (32)!speciation module.
+     smalltask=.FALSE.
+     CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+     IF (own_prefix) THEN
+      own_prefix=.FALSE.
+     ELSE
+      analysis_number=analysis_number+1
+     ENDIF
+     CALL user_speciation_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_speciation)
+     IF (parallelisation_requested) THEN
+      CALL append_string("parallel_operation T ### turn on parallel operation")
+      WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+      CALL append_string(fstring)
+     ENDIF
+     CALL append_string('speciation "'//TRIM(OUTPUT_PREFIX)//&
+     &TRIM(filename_speciation)//'" ### calculate speciation statistics')
+     !enough information for the analysis.
+     SKIP_ANALYSIS=.FALSE.
     CASE DEFAULT
      CALL report_error(0)
     END SELECT
