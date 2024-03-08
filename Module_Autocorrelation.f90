@@ -148,11 +148,11 @@ MODULE AUTOCORRELATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!WRITING input file to unit 8, which shouldn't be open.
 		!has to be compliant with 'read_velocity_correlation_body' in 'AUTOCORRELATION' module
 		SUBROUTINE user_conductivity_input&
-		&(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_conductivity)
+		&(parallelisation_possible,parallelisation_requested,nsteps,filename_conductivity)
 		IMPLICIT NONE
 		CHARACTER (LEN=*) :: filename_conductivity
 		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
-		INTEGER,INTENT(IN) :: number_of_molecules,nsteps
+		INTEGER,INTENT(IN) :: nsteps
 		INTEGER :: ios
 		LOGICAL :: connected
 			PRINT *,"Generating input for electrical conductivity."

@@ -1,4 +1,4 @@
-! RELEASED ON 08_Mar_2024 AT 14:43
+! RELEASED ON 08_Mar_2024 AT 15:33
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
