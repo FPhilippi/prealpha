@@ -1290,8 +1290,6 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!everything inside THIS loop counts as neighbours towards one species!
 					!Thus, at the end, we need to check if this species exist and update accordingly.
 					!Furthermore, at this stage, we need to initialise the species_clipboard
-					species_clipboard%total_number_of_neighbour_molecules=0
-					species_clipboard%total_number_of_neighbour_atoms=0
 					species_clipboard%number_of_logged_connections_in_species_list=0 !this corresponds to "species_clipboard%connection(:)%connection" being an empty list
 					species_clipboard%total_number_of_neighbour_atoms=0 !every neighbour atom is counted once regardless of the number of connections.
 					species_clipboard%total_number_of_neighbour_molecules=0 !every neighbour molecule is counted once regardless of the number of connections.
@@ -1328,10 +1326,10 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 									&n_acceptor,acceptor_indexcounter,n_donor,donor_indexcounter))) THEN
 										!smaller than cutoff!!!
 										IF (species_clipboard%number_of_logged_connections_in_species_list==maximum_number_of_connections) THEN
-										!overflow
-										!$OMP CRITICAL(overflow_updates)
-										neighbour_atom_overflow=neighbour_atom_overflow+1
-										!$OMP END CRITICAL(overflow_updates)
+											!overflow
+											!$OMP CRITICAL(overflow_updates)
+											neighbour_atom_overflow=neighbour_atom_overflow+1
+											!$OMP END CRITICAL(overflow_updates)
 										ELSE
 											neighbour_atom=.TRUE.
 											species_clipboard%number_of_logged_connections_in_species_list=&
@@ -2534,7 +2532,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			! WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
 			! &//"acceptor",n_acceptor_in,"_time_series.dat"
 			! OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
-			IF (ios/=0) CALL report_error(26,exit_status=ios)
+			! IF (ios/=0) CALL report_error(26,exit_status=ios)
 			!the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval".
 			REWIND 10+n_acceptor_in
 			! WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
@@ -2792,6 +2790,11 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 				END SUBROUTINE report_autocorrelation_function
 
 		END SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG
+
+		SUBROUTINE optimise_thresholds()
+		IMPLICIT NONE
+			
+		END SUBROUTINE optimise_thresholds
 
 		SUBROUTINE perform_speciation_analysis()
 		IMPLICIT NONE
