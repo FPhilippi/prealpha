@@ -3336,6 +3336,7 @@ INTEGER :: ios,n
 					FILENAME_SPECIATION_INPUT=dummy
 					WRITE(*,*) "Speciation module invoked."
 					CALL perform_speciation_analysis()
+					CALL add_reference(6)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)

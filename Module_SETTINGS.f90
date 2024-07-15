@@ -110,7 +110,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		INTEGER :: reference_number
 		LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
-	TYPE(reference_entry) :: LIST_OF_REFERENCES(5)
+	TYPE(reference_entry) :: LIST_OF_REFERENCES(6)
 	!LIST OF ERRORS HANDLED BY THE ROUTINES:
 	!0 unspecified error. These errors should (in theory) never be encountered.
 	!1 divided by zero in normalize3D
@@ -310,6 +310,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			!Julian's FFC paper
 			LIST_OF_REFERENCES(5)%reference_name="J. Phys. Chem. B., 2022, 126, 7143–7158."
 			LIST_OF_REFERENCES(5)%reference_DOI="10.1021/acs.jpcb.2c01372"
+			!The battery paper
+			LIST_OF_REFERENCES(6)%reference_name="Chem. Sci., 2024, 15, 7342–7358."
+			LIST_OF_REFERENCES(6)%reference_DOI="10.1039/D4SC01492H"
 		END SUBROUTINE initialise_references
 
 		SUBROUTINE add_reference(reference_number_to_add)

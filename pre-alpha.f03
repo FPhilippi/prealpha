@@ -1,4 +1,4 @@
-! RELEASED ON 08_Mar_2024 AT 15:33
+! RELEASED ON 15_Jul_2024 AT 20:45
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -111,7 +111,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   INTEGER :: reference_number
   LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
- TYPE(reference_entry) :: LIST_OF_REFERENCES(5)
+ TYPE(reference_entry) :: LIST_OF_REFERENCES(6)
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
  !1 divided by zero in normalize3D
@@ -311,6 +311,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    !Julian's FFC paper
    LIST_OF_REFERENCES(5)%reference_name="J. Phys. Chem. B., 2022, 126, 7143–7158."
    LIST_OF_REFERENCES(5)%reference_DOI="10.1021/acs.jpcb.2c01372"
+   !The battery paper
+   LIST_OF_REFERENCES(6)%reference_name="Chem. Sci., 2024, 15, 7342–7358."
+   LIST_OF_REFERENCES(6)%reference_DOI="10.1039/D4SC01492H"
   END SUBROUTINE initialise_references
 
   SUBROUTINE add_reference(reference_number_to_add)
@@ -17395,8 +17398,6 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      !everything inside THIS loop counts as neighbours towards one species!
      !Thus, at the end, we need to check if this species exist and update accordingly.
      !Furthermore, at this stage, we need to initialise the species_clipboard
-     species_clipboard%total_number_of_neighbour_molecules=0
-     species_clipboard%total_number_of_neighbour_atoms=0
      species_clipboard%number_of_logged_connections_in_species_list=0 !this corresponds to "species_clipboard%connection(:)%connection" being an empty list
      species_clipboard%total_number_of_neighbour_atoms=0 !every neighbour atom is counted once regardless of the number of connections.
      species_clipboard%total_number_of_neighbour_molecules=0 !every neighbour molecule is counted once regardless of the number of connections.
@@ -17433,10 +17434,10 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
          &n_acceptor,acceptor_indexcounter,n_donor,donor_indexcounter))) THEN
           !smaller than cutoff!!!
           IF (species_clipboard%number_of_logged_connections_in_species_list==maximum_number_of_connections) THEN
-          !overflow
-          !$OMP CRITICAL(overflow_updates)
-          neighbour_atom_overflow=neighbour_atom_overflow+1
-          !$OMP END CRITICAL(overflow_updates)
+           !overflow
+           !$OMP CRITICAL(overflow_updates)
+           neighbour_atom_overflow=neighbour_atom_overflow+1
+           !$OMP END CRITICAL(overflow_updates)
           ELSE
            neighbour_atom=.TRUE.
            species_clipboard%number_of_logged_connections_in_species_list=&
@@ -18639,7 +18640,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    ! WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
    ! &//"acceptor",n_acceptor_in,"_time_series.dat"
    ! OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
-   IF (ios/=0) CALL report_error(26,exit_status=ios)
+   ! IF (ios/=0) CALL report_error(26,exit_status=ios)
    !the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval".
    REWIND 10+n_acceptor_in
    ! WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
@@ -18898,6 +18899,11 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
 
   END SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG
 
+  SUBROUTINE optimise_thresholds()
+  IMPLICIT NONE
+   
+  END SUBROUTINE optimise_thresholds
+
   SUBROUTINE perform_speciation_analysis()
   IMPLICIT NONE
   INTEGER :: n_acceptor
@@ -18999,7 +19005,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 08_Mar_2024"
+ PRINT *, "   Date of Release: 15_Jul_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -22279,6 +22285,7 @@ INTEGER :: ios,n
      FILENAME_SPECIATION_INPUT=dummy
      WRITE(*,*) "Speciation module invoked."
      CALL perform_speciation_analysis()
+     CALL add_reference(6)
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
