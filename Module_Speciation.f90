@@ -23,6 +23,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL,PARAMETER :: print_connection_beads_default=.FALSE.
 	LOGICAL,PARAMETER :: calculate_autocorrelation_default=.FALSE.
 	LOGICAL,PARAMETER :: use_logarithmic_spacing_default=.FALSE.
+	LOGICAL,PARAMETER :: dump_jump_distances_default=.FALSE.
+	LOGICAL,PARAMETER :: ignorefirst_default=.TRUE. !if .TRUE., then the first segment of "being the same species is ignored" - i.e. only jumps not interrupted by the beginning and end of the trajectory are considered.
 	!variables
 	INTEGER :: nsteps=nsteps_default !how many steps to use from trajectory
 	INTEGER :: sampling_interval=sampling_interval_default
@@ -37,6 +39,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL :: print_connection_beads=print_connection_beads_default
 	LOGICAL :: calculate_autocorrelation=calculate_autocorrelation_default
 	LOGICAL :: use_logarithmic_spacing=use_logarithmic_spacing_default
+	LOGICAL :: dump_jump_distances=dump_jump_distances_default
+	LOGICAL :: ignorefirst=ignorefirst_default
 	REAL,DIMENSION(:,:,:,:),ALLOCATABLE :: squared_cutoff_list !the squared cutoffs. The dimensions are: entry of acceptor_list -- entry of acceptor atom_index_list -- entry of donor_list -- entry of donor atom_index_list.
 	TYPE,PRIVATE :: connections
 		!This one saves a specific pair of atoms as being connected.
@@ -2519,8 +2523,10 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 		REAL(WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: temp_function !running over the possible species.
 		INTEGER,DIMENSION(:,:),ALLOCATABLE :: molecule_speciesarray !This array essentially contains the information in the time_series file. first dimension is timestep, second dimension are the molecule indices.
 		INTEGER,DIMENSION(:),ALLOCATABLE :: timesteps_array !which timestep is this entry in autocorrelation_function?
-		INTEGER :: allocstatus,deallocstatus,ios,stepcounter,species_counter,dummy,molecule_counter,upper_limit
+		INTEGER :: allocstatus,deallocstatus,ios,stepcounter,species_counter,dummy,molecule_counter,upper_limit,firststep
+		REAL :: species_MSD(3)
 		LOGICAL :: connected
+		CHARACTER(LEN=1024) :: filename_MSD_output
 			WRITE(*,'("   Calculating species autocorrelation function for this acceptor:")')
 			!allocate memory for the molecule_speciesarray and fill from file.
 			IF (ALLOCATED(molecule_speciesarray)) CALL report_error(0)
@@ -2593,8 +2599,16 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
 			!initialise autocorrelation_function.
 			autocorrelation_function(:,:)=0.0_DP
+			!If necessary, open output for MSDs
+			IF (dump_jump_distances) THEN
+				WRITE(filename_MSD_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+				&//"acceptor",n_acceptor_in,"_jumps.dat"
+				OPEN(UNIT=3,FILE=TRIM(filename_MSD_output),IOSTAT=ios)
+				IF (ios/=0) CALL report_error(26,exit_status=ios)
+				WRITE(3,'("#Species timeline MSD")') 
+			ENDIF
 			!$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(temp_function,timeline,logarithmic_entry_counter,stepcounter)&
-			!$OMP PRIVATE (species_counter,allocstatus)
+			!$OMP PRIVATE (species_counter,allocstatus,firststep,species_MSD)
 			!$OMP SINGLE
 		 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 		 !$ 	WRITE (*,ADVANCE="NO",FMT='(A,I0)') "     ### Parallel execution on ",OMP_get_num_threads()
@@ -2617,6 +2631,39 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			!iterate over molecules and pass chunks to the subroutine that iterates over stepcounter
 			!$OMP DO SCHEDULE(STATIC,1)
 			DO molecule_counter=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index),1
+				!This is an extra task that not everyone will care about: dump the jump distances!
+				IF (dump_jump_distances) THEN
+					species_counter=molecule_speciesarray(1,molecule_counter)
+					firststep=1
+					DO stepcounter=2,upper_limit,1
+						!the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
+						IF (molecule_speciesarray(stepcounter,molecule_counter)/=species_counter) THEN
+							!we have a change in species! Yay!
+							IF (.NOT.((firststep==1).AND.(ignorefirst))) THEN
+								IF (stepcounter-firststep>1) THEN
+									!because at "stepcounter" we have detected a change, what matters is "stepcounter-1".
+									!first, get the time difference between start and end.
+									
+									!get the position at "stepcounter-1"
+									species_MSD=give_center_of_mass((stepcounter-1)*sampling_interval,&
+									&acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
+									!subtract the position at "firststep"
+									species_MSD=species_MSD-give_center_of_mass(firststep*sampling_interval,&
+									&acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
+									!print the MSD and the time
+									!$OMP CRITICAL(species_MSD)
+										WRITE(3,*) species_counter,&
+										&(stepcounter-1-firststep)*TIME_SCALING_FACTOR*sampling_interval,&
+										&SUM(species_MSD**2)
+									!$OMP END CRITICAL(species_MSD)
+								ENDIF
+							ENDIF
+							!update first step
+							firststep=stepcounter
+							species_counter=molecule_speciesarray(stepcounter,molecule_counter)
+						ENDIF
+					ENDDO
+				ENDIF
 				!'timeline' is the argument of the autocorrelation_function, i.e. the time shift of the original function.
 				!for example, if the current shift is timeline=1000, and there are 10000 timesteps in total,
 				!then the argument has to be evaluated from (h(0+0)-<h>)(h(0+1000)-<h>) up to (h(9000+0)-<h>)(h(9000+1000)-<h>)
@@ -2625,12 +2672,12 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 					timeline=timesteps_array(logarithmic_entry_counter)
 					!inner loop iterates over the whole chunk, i.e. the subset of the autocorr_array for the molecule in question.
 					temp_function(:)=0.0d0
-					DO stepcounter=1,upper_limit-timeline+1,1
+					DO stepcounter=1,upper_limit-timeline,1
 						!the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
 						!this is the central part of the whole autocorrelation process.
 						!because we have the species, it should look something like this.....
 						DO species_counter=0,acceptor_list(n_acceptor_in)%number_of_logged_species_in_acceptor_list,1
-							IF (molecule_speciesarray(stepcounter,molecule_counter)==species_counter)THEN
+							IF (molecule_speciesarray(stepcounter,molecule_counter)==species_counter) THEN
 								!h(t0) is one
 								IF (molecule_speciesarray(stepcounter+timeline,molecule_counter)==species_counter)THEN
 									!h(t0+t) is one
@@ -2659,7 +2706,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 					!$OMP CRITICAL(autocorrelation_updates)
 					autocorrelation_function(logarithmic_entry_counter,:)=&
 					&autocorrelation_function(logarithmic_entry_counter,:)+&
-					&temp_function(:)/DFLOAT(upper_limit-timeline+1)
+					&temp_function(:)/DFLOAT(upper_limit-timeline)
 					!$OMP END CRITICAL(autocorrelation_updates)
 				ENDDO! End of outer loop over time shifts
 				!$OMP CRITICAL(progress)
@@ -2680,6 +2727,9 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			autocorrelation_function(:,:)=autocorrelation_function(:,:)/&
 			&DFLOAT(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))
 			!print / report autocorrelation function
+			IF (dump_jump_distances) THEN
+				CLOSE(UNIT=3)
+			ENDIF
 			CALL report_autocorrelation_function()
 			DEALLOCATE(timesteps_array,STAT=deallocstatus)
 			IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
