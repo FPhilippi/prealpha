@@ -1,4 +1,4 @@
-! RELEASED ON 15_Jul_2024 AT 20:45
+! RELEASED ON 22_Jul_2024 AT 20:23
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -18627,12 +18627,13 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
   REAL(WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: temp_function !running over the possible species.
   INTEGER,DIMENSION(:,:),ALLOCATABLE :: molecule_speciesarray !This array essentially contains the information in the time_series file. first dimension is timestep, second dimension are the molecule indices.
   INTEGER,DIMENSION(:),ALLOCATABLE :: timesteps_array !which timestep is this entry in autocorrelation_function?
-  INTEGER :: allocstatus,deallocstatus,ios,stepcounter,species_counter,dummy,molecule_counter
+  INTEGER :: allocstatus,deallocstatus,ios,stepcounter,species_counter,dummy,molecule_counter,upper_limit
   LOGICAL :: connected
    WRITE(*,'("   Calculating species autocorrelation function for this acceptor:")')
    !allocate memory for the molecule_speciesarray and fill from file.
    IF (ALLOCATED(molecule_speciesarray)) CALL report_error(0)
-   ALLOCATE(molecule_speciesarray(MAX((nsteps-1+sampling_interval)/sampling_interval,0),&
+   upper_limit=MAX((nsteps-1+sampling_interval)/sampling_interval,0)
+   ALLOCATE(molecule_speciesarray(upper_limit,&
    &give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index)),STAT=allocstatus)
    IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
    ! INQUIRE(UNIT=3,OPENED=connected)
@@ -18644,7 +18645,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    !the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval".
    REWIND 10+n_acceptor_in
    ! WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
-   DO stepcounter=1,MAX((nsteps-1+sampling_interval)/sampling_interval,0),1
+   DO stepcounter=1,upper_limit,1
     !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
     READ(10+n_acceptor_in,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
     !sanity check
@@ -18732,7 +18733,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
      timeline=timesteps_array(logarithmic_entry_counter)
      !inner loop iterates over the whole chunk, i.e. the subset of the autocorr_array for the molecule in question.
      temp_function(:)=0.0d0
-     DO stepcounter=1,tmax-timeline+1,1
+     DO stepcounter=1,upper_limit-timeline+1,1
       !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
       !this is the central part of the whole autocorrelation process.
       !because we have the species, it should look something like this.....
@@ -18765,7 +18766,8 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
      !Normalise result. For the above example, this would be division by 9000
      !$OMP CRITICAL(autocorrelation_updates)
      autocorrelation_function(logarithmic_entry_counter,:)=&
-     &autocorrelation_function(logarithmic_entry_counter,:)+temp_function(:)/DFLOAT(tmax-timeline+1)
+     &autocorrelation_function(logarithmic_entry_counter,:)+&
+     &temp_function(:)/DFLOAT(upper_limit-timeline+1)
      !$OMP END CRITICAL(autocorrelation_updates)
     ENDDO! End of outer loop over time shifts
     !$OMP CRITICAL(progress)
@@ -19005,7 +19007,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 15_Jul_2024"
+ PRINT *, "   Date of Release: 22_Jul_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
