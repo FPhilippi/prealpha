@@ -19,6 +19,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL,PARAMETER :: default_mass_phosphorus=30.974
 	REAL,PARAMETER :: default_mass_lithium=6.94
 	REAL,PARAMETER :: default_mass_sodium=22.990
+	REAL,PARAMETER :: default_mass_magnesium=24.305
 
 	REAL,PARAMETER :: default_charge_hydrogen=0.0
 	REAL,PARAMETER :: default_charge_fluorine=0.0
@@ -33,6 +34,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL,PARAMETER :: default_charge_sulfur=0.0
 	REAL,PARAMETER :: default_charge_phosphorus=0.0
 	REAL,PARAMETER :: default_charge_lithium=0.0
+	REAL,PARAMETER :: default_charge_magnesium=0.0
 	!variables
 	REAL :: charge_hydrogen=default_charge_hydrogen
 	REAL :: charge_fluorine=default_charge_fluorine
@@ -47,6 +49,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: charge_phosphorus=default_charge_phosphorus
 	REAL :: charge_lithium=default_charge_lithium
 	REAL :: charge_sodium=default_charge_sodium
+	REAL :: charge_magnesium=default_charge_magnesium
 
 	REAL :: mass_hydrogen=default_mass_hydrogen
 	REAL :: mass_fluorine=default_mass_fluorine
@@ -61,6 +64,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: mass_phosphorus=default_mass_phosphorus
 	REAL :: mass_lithium=default_mass_lithium
 	REAL :: mass_sodium=default_mass_sodium
+	REAL :: mass_magnesium=default_mass_magnesium
 	LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
 	!fragment lists: store the atom_indices of the fragments.
 	INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -189,6 +193,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			mass_phosphorus=default_mass_phosphorus
 			mass_lithium=default_mass_lithium
 			mass_sodium=default_mass_sodium
+			mass_magnesium=default_mass_magnesium
 		END SUBROUTINE set_default_masses
 
 		SUBROUTINE set_default_charges()
@@ -206,11 +211,12 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			charge_phosphorus=default_charge_phosphorus
 			charge_lithium=default_charge_lithium
 			charge_sodium=default_charge_sodium
+			charge_magnesium=default_charge_magnesium
 		END SUBROUTINE set_default_charges
 
 		SUBROUTINE subtract_drude_masses()
 		IMPLICIT NONE
-			IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F"
+			IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Cl"
 			mass_nitrogen=mass_nitrogen-drude_mass
 			mass_oxygen=mass_oxygen-drude_mass
 			mass_carbon=mass_carbon-drude_mass
@@ -218,6 +224,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			mass_phosphorus=mass_phosphorus-drude_mass
 			mass_lithium=mass_lithium-drude_mass
 			mass_fluorine=mass_fluorine-drude_mass
+			mass_magnesium=mass_magnesium-drude_mass
+			mass_chlorine=mass_chlorine-drude_mass
 		END SUBROUTINE subtract_drude_masses
 
 		SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
@@ -3463,6 +3471,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						old_charge=charge_sodium
 						charge_sodium=new_charge
 						element_name_full="Sodium"
+					CASE ("Mg")
+						old_charge=charge_magnesium
+						charge_magnesium=new_charge
+						element_name_full="Magnesium"
 					CASE ("D","X")
 						old_charge=drude_charge
 						drude_charge=new_charge
@@ -3540,6 +3552,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						old_mass=mass_sodium
 						mass_sodium=new_mass
 						element_name_full="Sodium"
+					CASE ("Mg")
+						old_mass=mass_magnesium
+						mass_magnesium=new_mass
+						element_name_full="Magnesium"
 					CASE ("D","X")
 						old_mass=drude_mass
 						drude_mass=new_mass
@@ -4475,6 +4491,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				atomic_weight=mass_iodine
 			CASE ("Na")
 				atomic_weight=(mass_sodium)
+			CASE ("Mg")
+				atomic_weight=(mass_magnesium)
 			CASE ("N")
 				atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
 			CASE ("O")
@@ -4530,6 +4548,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CASE ("Li")
 				atomic_charge=charge_lithium
 			CASE ("Na")
+				atomic_charge=charge_magnesium
+			CASE ("Mg")
 				atomic_charge=charge_sodium
 			CASE ("X")
 				atomic_charge=drude_charge

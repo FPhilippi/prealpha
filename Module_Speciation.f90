@@ -193,6 +193,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			PRINT *,"How many neighbour connections do you want to allow per acceptor molecule?"
 			inputinteger1=user_input_integer(1,200)
 			WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
+			WRITE(8,'(" ",I0," nsteps")') nsteps
+			WRITE(8,'(" ",I0," sampling_interval")') sampling_interval
 			PRINT *,"Now let's talk about species lifetimes."
 			PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
 			calculate_autocorrelation=user_input_logical()
@@ -2603,9 +2605,9 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			IF (dump_jump_distances) THEN
 				WRITE(filename_MSD_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
 				&//"acceptor",n_acceptor_in,"_jumps.dat"
-				OPEN(UNIT=3,FILE=TRIM(filename_MSD_output),IOSTAT=ios)
+				OPEN(UNIT=10,FILE=TRIM(filename_MSD_output),IOSTAT=ios)!,STATUS="SCRATCH"
 				IF (ios/=0) CALL report_error(26,exit_status=ios)
-				WRITE(3,'("#Species timeline MSD")') 
+				WRITE(10,'("#Species timeline MSD")') 
 			ENDIF
 			!$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(temp_function,timeline,logarithmic_entry_counter,stepcounter)&
 			!$OMP PRIVATE (species_counter,allocstatus,firststep,species_MSD)
@@ -2642,8 +2644,6 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 							IF (.NOT.((firststep==1).AND.(ignorefirst))) THEN
 								IF (stepcounter-firststep>1) THEN
 									!because at "stepcounter" we have detected a change, what matters is "stepcounter-1".
-									!first, get the time difference between start and end.
-									
 									!get the position at "stepcounter-1"
 									species_MSD=give_center_of_mass((stepcounter-1)*sampling_interval,&
 									&acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
@@ -2652,7 +2652,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 									&acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
 									!print the MSD and the time
 									!$OMP CRITICAL(species_MSD)
-										WRITE(3,*) species_counter,&
+										WRITE(10,*) species_counter,&
 										&(stepcounter-1-firststep)*TIME_SCALING_FACTOR*sampling_interval,&
 										&SUM(species_MSD**2)
 									!$OMP END CRITICAL(species_MSD)
@@ -2728,7 +2728,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			&DFLOAT(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))
 			!print / report autocorrelation function
 			IF (dump_jump_distances) THEN
-				CLOSE(UNIT=3)
+				CLOSE(UNIT=10)
 			ENDIF
 			CALL report_autocorrelation_function()
 			DEALLOCATE(timesteps_array,STAT=deallocstatus)

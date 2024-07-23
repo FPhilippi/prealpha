@@ -1,4 +1,4 @@
-! RELEASED ON 22_Jul_2024 AT 22:04
+! RELEASED ON 23_Jul_2024 AT 19:08
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -1557,6 +1557,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL,PARAMETER :: default_mass_phosphorus=30.974
  REAL,PARAMETER :: default_mass_lithium=6.94
  REAL,PARAMETER :: default_mass_sodium=22.990
+ REAL,PARAMETER :: default_mass_magnesium=24.305
 
  REAL,PARAMETER :: default_charge_hydrogen=0.0
  REAL,PARAMETER :: default_charge_fluorine=0.0
@@ -1571,6 +1572,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL,PARAMETER :: default_charge_sulfur=0.0
  REAL,PARAMETER :: default_charge_phosphorus=0.0
  REAL,PARAMETER :: default_charge_lithium=0.0
+ REAL,PARAMETER :: default_charge_magnesium=0.0
  !variables
  REAL :: charge_hydrogen=default_charge_hydrogen
  REAL :: charge_fluorine=default_charge_fluorine
@@ -1585,6 +1587,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL :: charge_phosphorus=default_charge_phosphorus
  REAL :: charge_lithium=default_charge_lithium
  REAL :: charge_sodium=default_charge_sodium
+ REAL :: charge_magnesium=default_charge_magnesium
 
  REAL :: mass_hydrogen=default_mass_hydrogen
  REAL :: mass_fluorine=default_mass_fluorine
@@ -1599,6 +1602,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL :: mass_phosphorus=default_mass_phosphorus
  REAL :: mass_lithium=default_mass_lithium
  REAL :: mass_sodium=default_mass_sodium
+ REAL :: mass_magnesium=default_mass_magnesium
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1727,6 +1731,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    mass_phosphorus=default_mass_phosphorus
    mass_lithium=default_mass_lithium
    mass_sodium=default_mass_sodium
+   mass_magnesium=default_mass_magnesium
   END SUBROUTINE set_default_masses
 
   SUBROUTINE set_default_charges()
@@ -1744,11 +1749,12 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    charge_phosphorus=default_charge_phosphorus
    charge_lithium=default_charge_lithium
    charge_sodium=default_charge_sodium
+   charge_magnesium=default_charge_magnesium
   END SUBROUTINE set_default_charges
 
   SUBROUTINE subtract_drude_masses()
   IMPLICIT NONE
-   IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F"
+   IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Cl"
    mass_nitrogen=mass_nitrogen-drude_mass
    mass_oxygen=mass_oxygen-drude_mass
    mass_carbon=mass_carbon-drude_mass
@@ -1756,6 +1762,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    mass_phosphorus=mass_phosphorus-drude_mass
    mass_lithium=mass_lithium-drude_mass
    mass_fluorine=mass_fluorine-drude_mass
+   mass_magnesium=mass_magnesium-drude_mass
+   mass_chlorine=mass_chlorine-drude_mass
   END SUBROUTINE subtract_drude_masses
 
   SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
@@ -5001,6 +5009,10 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       old_charge=charge_sodium
       charge_sodium=new_charge
       element_name_full="Sodium"
+     CASE ("Mg")
+      old_charge=charge_magnesium
+      charge_magnesium=new_charge
+      element_name_full="Magnesium"
      CASE ("D","X")
       old_charge=drude_charge
       drude_charge=new_charge
@@ -5078,6 +5090,10 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       old_mass=mass_sodium
       mass_sodium=new_mass
       element_name_full="Sodium"
+     CASE ("Mg")
+      old_mass=mass_magnesium
+      mass_magnesium=new_mass
+      element_name_full="Magnesium"
      CASE ("D","X")
       old_mass=drude_mass
       drude_mass=new_mass
@@ -6013,6 +6029,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     atomic_weight=mass_iodine
    CASE ("Na")
     atomic_weight=(mass_sodium)
+   CASE ("Mg")
+    atomic_weight=(mass_magnesium)
    CASE ("N")
     atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
    CASE ("O")
@@ -6068,6 +6086,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    CASE ("Li")
     atomic_charge=charge_lithium
    CASE ("Na")
+    atomic_charge=charge_magnesium
+   CASE ("Mg")
     atomic_charge=charge_sodium
    CASE ("X")
     atomic_charge=drude_charge
@@ -16301,6 +16321,8 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    PRINT *,"How many neighbour connections do you want to allow per acceptor molecule?"
    inputinteger1=user_input_integer(1,200)
    WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
+   WRITE(8,'(" ",I0," nsteps")') nsteps
+   WRITE(8,'(" ",I0," sampling_interval")') sampling_interval
    PRINT *,"Now let's talk about species lifetimes."
    PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
    calculate_autocorrelation=user_input_logical()
@@ -18711,9 +18733,9 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    IF (dump_jump_distances) THEN
     WRITE(filename_MSD_output,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
     &//"acceptor",n_acceptor_in,"_jumps.dat"
-    OPEN(UNIT=3,FILE=TRIM(filename_MSD_output),IOSTAT=ios)
+    OPEN(UNIT=10,FILE=TRIM(filename_MSD_output),IOSTAT=ios)!,STATUS="SCRATCH"
     IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(3,'("#Species timeline MSD")') 
+    WRITE(10,'("#Species timeline MSD")') 
    ENDIF
    !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(temp_function,timeline,logarithmic_entry_counter,stepcounter)&
    !$OMP PRIVATE (species_counter,allocstatus,firststep,species_MSD)
@@ -18750,8 +18772,6 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
        IF (.NOT.((firststep==1).AND.(ignorefirst))) THEN
         IF (stepcounter-firststep>1) THEN
          !because at "stepcounter" we have detected a change, what matters is "stepcounter-1".
-         !first, get the time difference between start and end.
-         
          !get the position at "stepcounter-1"
          species_MSD=give_center_of_mass((stepcounter-1)*sampling_interval,&
          &acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
@@ -18760,7 +18780,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
          &acceptor_list(n_acceptor_in)%molecule_type_index,molecule_counter)
          !print the MSD and the time
          !$OMP CRITICAL(species_MSD)
-          WRITE(3,*) species_counter,&
+          WRITE(10,*) species_counter,&
           &(stepcounter-1-firststep)*TIME_SCALING_FACTOR*sampling_interval,&
           &SUM(species_MSD**2)
          !$OMP END CRITICAL(species_MSD)
@@ -18836,7 +18856,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    &DFLOAT(give_number_of_molecules_per_step(acceptor_list(n_acceptor_in)%molecule_type_index))
    !print / report autocorrelation function
    IF (dump_jump_distances) THEN
-    CLOSE(UNIT=3)
+    CLOSE(UNIT=10)
    ENDIF
    CALL report_autocorrelation_function()
    DEALLOCATE(timesteps_array,STAT=deallocstatus)
@@ -19057,7 +19077,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 22_Jul_2024"
+ PRINT *, "   Date of Release: 23_Jul_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -19785,7 +19805,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Furthermore, the support of drude particles can be turned on by adding:"
    PRINT *,"      masses 1"
    PRINT *,"      X 0.4"
-   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li,F - but not Hydrogen."
+   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li,F,Mg,Cl - but not Hydrogen."
    PRINT *,"    This keyword changes the defaults, i.e. ALL atoms of type a,X,P,.... see also:"
    PRINT *," - 'atomic_masses':"
    PRINT *,"    this keyword triggers the specification of custom atomic masses."
@@ -19796,7 +19816,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    The order is important:"
    PRINT *,"      1) The program starts with its own defaults, such as 12.011 for carbon."
    PRINT *,"      2) If necessary, these values are changed by 'default_masses'"
-   PRINT *,"      3) Any positive drude mass 'X' or 'D', if present, is subtracted from N,O,C,S,P,Li,F."
+   PRINT *,"      3) Any positive drude mass 'X' or 'D', if present, is subtracted from N,O,C,S,P,Li,F,Mg,Cl."
    PRINT *,"      4) After that, masses of particular atoms are overwritten by 'atomic_masses'."
    PRINT *," - 'default_charges' and 'atomic_charges'"
    PRINT *,"    These two keywords can be used to specify atomic charges."
