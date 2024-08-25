@@ -20,6 +20,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL,PARAMETER :: default_mass_lithium=6.94
 	REAL,PARAMETER :: default_mass_sodium=22.990
 	REAL,PARAMETER :: default_mass_magnesium=24.305
+	REAL,PARAMETER :: default_mass_zinc=65.38
+	REAL,PARAMETER :: default_mass_calcium=40.078
 
 	REAL,PARAMETER :: default_charge_hydrogen=0.0
 	REAL,PARAMETER :: default_charge_fluorine=0.0
@@ -35,6 +37,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL,PARAMETER :: default_charge_phosphorus=0.0
 	REAL,PARAMETER :: default_charge_lithium=0.0
 	REAL,PARAMETER :: default_charge_magnesium=0.0
+	REAL,PARAMETER :: default_charge_zinc=0.0
+	REAL,PARAMETER :: default_charge_calcium=0.0
+
 	!variables
 	REAL :: charge_hydrogen=default_charge_hydrogen
 	REAL :: charge_fluorine=default_charge_fluorine
@@ -50,6 +55,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: charge_lithium=default_charge_lithium
 	REAL :: charge_sodium=default_charge_sodium
 	REAL :: charge_magnesium=default_charge_magnesium
+	REAL :: charge_calcium=default_charge_calcium
+	REAL :: charge_zinc=default_charge_zinc
 
 	REAL :: mass_hydrogen=default_mass_hydrogen
 	REAL :: mass_fluorine=default_mass_fluorine
@@ -65,6 +72,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	REAL :: mass_lithium=default_mass_lithium
 	REAL :: mass_sodium=default_mass_sodium
 	REAL :: mass_magnesium=default_mass_magnesium
+	REAL :: mass_calcium=default_mass_calcium
+	REAL :: mass_zinc=default_mass_zinc
 	LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
 	!fragment lists: store the atom_indices of the fragments.
 	INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -194,6 +203,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			mass_lithium=default_mass_lithium
 			mass_sodium=default_mass_sodium
 			mass_magnesium=default_mass_magnesium
+			mass_calcium=default_mass_calcium
+			mass_zinc=default_mass_zinc
 		END SUBROUTINE set_default_masses
 
 		SUBROUTINE set_default_charges()
@@ -212,11 +223,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			charge_lithium=default_charge_lithium
 			charge_sodium=default_charge_sodium
 			charge_magnesium=default_charge_magnesium
+			charge_calcium=default_charge_calcium
+			charge_zinc=default_charge_zinc
 		END SUBROUTINE set_default_charges
 
 		SUBROUTINE subtract_drude_masses()
 		IMPLICIT NONE
-			IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Cl"
+			IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Ca,Zn,Cl"
 			mass_nitrogen=mass_nitrogen-drude_mass
 			mass_oxygen=mass_oxygen-drude_mass
 			mass_carbon=mass_carbon-drude_mass
@@ -226,6 +239,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			mass_fluorine=mass_fluorine-drude_mass
 			mass_magnesium=mass_magnesium-drude_mass
 			mass_chlorine=mass_chlorine-drude_mass
+			mass_zinc=mass_zinc-drude_mass
+			mass_calcium=mass_calcium-drude_mass
 		END SUBROUTINE subtract_drude_masses
 
 		SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
@@ -3475,6 +3490,14 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						old_charge=charge_magnesium
 						charge_magnesium=new_charge
 						element_name_full="Magnesium"
+					CASE ("Zn")
+						old_charge=charge_zinc
+						charge_zinc=new_charge
+						element_name_full="Zinc"
+					CASE ("Ca")
+						old_charge=charge_calcium
+						charge_calcium=new_charge
+						element_name_full="Calcium"
 					CASE ("D","X")
 						old_charge=drude_charge
 						drude_charge=new_charge
@@ -3556,6 +3579,14 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						old_mass=mass_magnesium
 						mass_magnesium=new_mass
 						element_name_full="Magnesium"
+					CASE ("Zn")
+						old_mass=mass_zinc
+						mass_zinc=new_mass
+						element_name_full="Zinc"
+					CASE ("Ca")
+						old_mass=mass_calcium
+						mass_calcium=new_mass
+						element_name_full="Calcium"
 					CASE ("D","X")
 						old_mass=drude_mass
 						drude_mass=new_mass
@@ -4493,6 +4524,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				atomic_weight=(mass_sodium)
 			CASE ("Mg")
 				atomic_weight=(mass_magnesium)
+			CASE ("Zn")
+				atomic_weight=(mass_zinc)
+			CASE ("Ca")
+				atomic_weight=(mass_calcium)
 			CASE ("N")
 				atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
 			CASE ("O")
@@ -4548,9 +4583,13 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			CASE ("Li")
 				atomic_charge=charge_lithium
 			CASE ("Na")
-				atomic_charge=charge_magnesium
-			CASE ("Mg")
 				atomic_charge=charge_sodium
+			CASE ("Mg")
+				atomic_charge=charge_magnesium
+			CASE ("Zn")
+				atomic_charge=charge_zinc
+			CASE ("Ca")
+				atomic_charge=charge_calcium
 			CASE ("X")
 				atomic_charge=drude_charge
 			CASE ("D")

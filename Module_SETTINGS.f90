@@ -1272,6 +1272,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				covalence_radius=1.34
 			CASE ("Na")
 				covalence_radius=1.54
+			CASE ("Mg")
+				covalence_radius=1.39
+			CASE ("Zn")
+				covalence_radius=1.18
+			CASE ("Ca")
+				covalence_radius=1.71
 			CASE DEFAULT
 				covalence_radius=1.00
 			END SELECT

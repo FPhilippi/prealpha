@@ -1,4 +1,4 @@
-! RELEASED ON 25_Aug_2024 AT 13:37
+! RELEASED ON 25_Aug_2024 AT 14:29
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -1273,6 +1273,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     covalence_radius=1.34
    CASE ("Na")
     covalence_radius=1.54
+   CASE ("Mg")
+    covalence_radius=1.39
+   CASE ("Zn")
+    covalence_radius=1.18
+   CASE ("Ca")
+    covalence_radius=1.71
    CASE DEFAULT
     covalence_radius=1.00
    END SELECT
@@ -1560,6 +1566,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL,PARAMETER :: default_mass_lithium=6.94
  REAL,PARAMETER :: default_mass_sodium=22.990
  REAL,PARAMETER :: default_mass_magnesium=24.305
+ REAL,PARAMETER :: default_mass_zinc=65.38
+ REAL,PARAMETER :: default_mass_calcium=40.078
 
  REAL,PARAMETER :: default_charge_hydrogen=0.0
  REAL,PARAMETER :: default_charge_fluorine=0.0
@@ -1575,6 +1583,9 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL,PARAMETER :: default_charge_phosphorus=0.0
  REAL,PARAMETER :: default_charge_lithium=0.0
  REAL,PARAMETER :: default_charge_magnesium=0.0
+ REAL,PARAMETER :: default_charge_zinc=0.0
+ REAL,PARAMETER :: default_charge_calcium=0.0
+
  !variables
  REAL :: charge_hydrogen=default_charge_hydrogen
  REAL :: charge_fluorine=default_charge_fluorine
@@ -1590,6 +1601,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL :: charge_lithium=default_charge_lithium
  REAL :: charge_sodium=default_charge_sodium
  REAL :: charge_magnesium=default_charge_magnesium
+ REAL :: charge_calcium=default_charge_calcium
+ REAL :: charge_zinc=default_charge_zinc
 
  REAL :: mass_hydrogen=default_mass_hydrogen
  REAL :: mass_fluorine=default_mass_fluorine
@@ -1605,6 +1618,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  REAL :: mass_lithium=default_mass_lithium
  REAL :: mass_sodium=default_mass_sodium
  REAL :: mass_magnesium=default_mass_magnesium
+ REAL :: mass_calcium=default_mass_calcium
+ REAL :: mass_zinc=default_mass_zinc
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1734,6 +1749,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    mass_lithium=default_mass_lithium
    mass_sodium=default_mass_sodium
    mass_magnesium=default_mass_magnesium
+   mass_calcium=default_mass_calcium
+   mass_zinc=default_mass_zinc
   END SUBROUTINE set_default_masses
 
   SUBROUTINE set_default_charges()
@@ -1752,11 +1769,13 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    charge_lithium=default_charge_lithium
    charge_sodium=default_charge_sodium
    charge_magnesium=default_charge_magnesium
+   charge_calcium=default_charge_calcium
+   charge_zinc=default_charge_zinc
   END SUBROUTINE set_default_charges
 
   SUBROUTINE subtract_drude_masses()
   IMPLICIT NONE
-   IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Cl"
+   IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Ca,Zn,Cl"
    mass_nitrogen=mass_nitrogen-drude_mass
    mass_oxygen=mass_oxygen-drude_mass
    mass_carbon=mass_carbon-drude_mass
@@ -1766,6 +1785,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    mass_fluorine=mass_fluorine-drude_mass
    mass_magnesium=mass_magnesium-drude_mass
    mass_chlorine=mass_chlorine-drude_mass
+   mass_zinc=mass_zinc-drude_mass
+   mass_calcium=mass_calcium-drude_mass
   END SUBROUTINE subtract_drude_masses
 
   SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
@@ -5015,6 +5036,14 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       old_charge=charge_magnesium
       charge_magnesium=new_charge
       element_name_full="Magnesium"
+     CASE ("Zn")
+      old_charge=charge_zinc
+      charge_zinc=new_charge
+      element_name_full="Zinc"
+     CASE ("Ca")
+      old_charge=charge_calcium
+      charge_calcium=new_charge
+      element_name_full="Calcium"
      CASE ("D","X")
       old_charge=drude_charge
       drude_charge=new_charge
@@ -5096,6 +5125,14 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       old_mass=mass_magnesium
       mass_magnesium=new_mass
       element_name_full="Magnesium"
+     CASE ("Zn")
+      old_mass=mass_zinc
+      mass_zinc=new_mass
+      element_name_full="Zinc"
+     CASE ("Ca")
+      old_mass=mass_calcium
+      mass_calcium=new_mass
+      element_name_full="Calcium"
      CASE ("D","X")
       old_mass=drude_mass
       drude_mass=new_mass
@@ -6033,6 +6070,10 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     atomic_weight=(mass_sodium)
    CASE ("Mg")
     atomic_weight=(mass_magnesium)
+   CASE ("Zn")
+    atomic_weight=(mass_zinc)
+   CASE ("Ca")
+    atomic_weight=(mass_calcium)
    CASE ("N")
     atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
    CASE ("O")
@@ -6088,9 +6129,13 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    CASE ("Li")
     atomic_charge=charge_lithium
    CASE ("Na")
-    atomic_charge=charge_magnesium
-   CASE ("Mg")
     atomic_charge=charge_sodium
+   CASE ("Mg")
+    atomic_charge=charge_magnesium
+   CASE ("Zn")
+    atomic_charge=charge_zinc
+   CASE ("Ca")
+    atomic_charge=charge_calcium
    CASE ("X")
     atomic_charge=drude_charge
    CASE ("D")
@@ -16378,6 +16423,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    tmax=tmax_default
    calculate_autocorrelation=calculate_autocorrelation_default
    use_logarithmic_spacing=use_logarithmic_spacing_default
+   dump_jump_distances=dump_jump_distances_default
   END SUBROUTINE set_defaults
 
   !initialises the speciation module by reading the specified input file.
@@ -19807,7 +19853,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    Furthermore, the support of drude particles can be turned on by adding:"
    PRINT *,"      masses 1"
    PRINT *,"      X 0.4"
-   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li,F,Mg,Cl - but not Hydrogen."
+   PRINT *,"    Note that drude particles are added to N,O,C,S,P,Li,F,Mg,Cl,Ca,Zn - but not Hydrogen."
    PRINT *,"    This keyword changes the defaults, i.e. ALL atoms of type a,X,P,.... see also:"
    PRINT *," - 'atomic_masses':"
    PRINT *,"    this keyword triggers the specification of custom atomic masses."
@@ -19818,7 +19864,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    The order is important:"
    PRINT *,"      1) The program starts with its own defaults, such as 12.011 for carbon."
    PRINT *,"      2) If necessary, these values are changed by 'default_masses'"
-   PRINT *,"      3) Any positive drude mass 'X' or 'D', if present, is subtracted from N,O,C,S,P,Li,F,Mg,Cl."
+   PRINT *,"      3) Any positive drude mass 'X' or 'D', if present, is subtracted from N,O,C,S,P,Li,F,Ca,Zn,Mg,Cl."
    PRINT *,"      4) After that, masses of particular atoms are overwritten by 'atomic_masses'."
    PRINT *," - 'default_charges' and 'atomic_charges'"
    PRINT *,"    These two keywords can be used to specify atomic charges."
