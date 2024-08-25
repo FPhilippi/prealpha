@@ -1,4 +1,4 @@
-! RELEASED ON 23_Jul_2024 AT 19:08
+! RELEASED ON 25_Aug_2024 AT 13:37
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -1339,10 +1339,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     ENDIF
    ELSE
     iteration_counter=iteration_counter+1
-    IF ((printsteps).AND.(MOD(iteration_counter,total_iterations/31)==0).AND.(progress_counter<31)) THEN
-     WRITE(*,ADVANCE="NO",FMT='("#")')
-     CALL refresh_IO()
-     progress_counter=progress_counter+1
+    IF (printsteps) THEN
+     IF ((MOD(iteration_counter,total_iterations/31)==0).AND.(progress_counter<31)) THEN
+      WRITE(*,ADVANCE="NO",FMT='("#")')
+      CALL refresh_IO()
+      progress_counter=progress_counter+1
+     ENDIF
     ENDIF
    ENDIF
   END SUBROUTINE print_progress
@@ -19077,7 +19079,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 23_Jul_2024"
+ PRINT *, "   Date of Release: 25_Aug_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.

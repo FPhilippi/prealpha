@@ -1338,10 +1338,12 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				ENDIF
 			ELSE
 				iteration_counter=iteration_counter+1
-				IF ((printsteps).AND.(MOD(iteration_counter,total_iterations/31)==0).AND.(progress_counter<31)) THEN
-					WRITE(*,ADVANCE="NO",FMT='("#")')
-					CALL refresh_IO()
-					progress_counter=progress_counter+1
+				IF (printsteps) THEN
+					IF ((MOD(iteration_counter,total_iterations/31)==0).AND.(progress_counter<31)) THEN
+						WRITE(*,ADVANCE="NO",FMT='("#")')
+						CALL refresh_IO()
+						progress_counter=progress_counter+1
+					ENDIF
 				ENDIF
 			ENDIF
 		END SUBROUTINE print_progress

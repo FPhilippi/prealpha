@@ -1,3 +1,11 @@
+25.08.2024:
+	Fixed bug that caused problems when reading very short trajectories
+23.07.2024:
+	Added Mg to atom list... probably some day I should just do the whole periodic table but who is going to use the code anyways
+22.07.2024:
+	Bug fix in speciation module
+15.07.2024:
+	Updated Reference list
 08.03.2024:
 	Added user input for speciation module.
 06.03.2024:
