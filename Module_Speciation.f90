@@ -193,8 +193,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			PRINT *,"How many neighbour connections do you want to allow per acceptor molecule?"
 			inputinteger1=user_input_integer(1,200)
 			WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
-			WRITE(8,'(" ",I0," nsteps")') nsteps
-			WRITE(8,'(" ",I0," sampling_interval")') sampling_interval
+			WRITE(8,'(" nsteps ",I0)') nsteps
+			WRITE(8,'(" sampling_interval ",I0)') sampling_interval
 			PRINT *,"Now let's talk about species lifetimes."
 			PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
 			calculate_autocorrelation=user_input_logical()
@@ -248,6 +248,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			tmax=tmax_default
 			calculate_autocorrelation=calculate_autocorrelation_default
 			use_logarithmic_spacing=use_logarithmic_spacing_default
+			dump_jump_distances=dump_jump_distances_default
 		END SUBROUTINE set_defaults
 
 		!initialises the speciation module by reading the specified input file.

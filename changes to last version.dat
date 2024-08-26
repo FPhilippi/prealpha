@@ -1,3 +1,5 @@
+26.08.2024:
+	Fixed minor bugs (speciation user input, drude particle recognition if xyz files are used)
 25.08.2024:
 	Fixed bug that caused problems when reading very short trajectories
 	added Zinc and Calcium

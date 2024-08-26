@@ -1,4 +1,4 @@
-! RELEASED ON 25_Aug_2024 AT 14:29
+! RELEASED ON 26_Aug_2024 AT 13:23
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -282,6 +282,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !165 atom assigned twice to a group
  !166 need time_series for autocorrelation
  !167 could not read the time_series file - return.
+ !168 print notice about guesstimated box dimension
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -961,6 +962,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (167)
      WRITE(*,*) " #  ERROR 167: 'xxx_time_series.dat' could not be read."
      WRITE(*,*) "--> did the previous analysis terminate normally? check if file is compromised."
+    CASE (168)
+     error_count=error_count-1
+     WRITE(*,*) " #  NOTICE 168: xyz format does not give box size information."
+     WRITE(*,*) "--> For now, maximum_distance is set arbitrarily, see EXIT STATUS."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -2244,7 +2249,10 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    IF (PRESENT(skip_position)) THEN
     IF (skip_position) RETURN
    ENDIF
-   IF (INFORMATION_IN_TRAJECTORY=="POS") THEN
+   IF (INFORMATION_IN_TRAJECTORY=="VEL") THEN
+    molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=0.0d0
+    molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%minimum_drude_distance=0.0d0
+   ELSE
     !Compute smallest distance and highest distance in the first step
     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
      current_distance=give_smallest_atom_distance&
@@ -2257,9 +2265,6 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=current_distance
      ENDIF
     ENDDO
-   ELSE
-    molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=0.0d0
-    molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%minimum_drude_distance=0.0d0
    ENDIF
    drude_details=.TRUE.
   END SUBROUTINE compute_drude_properties
@@ -3279,7 +3284,6 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     RETURN
    ENDIF
    number_of_assigned_DC_pairs=0 !counter for the number of assigned drude pairs
-   WRITE(*,*) "Printing detailed drude information."
    DO molecule_type_index=1,number_of_molecule_types,1 !iterate over all molecule types.
     WRITE(*,'("   Molecule type ",I0," has ",I0," drude particles.")') &
     &molecule_type_index,molecule_list(molecule_type_index)%number_of_drudes_in_molecule
@@ -5754,6 +5758,10 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       ENDIF
       READ(3,IOSTAT=ios,FMT=*)
       IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
+      ! we need to get an estimate of the maximum_distance as well...
+      maximum_distance_squared=22500.0
+      maximum_distance=SQRT(maximum_distance_squared)
+      CALL report_error(168,exit_status=INT(maximum_distance))
      CASE DEFAULT
       IF (DEVELOPERS_VERSION) WRITE(*,'("  ! load_trajectory_header_information is faulty")') skipped_charges
       CALL report_error(0)!unknown trajectory format, which should never be passed to this subroutine.
@@ -16368,8 +16376,8 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
    PRINT *,"How many neighbour connections do you want to allow per acceptor molecule?"
    inputinteger1=user_input_integer(1,200)
    WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
-   WRITE(8,'(" ",I0," nsteps")') nsteps
-   WRITE(8,'(" ",I0," sampling_interval")') sampling_interval
+   WRITE(8,'(" nsteps ",I0)') nsteps
+   WRITE(8,'(" sampling_interval ",I0)') sampling_interval
    PRINT *,"Now let's talk about species lifetimes."
    PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
    calculate_autocorrelation=user_input_logical()
@@ -19125,7 +19133,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 25_Aug_2024"
+ PRINT *, "   Date of Release: 26_Aug_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.

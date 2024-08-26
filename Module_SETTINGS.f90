@@ -281,6 +281,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!165 atom assigned twice to a group
 	!166 need time_series for autocorrelation
 	!167 could not read the time_series file - return.
+	!168 print notice about guesstimated box dimension
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -960,6 +961,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (167)
 					WRITE(*,*) " #  ERROR 167: 'xxx_time_series.dat' could not be read."
 					WRITE(*,*) "--> did the previous analysis terminate normally? check if file is compromised."
+				CASE (168)
+					error_count=error_count-1
+					WRITE(*,*) " #  NOTICE 168: xyz format does not give box size information."
+					WRITE(*,*) "--> For now, maximum_distance is set arbitrarily, see EXIT STATUS."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

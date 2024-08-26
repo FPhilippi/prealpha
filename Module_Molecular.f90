@@ -698,7 +698,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (PRESENT(skip_position)) THEN
 				IF (skip_position) RETURN
 			ENDIF
-			IF (INFORMATION_IN_TRAJECTORY=="POS") THEN
+			IF (INFORMATION_IN_TRAJECTORY=="VEL") THEN
+				molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=0.0d0
+				molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%minimum_drude_distance=0.0d0
+			ELSE
 				!Compute smallest distance and highest distance in the first step
 				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
 					current_distance=give_smallest_atom_distance&
@@ -711,9 +714,6 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=current_distance
 					ENDIF
 				ENDDO
-			ELSE
-				molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%maximum_drude_distance=0.0d0
-				molecule_list(molecule_type_index)%list_of_drude_pairs(atom_index_core)%minimum_drude_distance=0.0d0
 			ENDIF
 			drude_details=.TRUE.
 		END SUBROUTINE compute_drude_properties
@@ -1733,7 +1733,6 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				RETURN
 			ENDIF
 			number_of_assigned_DC_pairs=0 !counter for the number of assigned drude pairs
-			WRITE(*,*) "Printing detailed drude information."
 			DO molecule_type_index=1,number_of_molecule_types,1 !iterate over all molecule types.
 				WRITE(*,'("   Molecule type ",I0," has ",I0," drude particles.")') &
 				&molecule_type_index,molecule_list(molecule_type_index)%number_of_drudes_in_molecule
@@ -4208,6 +4207,10 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ENDIF
 						READ(3,IOSTAT=ios,FMT=*)
 						IF ((ios/=0).AND.(ERROR_CODE/=71)) CALL report_error(71)
+						! we need to get an estimate of the maximum_distance as well...
+						maximum_distance_squared=22500.0
+						maximum_distance=SQRT(maximum_distance_squared)
+						CALL report_error(168,exit_status=INT(maximum_distance))
 					CASE DEFAULT
 						IF (DEVELOPERS_VERSION) WRITE(*,'("  ! load_trajectory_header_information is faulty")') skipped_charges
 						CALL report_error(0)!unknown trajectory format, which should never be passed to this subroutine.
