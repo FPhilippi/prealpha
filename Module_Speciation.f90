@@ -24,7 +24,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL,PARAMETER :: calculate_autocorrelation_default=.FALSE.
 	LOGICAL,PARAMETER :: use_logarithmic_spacing_default=.FALSE.
 	LOGICAL,PARAMETER :: dump_jump_distances_default=.FALSE.
-	LOGICAL,PARAMETER :: ignorefirst_default=.TRUE. !if .TRUE., then the first segment of "being the same species is ignored" - i.e. only jumps not interrupted by the beginning and end of the trajectory are considered.
+	LOGICAL,PARAMETER :: ignorefirst_default=.TRUE. !if .TRUE., THEN the first segment of "being the same species is ignored" - i.e. only jumps not interrupted by the beginning and end of the trajectory are considered.
+	LOGICAL,PARAMETER :: communal_cluster_correction_default=.FALSE.
 	!variables
 	INTEGER :: nsteps=nsteps_default !how many steps to use from trajectory
 	INTEGER :: sampling_interval=sampling_interval_default
@@ -41,6 +42,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	LOGICAL :: use_logarithmic_spacing=use_logarithmic_spacing_default
 	LOGICAL :: dump_jump_distances=dump_jump_distances_default
 	LOGICAL :: ignorefirst=ignorefirst_default
+	LOGICAL :: communal_cluster_correction=communal_cluster_correction_default
 	REAL,DIMENSION(:,:,:,:),ALLOCATABLE :: squared_cutoff_list !the squared cutoffs. The dimensions are: entry of acceptor_list -- entry of acceptor atom_index_list -- entry of donor_list -- entry of donor atom_index_list.
 	TYPE,PRIVATE :: connections
 		!This one saves a specific pair of atoms as being connected.
@@ -58,10 +60,16 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: first_index_in_connection_list
 		INTEGER :: extra_atom_entries_in_connection_list
 	END TYPE neighbour_molecule_status
+	TYPE,PRIVATE :: donor_vs_species_entry
+		INTEGER :: unique_identifier !unique donor molecule identifier
+		INTEGER :: n_donor !the donor type. technically part of unique_identifier, but faster and easier this way.
+		INTEGER :: parent_species
+	END TYPE donor_vs_species_entry
 	TYPE,PRIVATE :: species
 		INTEGER :: total_number_of_neighbour_atoms ! For example, "4" for Li[DME]2
 		INTEGER :: total_number_of_neighbour_molecules ! For example, "2" for Li[DME]2
 		INTEGER(KIND=WORKING_PRECISION) :: occurrences ! For example, "I have found this species 34857 times"
+		REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: communal_cluster_corrected_neighbour_count !allocated from 1 to N_donor_types
 		INTEGER :: rank !1 for the most probable, 2 for the next, 3 for the third most probable, and so one.
 		INTEGER :: timestep_first_occurrence, timestep_last_occurrence
 		TYPE(neighbour_molecule_status),DIMENSION(:),ALLOCATABLE :: neighbour_molecule_starting_indices !allocated up to maximum_number_of_connections but filled only up to total_number_of_neighbour_molecules with the starting indices of said molecules.
@@ -195,6 +203,12 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(8,'(" N_neighbours ",I0," ### maximum number of neighbour connections per acceptor molecule")') inputinteger1
 			WRITE(8,'(" nsteps ",I0)') nsteps
 			WRITE(8,'(" sampling_interval ",I0)') sampling_interval
+			PRINT *,"Do you want to calculate the communal cluster correction factors (y/n)?"
+			IF (user_input_logical()) THEN
+				WRITE(8,'(" use_ccc T ### printing communal cluster correction factors")')
+			ELSE
+				WRITE(8,'(" use_ccc F ### skip communal cluster correction")')
+			ENDIF
 			PRINT *,"Now let's talk about species lifetimes."
 			PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
 			calculate_autocorrelation=user_input_logical()
@@ -249,11 +263,17 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			calculate_autocorrelation=calculate_autocorrelation_default
 			use_logarithmic_spacing=use_logarithmic_spacing_default
 			dump_jump_distances=dump_jump_distances_default
+			communal_cluster_correction=communal_cluster_correction_default
 		END SUBROUTINE set_defaults
 
 		!initialises the speciation module by reading the specified input file.
 		SUBROUTINE initialise_speciation()
 		IMPLICIT NONE
+	 !$ INTERFACE
+	 !$ 	FUNCTION OMP_get_num_threads()
+	 !$ 	INTEGER :: OMP_get_num_threads
+	 !$ 	END FUNCTION OMP_get_num_threads
+	 !$ END INTERFACE
 		LOGICAL :: file_exists,connected
 		INTEGER :: ios,allocstatus,n,m,acceptor_maxatoms,donor_maxatoms,a,b
 		REAL :: real_space_distance
@@ -306,6 +326,13 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						ALLOCATE(acceptor_list(n)%list_of_all_species(m)%&
 						&neighbour_molecule_starting_indices(maximum_number_of_connections),STAT=allocstatus)
 						IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
+						IF (communal_cluster_correction) THEN
+							IF (ALLOCATED(acceptor_list(n)%list_of_all_species(m)%&
+							&communal_cluster_corrected_neighbour_count)) CALL report_error(0)
+							ALLOCATE(acceptor_list(n)%list_of_all_species(m)%&
+							&communal_cluster_corrected_neighbour_count(N_donor_types),STAT=allocstatus)
+							IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+						ENDIF
 					ENDDO
 					acceptor_list(n)%list_of_all_species(:)%occurrences=0
 					acceptor_list(n)%list_of_all_species(:)%timestep_last_occurrence=0
@@ -319,6 +346,16 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						acceptor_maxatoms=acceptor_list(n)%N_atoms
 					ENDIF
 				ENDDO
+				IF (communal_cluster_correction) THEN
+				 !$ IF (PARALLEL_OPERATION) THEN
+				 !$ 	bytes_needed=bytes_needed+3*maximum_number_of_connections*&
+				 !$ 	&acceptor_maxatoms*OMP_get_num_threads()!I need three single precision integers here I guess - the correction x4 comes later
+				 !$ 	bytes_needed=bytes_needed+OMP_get_num_threads()*N_donor_types*maximum_number_of_species*3 !this is for the clipboards
+				 !$ ELSE
+					bytes_needed=bytes_needed+3*maximum_number_of_connections*acceptor_maxatoms!I need three single precision integers here I guess - the correction x4 comes later
+					bytes_needed=bytes_needed+N_donor_types*maximum_number_of_species*3 !this is for the clipboards
+				 !$ ENDIF
+				ENDIF
 				!similarly, search for the most atoms among the donor molecule types.
 				DO n=1,N_donor_types,1
 					!this will determine the upper limit of the donor part of the cutoff list.
@@ -546,6 +583,19 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_logarithmic_spacing' to ",&
 								&use_logarithmic_spacing
+							ENDIF
+						CASE ("ccc","use_ccc","cluster_correction","use_cluster_correction","communal_solvation",&
+						&"use_communal_solvation","use_communal_cluster_correction","communal_cluster_correction")
+							BACKSPACE 3
+							READ(3,IOSTAT=ios,FMT=*) inputstring,communal_cluster_correction
+							IF (ios/=0) THEN
+								CALL report_error(158,exit_status=ios)
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+								&"   setting 'communal_cluster_correction' to default (=",communal_cluster_correction_default,")"
+								communal_cluster_correction=communal_cluster_correction_default
+							ELSE
+								IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'communal_cluster_correction' to ",&
+								&communal_cluster_correction
 							ENDIF
 						CASE ("correlate","autocorrelation","time_correlation","calculate_autocorrelation")
 							BACKSPACE 3
@@ -1227,6 +1277,10 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		INTEGER :: stepcounter,acceptor_molecule_index,n_acceptor,n_donor,donor_indexcounter,ios,maxmol
 		INTEGER :: donor_molecule_index,acceptor_indexcounter,allocstatus,deallocstatus,observed_species_number
 		INTEGER,DIMENSION(:,:),ALLOCATABLE :: all_observed_species_for_timestep
+		REAL,DIMENSION(:,:),ALLOCATABLE :: ccc_neighbourfraction_clip !first dimension goes over species, second over donor types
+		INTEGER,DIMENSION(:,:),ALLOCATABLE :: ccc_neighbourcount_clip !first dimension goes over species, second over donor types
+		TYPE(donor_vs_species_entry),DIMENSION(:),ALLOCATABLE :: donor_vs_species_list !first dimension goes over all connections in a given timestep for a given acceptor.
+		INTEGER :: logged_connections,new_connections,unique_donor_identifier,m,n,first,last
 		LOGICAL :: existing_species,problematic_occurrence,neighbour_atom,neighbour_molecule,connected
 		LOGICAL,DIMENSION(:),ALLOCATABLE :: potential_species_match !first dimension goes over all the species
 		TYPE(species) :: species_clipboard
@@ -1253,11 +1307,21 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				IF (maxmol<give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index))&
 				&maxmol=give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index)
 			ENDDO
+		ELSE
+			IF (communal_cluster_correction) THEN
+				maxmol=0
+				DO n_acceptor=1,N_acceptor_types,1
+					IF (maxmol<give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index))&
+					&maxmol=give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index)
+				ENDDO
+			ENDIF
 		ENDIF
 		!$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
 		!$OMP PRIVATE(species_clipboard,potential_species_match,stepcounter,n_acceptor,acceptor_molecule_index)&
 		!$OMP PRIVATE(n_donor,donor_molecule_index,donor_indexcounter,acceptor_indexcounter,neighbour_atom,observed_species_number)&
-		!$OMP PRIVATE(existing_species,problematic_occurrence,neighbour_molecule,all_observed_species_for_timestep)
+		!$OMP PRIVATE(existing_species,problematic_occurrence,neighbour_molecule,all_observed_species_for_timestep)&
+		!$OMP PRIVATE(donor_vs_species_list,logged_connections,new_connections,unique_donor_identifier,m,n,first,last)&
+		!$OMP PRIVATE(ccc_neighbourfraction_clip,ccc_neighbourcount_clip)
 		!$OMP SINGLE
 	 !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
 	 !$ 	WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (speciation)"
@@ -1269,6 +1333,17 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (ALLOCATED(all_observed_species_for_timestep)) CALL report_error(0)
 			ALLOCATE(all_observed_species_for_timestep(N_acceptor_types,maxmol),STAT=allocstatus)
 			IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
+		ENDIF
+		IF (communal_cluster_correction) THEN
+			IF (ALLOCATED(donor_vs_species_list)) CALL report_error(0)
+			ALLOCATE(donor_vs_species_list(maxmol*maximum_number_of_connections),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+			IF (ALLOCATED(ccc_neighbourfraction_clip)) CALL report_error(0)
+			ALLOCATE(ccc_neighbourfraction_clip(maximum_number_of_species,N_donor_types),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+			IF (ALLOCATED(ccc_neighbourcount_clip)) CALL report_error(0)
+			ALLOCATE(ccc_neighbourcount_clip(maximum_number_of_species,N_donor_types),STAT=allocstatus)
+			IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
 		ENDIF
 		!allocate memory for species clipboard
 		IF (ALLOCATED(species_clipboard%connection)) CALL report_error(0)
@@ -1292,6 +1367,8 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!$OMP DO SCHEDULE(STATIC,1) ORDERED
 		DO stepcounter=1,nsteps,sampling_interval
 			DO n_acceptor=1,N_acceptor_types,1
+				!reset donor_vs_species_list
+				IF (communal_cluster_correction) logged_connections=0
 				!per ACCEPTOR molecule index, go over all its atoms and check if there are neighbour contributions.
 				DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
 					!everything inside THIS loop counts as neighbours towards one species!
@@ -1300,11 +1377,15 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					species_clipboard%number_of_logged_connections_in_species_list=0 !this corresponds to "species_clipboard%connection(:)%connection" being an empty list
 					species_clipboard%total_number_of_neighbour_atoms=0 !every neighbour atom is counted once regardless of the number of connections.
 					species_clipboard%total_number_of_neighbour_molecules=0 !every neighbour molecule is counted once regardless of the number of connections.
+					!reset the counter for the new entries in the donor_vs_species_list
+					new_connections=0
+					unique_donor_identifier=0
 loop_donortypes:	DO n_donor=1,N_donor_types,1
 						!Iterate over all possible neighbour (donor) molecules...
 						DO donor_molecule_index=1,&
 						&give_number_of_molecules_per_step(donor_list(n_donor)%molecule_type_index),1
 							!now we are down to one specific donor molecule.
+							!its identifier is unique_donor_identifier+donor_molecule_index
 							!We need to check that we do not accidentally include intramolecular contributions.
 							IF ((donor_list(n_donor)%molecule_type_index==acceptor_list(n_acceptor)%molecule_type_index)&
 							&.AND.(donor_molecule_index==acceptor_molecule_index)) CYCLE
@@ -1354,6 +1435,14 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 											species_clipboard%connection(species_clipboard%&
 											&number_of_logged_connections_in_species_list)%indices(4)&
 											&=acceptor_indexcounter !not directly the atom_index, but the entry in atom_index_list(x,1)
+											!update communal_cluster_correction
+											IF (communal_cluster_correction) THEN
+												new_connections=new_connections+1
+												!already log the unique donor molecule identifier - but we do not know the species yet!
+												donor_vs_species_list(logged_connections+new_connections)%unique_identifier=&
+												&unique_donor_identifier+donor_molecule_index
+												donor_vs_species_list(logged_connections+new_connections)%n_donor=n_donor
+											ENDIF
 										ENDIF
 									ENDIF
 								ENDDO
@@ -1368,6 +1457,8 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 								&species_clipboard%total_number_of_neighbour_molecules+1
 							ENDIF
 						ENDDO
+						!if every donor has 10 molecules, then the unique_donor_identifier becomes 1-10 for the first n_donor, 11-21 for the second, etc.
+						unique_donor_identifier=unique_donor_identifier+give_number_of_molecules_per_step(donor_list(n_donor)%molecule_type_index)
 					ENDDO loop_donortypes
 					!The species clipboard is now filled with all the connections observed for this specific acceptor molecule.
 					!Check if there was any neighbour at all
@@ -1387,9 +1478,98 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 						&acceptor_list(n_acceptor)%no_neighbour_occurrences+1
 						!$OMP END CRITICAL(acceptor_list_access)
 					ENDIF
-					!This would be a good point to append the species corresponding to acceptor_molecule_index to the time series
-					IF (calculate_autocorrelation) all_observed_species_for_timestep(n_acceptor,acceptor_molecule_index)=observed_species_number
+					!This is a good point to append the species corresponding to acceptor_molecule_index to the time series
+					IF (calculate_autocorrelation) all_observed_species_for_timestep(n_acceptor,acceptor_molecule_index)=&
+					&observed_species_number
+					!Now that we know the observed_species_number, we can put this in the donor_vs_species_list.
+					IF (communal_cluster_correction) THEN
+						IF ((new_connections>0).AND.(observed_species_number>0)) THEN
+							donor_vs_species_list(logged_connections+1:logged_connections+new_connections)%parent_species=observed_species_number
+							logged_connections=logged_connections+new_connections
+						ENDIF
+					ENDIF
 				ENDDO
+				!here we have iterated through all the acceptor molecules.
+				!that also means we should have found all the donors of this step for this acceptor.
+				!We can use donor_vs_species_list to deal with communal solvation.
+				IF (communal_cluster_correction) THEN
+					IF (logged_connections>0) THEN
+						IF (logged_connections==1) THEN
+							!add the single connection...
+							!$OMP CRITICAL(ccc_updates)
+							acceptor_list(n_acceptor)%list_of_all_species(&
+							&donor_vs_species_list(1)%parent_species&
+							&)%communal_cluster_corrected_neighbour_count(&
+							&donor_vs_species_list(logged_connections+new_connections)%n_donor&
+							&)=&
+							&acceptor_list(n_acceptor)%list_of_all_species(&
+							&donor_vs_species_list(1)%parent_species&
+							&)%communal_cluster_corrected_neighbour_count(&
+							&donor_vs_species_list(logged_connections+new_connections)%n_donor&
+							&)+1.0d0
+							!$OMP end CRITICAL(ccc_updates)
+						ELSE
+							!at least two connections!
+							ccc_neighbourfraction_clip(:,:)=0.0d0 !we divide by the acceptor count later - if it is not zero of course.
+							ccc_neighbourcount_clip(:,:)=0
+							!we need to sort the donor_vs_species_list from 1 up to logged_connections.
+							!quicksort should do the job. we do not mind the order of %n_donor or %species.
+							CALL sort_dvslist(1,logged_connections,donor_vs_species_list)
+							first=1
+							DO m=2,logged_connections,1
+								IF (donor_vs_species_list(m)%unique_identifier/=donor_vs_species_list(first)%unique_identifier) THEN
+									last=m-1
+									!the entries from first to last belong to the same molecule!
+									!we need to collect the following information:
+									! - keep track of how many specific acceptor molecules were found
+									! - the sum of the scaling factors
+									! - this information depends on n_donor and the species number!
+									DO n=first,last
+										ccc_neighbourfraction_clip(&
+										&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+										&)=ccc_neighbourfraction_clip(&
+										&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+										&)+1.0/FLOAT(last-first+1)
+										ccc_neighbourcount_clip(&
+										&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+										&)=ccc_neighbourcount_clip(&
+										&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+										&)+1
+									ENDDO
+									!finally, update the new "first"
+									first=m
+								ENDIF
+							ENDDO
+							!don't forget about the last chunk, from first to logged_connections
+							last=logged_connections
+							DO n=first,last
+								ccc_neighbourfraction_clip(&
+								&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+								&)=ccc_neighbourfraction_clip(&
+								&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+								&)+1.0/FLOAT(last-first+1)
+								ccc_neighbourcount_clip(&
+								&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+								&)=ccc_neighbourcount_clip(&
+								&donor_vs_species_list(n)%parent_species,donor_vs_species_list(n)%n_donor&
+								&)+1
+							ENDDO
+							DO m=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
+								DO n=1,N_donor_types,1
+									IF (ccc_neighbourcount_clip(m,n)/=0) THEN
+										!$OMP CRITICAL(ccc_updates)
+										acceptor_list(n_acceptor)%list_of_all_species(m)%&
+										&communal_cluster_corrected_neighbour_count(n)=&
+										&acceptor_list(n_acceptor)%list_of_all_species(m)%&
+										&communal_cluster_corrected_neighbour_count(n)+&
+										&ccc_neighbourfraction_clip(m,n)/FLOAT(ccc_neighbourcount_clip(m,n))
+										!$OMP end CRITICAL(ccc_updates)
+									ENDIF
+								ENDDO
+							ENDDO
+						ENDIF
+					ENDIF
+				ENDIF
 			ENDDO
 			IF (VERBOSE_OUTPUT) CALL print_progress()
 			IF (calculate_autocorrelation) THEN
@@ -1410,6 +1590,26 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 		IF (calculate_autocorrelation) THEN
 			IF (ALLOCATED(all_observed_species_for_timestep)) THEN
 				DEALLOCATE(all_observed_species_for_timestep,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			ELSE
+				CALL report_error(0)
+			ENDIF
+		ENDIF
+		IF (communal_cluster_correction) THEN
+			IF (ALLOCATED(donor_vs_species_list)) THEN
+				DEALLOCATE(donor_vs_species_list,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			ELSE
+				CALL report_error(0)
+			ENDIF
+			IF (ALLOCATED(ccc_neighbourfraction_clip)) THEN
+				DEALLOCATE(ccc_neighbourfraction_clip,STAT=deallocstatus)
+				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+			ELSE
+				CALL report_error(0)
+			ENDIF
+			IF (ALLOCATED(ccc_neighbourcount_clip)) THEN
+				DEALLOCATE(ccc_neighbourcount_clip,STAT=deallocstatus)
 				IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 			ELSE
 				CALL report_error(0)
@@ -1446,6 +1646,57 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 	 !$ 	WRITE(*,ADVANCE="NO",FMT='(" ### End of parallelised section, took ")')
 	 !$ 	CALL timing_parallel_sections(.FALSE.)
 	 !$ ENDIF
+		IF (communal_cluster_correction) THEN
+			!normalisation
+			DO n_acceptor=1,N_acceptor_types,1
+				DO m=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
+					DO n=1,N_donor_types,1
+						acceptor_list(n_acceptor)%list_of_all_species(m)%&
+						&communal_cluster_corrected_neighbour_count(n)=&
+						&acceptor_list(n_acceptor)%list_of_all_species(m)%&
+						&communal_cluster_corrected_neighbour_count(n)/FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+					ENDDO
+				ENDDO
+			ENDDO
+		ENDIF
+
+		CONTAINS
+
+			!The following subroutine is a quicksort algorithm to sort the donor_vs_species_list.
+			RECURSIVE SUBROUTINE sort_dvslist(left,right,donor_vs_species_list_inout)
+			IMPLICIT NONE
+			INTEGER,INTENT(IN) :: left,right
+			INTEGER :: a,b
+			TYPE(donor_vs_species_entry),DIMENSION(*),INTENT(INOUT) :: donor_vs_species_list_inout
+			INTEGER pivot
+			TYPE(donor_vs_species_entry) :: dvslist_clip
+				IF (left<right) THEN
+					pivot=donor_vs_species_list_inout(left)%unique_identifier
+					a=left
+					b=right
+					DO
+						DO WHILE (donor_vs_species_list_inout(a)%unique_identifier<pivot)
+							a=a+1
+						ENDDO
+						DO WHILE (donor_vs_species_list_inout(b)%unique_identifier>pivot)
+							b=b-1
+						ENDDO
+						IF (a>=b) EXIT
+						!swap elements, unless they're the same
+						IF (donor_vs_species_list_inout(a)%unique_identifier==donor_vs_species_list_inout(b)%unique_identifier) THEN
+							b=b-1
+							IF (a==b) EXIT
+						ELSE
+							dvslist_clip=donor_vs_species_list_inout(a)
+							donor_vs_species_list_inout(a)=donor_vs_species_list_inout(b)
+							donor_vs_species_list_inout(b)=dvslist_clip
+						ENDIF
+					ENDDO
+					CALL sort_dvslist(left,b,donor_vs_species_list_inout)
+					CALL sort_dvslist(b+1,right,donor_vs_species_list_inout)
+				ENDIF
+			END SUBROUTINE sort_dvslist
+
 		END SUBROUTINE trajectory_speciation_analysis_parallel
 
 		SUBROUTINE add_clipboard_to_list(species_clipboard,potential_species_match,n_acceptor_in,stepcounter_in,observed_species_number)
@@ -1810,11 +2061,11 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 		IMPLICIT NONE
 		INTEGER,INTENT(IN) :: n_acceptor_in
 		INTEGER :: entry_counter,allocstatus,deallocstatus,best_index,species_output_counter
-		INTEGER :: i,previous_donor_molecule,donor_type_counter,m,double_connections_counter
+		INTEGER :: i,previous_donor_molecule,donor_type_counter,m,double_connections_counter,connections_perdonor
 		INTEGER :: species_atomcount,ios,species_charge,group_number,connection_counter,N_beads,N_beads_total
 		INTEGER :: acceptorgroup,donorgroup,connections_firstindex,extra_atom_entries,species_molecules
 		INTEGER :: species_molecules_doubles,extra_atom_entries_2,donorgroup_2,acceptorgroup_2,connections_firstindex_2
-		INTEGER :: donortype_2,donortype
+		INTEGER :: donortype_2,donortype,n_donor
 		LOGICAL :: connected,no_ungrouped_atoms,firsttime
 		REAL :: total_occurrence,best_value,distance,base_atom(3),tip_atom(3),connection_vector(3),beadspan
 		REAL,PARAMETER :: bead_clearance=0.5,bead_distance=0.4
@@ -2092,6 +2343,28 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 				ENDDO
 				WRITE(4,'("   The total formal charge including the acceptor was ",SP,I0,SS,".")')&
 				&species_charge
+				IF (communal_cluster_correction) THEN
+					WRITE(4,'("   The correction factors for communal solvation were:")')
+					DO n_donor=1,N_donor_types,1
+						!how many connections for this donor type?
+						connections_perdonor=0
+						DO connection_counter=1,acceptor_list(n_acceptor_in)%&
+						&list_of_all_species(best_index)%&
+						&number_of_logged_connections_in_species_list
+							IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+							&%connection(connection_counter)%indices(1)==n_donor)&
+							&connections_perdonor=connections_perdonor+1
+						ENDDO
+						IF (connections_perdonor>0)&
+						&WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F0.2," ",A)')&
+						&acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+						&communal_cluster_corrected_neighbour_count(n_donor),&
+						&n_donor,&
+						&acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+						&communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
+						&TRIM(give_sum_formula(n_donor))
+					ENDDO
+				ENDIF
 				!print the first and last occurrence
 				!Note that we are still in the "best_index" loop
 				WRITE(filename_speciation_output,'(A,I0,A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
@@ -2521,7 +2794,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 	 !$ END INTERFACE
 		INTEGER :: timeline,logarithmic_entry_counter,entries
 		REAL(WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: autocorrelation_function
-		!the quantity C(t), which is calculated as uncorrected and then afterwards corrected.
+		!the quantity C(t), which is calculated as uncorrected and THEN afterwards corrected.
 		!here, the first dimension are the timesteps, and the second dimension are the possible species.
 		REAL(WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: temp_function !running over the possible species.
 		INTEGER,DIMENSION(:,:),ALLOCATABLE :: molecule_speciesarray !This array essentially contains the information in the time_series file. first dimension is timestep, second dimension are the molecule indices.
@@ -2667,7 +2940,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 				ENDIF
 				!'timeline' is the argument of the autocorrelation_function, i.e. the time shift of the original function.
 				!for example, if the current shift is timeline=1000, and there are 10000 timesteps in total,
-				!then the argument has to be evaluated from (h(0+0)-<h>)(h(0+1000)-<h>) up to (h(9000+0)-<h>)(h(9000+1000)-<h>)
+				!THEN the argument has to be evaluated from (h(0+0)-<h>)(h(0+1000)-<h>) up to (h(9000+0)-<h>)(h(9000+1000)-<h>)
 				!timeline=0 is 1.0 for all
 				DO logarithmic_entry_counter=0,entries,1
 					timeline=timesteps_array(logarithmic_entry_counter)

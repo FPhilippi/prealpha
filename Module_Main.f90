@@ -1097,6 +1097,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    binary intermittent autocorrelation function for each species is calculated and reported."
 			PRINT *," - 'log_spacing': expects a logical ('T' or 'F'). If 'T', then the time steps of the"
 			PRINT *,"    autocorrelation function are printed logarithmically (warmly recommended)."
+			PRINT *," - 'use_ccc': expects a logical ('T' or 'F'). If 'T', then the communal cluster correction factors are printed."
 			PRINT *," - 'tmax':"
 			PRINT *,"    Expects an integer, which is then taken as the maximum number of steps"
 			PRINT *,"    into the future for the time correlation function."
