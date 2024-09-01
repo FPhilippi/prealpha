@@ -1,4 +1,4 @@
-! RELEASED ON 01_Sep_2024 AT 18:11
+! RELEASED ON 01_Sep_2024 AT 20:07
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -18263,10 +18263,28 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
   CHARACTER(LEN=1024) :: filename_speciation_statistics
   CHARACTER(LEN=1024) :: species_output_header
   CHARACTER(LEN=2) :: element_name
+  INTEGER,DIMENSION(:),ALLOCATABLE :: formal_sum_formula !how many times the donor molecules were found
    WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
    &//"acceptor",n_acceptor_in,"_speciation_statistics.dat"
    OPEN(UNIT=4,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
    IF (ios/=0) CALL report_error(26,exit_status=ios)
+   IF (communal_cluster_correction) THEN
+    INQUIRE(UNIT=9,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=9)
+    WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"acceptor",n_acceptor_in,"_speciation_statistics_table.dat"
+    OPEN(UNIT=9,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(9,'(" This file contains the detailed communal cluster correction factors.")')
+    WRITE(9,ADVANCE="NO",FMT='(A15,A15)')"#species","<h>"
+    DO n_donor=1,N_donor_types,1
+     WRITE(9,ADVANCE="NO",FMT='(A15)') TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+    ENDDO
+    WRITE(9,*) "sum_formula(formally)"
+    IF (ALLOCATED(formal_sum_formula)) CALL report_error(0)
+    ALLOCATE(formal_sum_formula(N_donor_types),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+   ENDIF
    WRITE(4,'(" This file contains speciation statistics for acceptors coordinated by donors.")')
    IF (acceptor_list(n_acceptor_in)%N_atoms==1) THEN
     WRITE(4,'(" This acceptor was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
@@ -18413,6 +18431,12 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
      &species_output_counter,&
      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences
     ENDIF
+    IF (communal_cluster_correction) THEN
+     formal_sum_formula(:)=0
+     WRITE(9,ADVANCE="NO",FMT='(I15)') species_output_counter
+     WRITE(9,ADVANCE="NO",FMT='(F15.10)') FLOAT(&
+     &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)/total_occurrence
+    ENDIF
     IF (species_output_counter<6) THEN
      IF (FLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
      &occurrences)/total_occurrence>0.01) THEN
@@ -18496,6 +18520,13 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
       ELSE
        WRITE(4,ADVANCE="NO",FMT='("     One molecule of type ")')
       ENDIF
+      IF (communal_cluster_correction) THEN
+       !we need to keep track of these for later
+       formal_sum_formula(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+       &%connection(connections_firstindex)%indices(1))=formal_sum_formula(&
+       &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
+       &%connection(connections_firstindex)%indices(1))+double_connections_counter
+      ENDIF
       WRITE(4,ADVANCE="NO",FMT='(I0,"(",A,") with ")')&
       &donor_list(acceptor_list(n_acceptor_in)%list_of_all_species(best_index)&
       &%connection(connections_firstindex)%indices(1))%molecule_type_index,&
@@ -18543,15 +18574,38 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
        &%connection(connection_counter)%indices(1)==n_donor)&
        &connections_perdonor=connections_perdonor+1
       ENDDO
-      IF (connections_perdonor>0)&
-      &WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F0.2," ",A)')&
-      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &communal_cluster_corrected_neighbour_count(n_donor),&
-      &n_donor,&
-      &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
-      &TRIM(give_sum_formula(n_donor))
+      WRITE(9,ADVANCE="NO",FMT='(E15.6)') acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+      &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor)
+      IF (connections_perdonor>0) THEN
+       IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+       &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor)<1.0)THEN
+        WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F4.2," ",A)')&
+        &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+        &communal_cluster_corrected_neighbour_count(n_donor),&
+        &n_donor,&
+        &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+        &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
+        &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+       ELSE
+        WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F0.2," ",A)')&
+        &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+        &communal_cluster_corrected_neighbour_count(n_donor),&
+        &n_donor,&
+        &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+        &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
+        &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+       ENDIF
+       
+      ENDIF
      ENDDO
+     !Write the "formal" sum formula, without the corrections
+     WRITE(9,ADVANCE="NO",FMT='(" [",A,"][")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+     DO n_donor=1,N_donor_types,1
+      WRITE(9,ADVANCE="NO",FMT='("(",A,")",I0)')&
+      &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index)),&
+      &formal_sum_formula(n_donor)
+     ENDDO
+     WRITE(9,'("]")')
     ENDIF
     !print the first and last occurrence
     !Note that we are still in the "best_index" loop
@@ -18877,6 +18931,14 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    ELSE
     CALL report_error(0)
    ENDIF
+   IF (communal_cluster_correction) THEN
+    IF (ALLOCATED(formal_sum_formula)) THEN
+     DEALLOCATE(formal_sum_formula,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ELSE
+     CALL report_error(0)
+    ENDIF
+   ENDIF
    WRITE(4,*)
    WRITE(4,'(" The donors of this analysis were:")')
    DO donor_type_counter=1,N_donor_types,1
@@ -18969,6 +19031,10 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
    ENDDO
    ENDFILE 4
    CLOSE(UNIT=4)
+   IF (communal_cluster_correction) THEN
+    ENDFILE 9
+    CLOSE(UNIT=9)
+   ENDIF
   END SUBROUTINE print_acceptor_summary
 
   !The following subroutine was borrowed from MODULE AUTOCORRELATION - needed quite a few adjustments so I put it here
