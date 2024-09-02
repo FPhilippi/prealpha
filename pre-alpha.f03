@@ -1,4 +1,4 @@
-! RELEASED ON 01_Sep_2024 AT 20:07
+! RELEASED ON 02_Sep_2024 AT 15:18
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -16257,7 +16257,8 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   INTEGER :: total_number_of_neighbour_atoms ! For example, "4" for Li[DME]2
   INTEGER :: total_number_of_neighbour_molecules ! For example, "2" for Li[DME]2
   INTEGER(KIND=WORKING_PRECISION) :: occurrences ! For example, "I have found this species 34857 times"
-  REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: communal_cluster_corrected_neighbour_count !allocated from 1 to N_donor_types
+  REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: communal_cluster_corrected_neighbour_count !dimension 1 allocated from 1 to N_donor_types.
+  !dimension two is 1)the sum of 1/connections and 2) the connections; to get the final fraction, divide 1) by 2)
   INTEGER :: rank !1 for the most probable, 2 for the next, 3 for the third most probable, and so one.
   INTEGER :: timestep_first_occurrence, timestep_last_occurrence
   TYPE(neighbour_molecule_status),DIMENSION(:),ALLOCATABLE :: neighbour_molecule_starting_indices !allocated up to maximum_number_of_connections but filled only up to total_number_of_neighbour_molecules with the starting indices of said molecules.
@@ -16489,6 +16490,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      !these are 4 bytes, actually
      bytes_needed=bytes_needed+13*maximum_number_of_species
      bytes_needed=bytes_needed+6*maximum_number_of_species*maximum_number_of_connections
+     IF (communal_cluster_correction) bytes_needed=bytes_needed+2*2*N_donor_types*maximum_number_of_species !this is for the communal_cluster_corrected_neighbour_count
      IF (allocstatus/=0) CALL report_error(156,exit_status=allocstatus)
      !Initialise the list_of_all_species
      DO m=1,maximum_number_of_species,1
@@ -16518,8 +16520,10 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
        IF (ALLOCATED(acceptor_list(n)%list_of_all_species(m)%&
        &communal_cluster_corrected_neighbour_count)) CALL report_error(0)
        ALLOCATE(acceptor_list(n)%list_of_all_species(m)%&
-       &communal_cluster_corrected_neighbour_count(N_donor_types),STAT=allocstatus)
+       &communal_cluster_corrected_neighbour_count(N_donor_types,2),STAT=allocstatus)
        IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+       acceptor_list(n)%list_of_all_species(m)%&
+       &communal_cluster_corrected_neighbour_count(:,:)=0.0d0
       ENDIF
      ENDDO
      acceptor_list(n)%list_of_all_species(:)%occurrences=0
@@ -16541,7 +16545,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
      !$  bytes_needed=bytes_needed+OMP_get_num_threads()*N_donor_types*maximum_number_of_species*3 !this is for the clipboards
      !$ ELSE
      bytes_needed=bytes_needed+3*maximum_number_of_connections*acceptor_maxatoms!I need three single precision integers here I guess - the correction x4 comes later
-     bytes_needed=bytes_needed+N_donor_types*maximum_number_of_species*3 !this is for the clipboards
+     bytes_needed=bytes_needed+N_donor_types*maximum_number_of_species*4 !this is for the clipboards
      !$ ENDIF
     ENDIF
     !similarly, search for the most atoms among the donor molecule types.
@@ -17465,7 +17469,7 @@ MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
   INTEGER :: stepcounter,acceptor_molecule_index,n_acceptor,n_donor,donor_indexcounter,ios,maxmol
   INTEGER :: donor_molecule_index,acceptor_indexcounter,allocstatus,deallocstatus,observed_species_number
   INTEGER,DIMENSION(:,:),ALLOCATABLE :: all_observed_species_for_timestep
-  REAL,DIMENSION(:,:),ALLOCATABLE :: ccc_neighbourfraction_clip !first dimension goes over species, second over donor types
+  REAL(KIND=WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: ccc_neighbourfraction_clip !first dimension goes over species, second over donor types
   INTEGER,DIMENSION(:,:),ALLOCATABLE :: ccc_neighbourcount_clip !first dimension goes over species, second over donor types
   TYPE(donor_vs_species_entry),DIMENSION(:),ALLOCATABLE :: donor_vs_species_list !first dimension goes over all connections in a given timestep for a given acceptor.
   INTEGER :: logged_connections,new_connections,unique_donor_identifier,m,n,first,last
@@ -17689,12 +17693,12 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
        &donor_vs_species_list(1)%parent_species&
        &)%communal_cluster_corrected_neighbour_count(&
        &donor_vs_species_list(logged_connections+new_connections)%n_donor&
-       &)=&
+       &,:)=&
        &acceptor_list(n_acceptor)%list_of_all_species(&
        &donor_vs_species_list(1)%parent_species&
        &)%communal_cluster_corrected_neighbour_count(&
        &donor_vs_species_list(logged_connections+new_connections)%n_donor&
-       &)+1.0d0
+       &,:)+1.0d0
        !$OMP end CRITICAL(ccc_updates)
       ELSE
        !at least two connections!
@@ -17747,10 +17751,16 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
          IF (ccc_neighbourcount_clip(m,n)/=0) THEN
           !$OMP CRITICAL(ccc_updates)
           acceptor_list(n_acceptor)%list_of_all_species(m)%&
-          &communal_cluster_corrected_neighbour_count(n)=&
+          &communal_cluster_corrected_neighbour_count(n,1)=&
           &acceptor_list(n_acceptor)%list_of_all_species(m)%&
-          &communal_cluster_corrected_neighbour_count(n)+&
-          &ccc_neighbourfraction_clip(m,n)/FLOAT(ccc_neighbourcount_clip(m,n))
+          &communal_cluster_corrected_neighbour_count(n,1)+&
+          &ccc_neighbourfraction_clip(m,n)
+          
+          acceptor_list(n_acceptor)%list_of_all_species(m)%&
+          &communal_cluster_corrected_neighbour_count(n,2)=&
+          &acceptor_list(n_acceptor)%list_of_all_species(m)%&
+          &communal_cluster_corrected_neighbour_count(n,2)+&
+          &DFLOAT(ccc_neighbourcount_clip(m,n))
           !$OMP end CRITICAL(ccc_updates)
          ENDIF
         ENDDO
@@ -17840,9 +17850,11 @@ loop_donortypes: DO n_donor=1,N_donor_types,1
     DO m=1,acceptor_list(n_acceptor)%number_of_logged_species_in_acceptor_list,1
      DO n=1,N_donor_types,1
       acceptor_list(n_acceptor)%list_of_all_species(m)%&
-      &communal_cluster_corrected_neighbour_count(n)=&
+      &communal_cluster_corrected_neighbour_count(n,1)=&
       &acceptor_list(n_acceptor)%list_of_all_species(m)%&
-      &communal_cluster_corrected_neighbour_count(n)/FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+      &communal_cluster_corrected_neighbour_count(n,1)/&
+      &acceptor_list(n_acceptor)%list_of_all_species(m)%&
+      &communal_cluster_corrected_neighbour_count(n,2)
      ENDDO
     ENDDO
    ENDDO
@@ -18268,23 +18280,6 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
    &//"acceptor",n_acceptor_in,"_speciation_statistics.dat"
    OPEN(UNIT=4,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
    IF (ios/=0) CALL report_error(26,exit_status=ios)
-   IF (communal_cluster_correction) THEN
-    INQUIRE(UNIT=9,OPENED=connected)
-    IF (connected) CALL report_error(27,exit_status=9)
-    WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
-    &//"acceptor",n_acceptor_in,"_speciation_statistics_table.dat"
-    OPEN(UNIT=9,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
-    IF (ios/=0) CALL report_error(26,exit_status=ios)
-    WRITE(9,'(" This file contains the detailed communal cluster correction factors.")')
-    WRITE(9,ADVANCE="NO",FMT='(A15,A15)')"#species","<h>"
-    DO n_donor=1,N_donor_types,1
-     WRITE(9,ADVANCE="NO",FMT='(A15)') TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
-    ENDDO
-    WRITE(9,*) "sum_formula(formally)"
-    IF (ALLOCATED(formal_sum_formula)) CALL report_error(0)
-    ALLOCATE(formal_sum_formula(N_donor_types),STAT=allocstatus)
-    IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
-   ENDIF
    WRITE(4,'(" This file contains speciation statistics for acceptors coordinated by donors.")')
    IF (acceptor_list(n_acceptor_in)%N_atoms==1) THEN
     WRITE(4,'(" This acceptor was atom ",I0," (",A,") of molecule type ",I0," (",A,").")')&
@@ -18399,6 +18394,33 @@ loop_connections:    DO connection_counter=0,extra_atom_entries_ref ! step 2)
      average_h(entry_counter)=&
      &DFLOAT(acceptor_list(n_acceptor_in)%list_of_all_species(entry_counter)%occurrences)/total_occurrence
     ENDDO
+   ENDIF
+   IF (communal_cluster_correction) THEN
+    INQUIRE(UNIT=9,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=9)
+    WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+    &//"acceptor",n_acceptor_in,"_speciation_statistics_table.dat"
+    OPEN(UNIT=9,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+    WRITE(9,'(" This file contains the detailed communal cluster correction factors.")')
+    WRITE(9,ADVANCE="NO",FMT='(A15,A15)')"#species","<h>"
+    DO n_donor=1,N_donor_types,1
+     WRITE(9,ADVANCE="NO",FMT='(A15)') TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+    ENDDO
+    WRITE(9,*) "sum_formula(formally)"
+    IF (ALLOCATED(formal_sum_formula)) CALL report_error(0)
+    ALLOCATE(formal_sum_formula(N_donor_types),STAT=allocstatus)
+    IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
+    !is there a species #0?
+    IF (acceptor_list(n_acceptor_in)%no_neighbour_occurrences>0) THEN
+     WRITE(9,ADVANCE="NO",FMT='(I15)') 0
+     WRITE(9,ADVANCE="NO",FMT='(F15.10)')DFLOAT(acceptor_list(n_acceptor_in)%species_overflow+&
+     &acceptor_list(n_acceptor_in)%no_neighbour_occurrences)/total_occurrence
+     DO n_donor=1,N_donor_types,1
+      WRITE(9,ADVANCE="NO",FMT='(E15.6)') 0.0d0
+     ENDDO
+     WRITE(9,'(" [",A,"]")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+    ENDIF
    ENDIF
    !Now, print species in order of decreasing occurrence
    !I am going to brute force this since I do not want to sort them.
@@ -18574,28 +18596,31 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
        &%connection(connection_counter)%indices(1)==n_donor)&
        &connections_perdonor=connections_perdonor+1
       ENDDO
+      IF (formal_sum_formula(n_donor)==0) THEN
+       acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+       &communal_cluster_corrected_neighbour_count(n_donor,1)=0.0d0
+      ENDIF
       WRITE(9,ADVANCE="NO",FMT='(E15.6)') acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-      &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor)
+      &communal_cluster_corrected_neighbour_count(n_donor,1)*FLOAT(connections_perdonor)
       IF (connections_perdonor>0) THEN
        IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-       &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor)<1.0)THEN
+       &communal_cluster_corrected_neighbour_count(n_donor,1)*FLOAT(connections_perdonor)<1.0)THEN
         WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F4.2," ",A)')&
         &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-        &communal_cluster_corrected_neighbour_count(n_donor),&
+        &communal_cluster_corrected_neighbour_count(n_donor,1),&
         &n_donor,&
         &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-        &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
+        &communal_cluster_corrected_neighbour_count(n_donor,1)*FLOAT(connections_perdonor),&
         &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
        ELSE
         WRITE(4,'("     x",F4.2," for molecule type ",I0," corresponding to ",F0.2," ",A)')&
         &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-        &communal_cluster_corrected_neighbour_count(n_donor),&
+        &communal_cluster_corrected_neighbour_count(n_donor,1),&
         &n_donor,&
         &acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
-        &communal_cluster_corrected_neighbour_count(n_donor)*FLOAT(connections_perdonor),&
+        &communal_cluster_corrected_neighbour_count(n_donor,1)*FLOAT(connections_perdonor),&
         &TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
        ENDIF
-       
       ENDIF
      ENDDO
      !Write the "formal" sum formula, without the corrections
@@ -19211,21 +19236,25 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
          !h(t0+t) is one
          temp_function(species_counter)=temp_function(species_counter)+&
          &(1.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
+         !which is (1.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
         ELSE
          !h(t0+t) is zero
          temp_function(species_counter)=temp_function(species_counter)+&
-         &(1.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
+         &(average_h(species_counter)-1.0d0)*(average_h(species_counter))
+         !which is (1.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
         ENDIF
        ELSE
         !h(t0) is zero
         IF (molecule_speciesarray(stepcounter+timeline,molecule_counter)==species_counter)THEN
          !h(t0+t) is one
          temp_function(species_counter)=temp_function(species_counter)+&
-         &(0.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
+         &(average_h(species_counter))*(average_h(species_counter)-1.0d0)
+         !which is (0.0d0-average_h(species_counter))*(1.0d0-average_h(species_counter))
         ELSE
          !h(t0+t) is zero
          temp_function(species_counter)=temp_function(species_counter)+&
-         &(0.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
+         &(average_h(species_counter))*(average_h(species_counter))
+         !which is (0.0d0-average_h(species_counter))*(0.0d0-average_h(species_counter))
         ENDIF
        ENDIF
       ENDDO
@@ -19477,7 +19506,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 01_Sep_2024"
+ PRINT *, "   Date of Release: 02_Sep_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
