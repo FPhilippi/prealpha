@@ -2,7 +2,8 @@
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) !RELEASEYEAR! Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
-	! This work is funded by the Japan Society for the Promotion of Science
+	! This work is funded by the Japan Society for the Promotion of Science.
+	! This work is funded by the European Union.
 
     ! This program is free software: you can redistribute it and/or modify
     ! it under the terms of the GNU General Public License as published by
@@ -99,6 +100,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	CHARACTER(LEN=1024) :: FILENAME_DISTRIBUTION_INPUT="distribution.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISTANCE_INPUT="distance.inp"
 	CHARACTER(LEN=1024) :: FILENAME_SPECIATION_INPUT="speciation.inp"
+	CHARACTER(LEN=1024) :: FILENAME_CLUSTER_INPUT="cluster.inp"
 	CHARACTER(LEN=1024) :: FILENAME_DISPERSION_INPUT="dispersion.inp"
 	CHARACTER(LEN=1024) :: REDIRECTED_OUTPUT="output.dat"
 	CHARACTER(LEN=1024) :: OUTPUT_PREFIX="" !prefix added to output, for example to distinguish between different autocorrelation analyses
@@ -283,6 +285,13 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!167 could not read the time_series file - return.
 	!168 print notice about guesstimated box dimension
 	!169 Couldn't allocate memory for communal cluster correction
+	!170 problem streaming cluster input file
+	!171 Couldn't allocate memory for cluster data structures
+	!172 cannot open cluster.inp for reading
+	!173 no atoms specified in cluster.inp
+	!174 no cutoffs specified in cluster.inp
+	!175 nonsensical values for the cutoff scan
+	!176 nonsensical values for molecule_type_index or atom_index
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -970,6 +979,32 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  SEVERE ERROR 169: couldn't allocate memory for communal cluster correction."
 					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
 					STOP
+				CASE (170)
+					WRITE(*,*) " #  ERROR 170: problem streaming '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) " #  check format of '",TRIM(FILENAME_CLUSTER_INPUT),"'!"
+				CASE (171)
+					WRITE(*,*) " #  SEVERE ERROR 171: couldn't allocate memory for cluster data structures."
+					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+					CALL finalise_global()
+					STOP
+				CASE (172)
+					WRITE(*,*) " #  SEVERE ERROR 172: couldn't read '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) " #  Check format of input file!"
+					CLOSE(UNIT=3)!unit 3 is the cluster input file
+					CALL finalise_global()
+					STOP
+				CASE (173)
+					WRITE(*,*) " #  ERROR 173: No atoms specified in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) "--> please use 'add_molecule' or 'add_atom' in your cluster input file."
+				CASE (174)
+					WRITE(*,*) " #  ERROR 174: No cutoffs specified in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) "--> please use 'single_cutoff' or 'scan_cutoff' in your cluster input file."
+				CASE (175)
+					WRITE(*,*) " #  ERROR 175: cutoff not specified correctly in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) "--> please check the use of 'single_cutoff' or 'scan_cutoff' in your cluster input file."
+				CASE (176)
+					WRITE(*,*) " #  ERROR 176: atoms not specified correctly in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) "--> please check the use of 'add_molecule' or 'add_atom' in your cluster input file."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT

@@ -1792,6 +1792,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		USE DISTRIBUTION
 		USE DISTANCE
 		USE SPECIATION
+		USE CLUSTER
 		IMPLICIT NONE
 		LOGICAL :: parallelisation_possible,parallelisation_requested,own_prefix
 		INTEGER :: nthreads,analysis_number,n,snap,startstep,endstep,molecule_type_index,molecule_index
@@ -2680,12 +2681,15 @@ SUBROUTINE finalise_global()
 USE MOLECULAR
 USE SETTINGS
 IMPLICIT NONE
-13	FORMAT ("    ##### ####  #####")
-28	FORMAT ("    #   ##  #       #")
-42	FORMAT ("    ########    #####")
-43	FORMAT ("        #       #")
-44	FORMAT ("        #########")
-45	FORMAT ("    #      #        #")
+13	FORMAT ("  \ \  __/ \ \_\\ \____\\ \__/ \_\/\____\\ \  __/ \ \_\ \_\\ \__/ \_\")
+28	FORMAT (" \ \ \_\ \\ \ \//\  __/ /\ \_\ \_ \_\ \_\ \ \_\ \\ \ \ \ \ /\ \_\ \_")
+42	FORMAT ("  _____    _ __    __      __  \//\ \    _____ \ \ \___       __")
+43	FORMAT ("                               /\_ \           /\ \")
+44	FORMAT ("                                ___             __")
+45	FORMAT (" /\  __ \ /\  __\/ __ \  / __ \  \ \ \  /\  __ \\ \  _  \   / __ \")
+47	FORMAT ("     \/_/                                   \/_/")
+72	FORMAT ("    \ \_\                                  \ \_\")
+92	FORMAT ("   \ \ \/   \/_/ \/____/ \/__/\/_/\/____/ \ \ \/   \/_/\/_/ \/__/\/_/")
 	CALL finalise_molecular()!also closes unit 9, if still open.
 	CLOSE(UNIT=7)
 	IF (DEVELOPERS_VERSION) THEN
@@ -2694,11 +2698,11 @@ IMPLICIT NONE
 		WRITE(*,43)
 		WRITE(*,42)
 		WRITE(*,45)
-		WRITE(*,45)
 		WRITE(*,28)
 		WRITE(*,13)
-		WRITE(*,43)
-		WRITE(*,44)
+		WRITE(*,92)
+		WRITE(*,72)
+		WRITE(*,47)
 		PRINT *
 	ENDIF
 END SUBROUTINE finalise_global
@@ -2713,6 +2717,7 @@ USE SETTINGS
 USE DISTRIBUTION
 USE DISTANCE
 USE SPECIATION
+USE CLUSTER
 IMPLICIT NONE
 	 !$ INTERFACE
 	 !$ 	FUNCTION OMP_get_num_threads()
@@ -3338,6 +3343,18 @@ INTEGER :: ios,n
 					WRITE(*,*) "Speciation module invoked."
 					CALL perform_speciation_analysis()
 					CALL add_reference(6)
+				CASE ("cluster","cluster_analysis") !Module SPECIATION
+					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
+					BACKSPACE 7
+					READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
+					IF (ios/=0) THEN
+						CALL report_error(19,exit_status=ios)
+						EXIT
+					ENDIF
+					FILENAME_CLUSTER_INPUT=dummy
+					WRITE(*,*) "Cluster module invoked."
+					CALL perform_cluster_analysis()
+					CALL add_reference(6)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3530,8 +3547,9 @@ INTEGER :: ios,n
 					!WRITE(*,*) "testing stuff for JMD."
 					!CALL dump_atomic_properties()
 					!CALL perform_speciation_analysis()
-					FILENAME_SPECIATION_INPUT="speciationX.inp"
-					CALL perform_speciation_analysis()
+					!FILENAME_SPECIATION_INPUT="speciationX.inp"
+					!CALL perform_speciation_analysis()
+					CALL cluster_analysis(4.25)
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

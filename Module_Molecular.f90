@@ -171,7 +171,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
 	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
 	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
-	PUBLIC :: give_box_boundaries
+	PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index
 	CONTAINS
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
@@ -186,6 +186,30 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 			ENDDO
 		END FUNCTION check_charges
+
+		LOGICAL FUNCTION valid_molecule_type_index(molecule_type_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index
+			IF ((molecule_type_index<1).OR.(molecule_type_index>give_number_of_molecule_types())) THEN
+				valid_molecule_type_index=.FALSE.
+			ELSE
+				valid_molecule_type_index=.TRUE.
+			ENDIF
+		END FUNCTION valid_molecule_type_index
+
+		LOGICAL FUNCTION valid_atom_index(molecule_type_index,atom_index)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: molecule_type_index,atom_index
+			IF (valid_molecule_type_index(molecule_type_index)) THEN
+				IF ((atom_index<1).OR.(atom_index>give_number_of_atoms_per_molecule(molecule_type_index))) THEN
+					valid_atom_index=.FALSE.
+				ELSE
+					valid_atom_index=.TRUE.
+				ENDIF
+			ELSE
+				valid_atom_index=.FALSE.
+			ENDIF
+		END FUNCTION valid_atom_index
 
 		SUBROUTINE set_default_masses()
 		IMPLICIT NONE

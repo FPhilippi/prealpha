@@ -645,7 +645,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 							ELSE
 								IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'sampling_interval' to ",sampling_interval
 							ENDIF
-						CASE ("nsteps")
+						CASE ("nsteps","n_steps")
 							BACKSPACE 3
 							READ(3,IOSTAT=ios,FMT=*) inputstring,nsteps
 							IF (ios/=0) THEN
@@ -1100,7 +1100,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						WRITE(*,FMT='("    Molecule type ",I0," (",A,"):")')&
 						&acceptor_list(n)%molecule_type_index,TRIM(give_sum_formula(acceptor_list(n)%molecule_type_index))
 						DO atom_counter=1,acceptor_list(n)%N_atoms,1
-							WRITE(*,ADVANCE="NO",FMT='("      Atom index ",I0," (",A,"), cutoff = ")')&
+							WRITE(*,ADVANCE="NO",FMT='("      Atom index ",I0," (",A,"), cutoff ")')&
 							&acceptor_list(n)%atom_index_list(atom_counter,1),&
 							&TRIM(give_element_symbol(acceptor_list(n)%molecule_type_index,acceptor_list(n)%&
 							&atom_index_list(atom_counter,1)))
@@ -1111,7 +1111,12 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								&atom_index_list(atom_counter,1))))
 								WRITE(*,'(F0.2," (covalence radius)")')acceptor_list(n)%cutoff_list(atom_counter)
 							ELSE
-								WRITE(*,'(F0.2)')acceptor_list(n)%cutoff_list(atom_counter)
+								IF (acceptor_list(n)%cutoff_list(atom_counter)<0.01) THEN
+									WRITE(*,'("< 0.01")')
+								ELSE
+									WRITE(*,ADVANCE="NO",FMT='("= ")')
+									WRITE(*,'(F0.2)')acceptor_list(n)%cutoff_list(atom_counter)
+								ENDIF
 							ENDIF
 						ENDDO
 					ENDDO
@@ -1223,7 +1228,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						WRITE(*,FMT='("    Molecule type ",I0," (",A,"):")')&
 						&donor_list(n)%molecule_type_index,TRIM(give_sum_formula(donor_list(n)%molecule_type_index))
 						DO atom_counter=1,donor_list(n)%N_atoms,1
-							WRITE(*,ADVANCE="NO",FMT='("      Atom index ",I0," (",A,"), cutoff = ")')&
+							WRITE(*,ADVANCE="NO",FMT='("      Atom index ",I0," (",A,"), cutoff ")')&
 							&donor_list(n)%atom_index_list(atom_counter,1),&
 							&TRIM(give_element_symbol(donor_list(n)%molecule_type_index,donor_list(n)%&
 							&atom_index_list(atom_counter,1)))
@@ -1234,7 +1239,12 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 								&atom_index_list(atom_counter,1))))
 								WRITE(*,'(F0.2," (covalence radius)")')donor_list(n)%cutoff_list(atom_counter)
 							ELSE
-								WRITE(*,'(F0.2)')donor_list(n)%cutoff_list(atom_counter)
+								IF (donor_list(n)%cutoff_list(atom_counter)<0.01) THEN
+									WRITE(*,'("< 0.01")')
+								ELSE
+									WRITE(*,ADVANCE="NO",FMT='("= ")')
+									WRITE(*,'(F0.2)')donor_list(n)%cutoff_list(atom_counter)
+								ENDIF
 							ENDIF
 						ENDDO
 					ENDDO

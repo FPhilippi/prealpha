@@ -1,3 +1,6 @@
+26.10.2024:
+	The cluster analysis I have been working on is now embedded in the main module.
+	Will fix bugs and outputs over the coming days.
 02.09.2024:
 	Bug fixes related to the normalisation - the composition was off by up to 10% in some cases. Much more stable numerically now.
 01.09.2024:
