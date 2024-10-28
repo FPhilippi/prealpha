@@ -80,6 +80,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !List of centre-of-mass fragments (defined as atom_indices) for tip atom
 	INTEGER :: number_of_tip_atoms,number_of_base_atoms !extent of the two fragment_lists
 	REAL(KIND=WORKING_PRECISION) :: mass_of_tip_fragment,mass_of_base_fragment !total masses of the two fragments
+	INTEGER :: printmember_output_atom_count !how many *ATOMS* are currently logged in the molecules_to_print
 	INTEGER :: molecule_type_index_for_fragments !molecule type index of the molecule to which tip and base atoms belong to
 	LOGICAL :: dihedrals_initialised=.FALSE.!Status boolean, is true if the dihedral_member_indices has been initialised.
 	LOGICAL :: drudes_assigned=.FALSE.
@@ -121,7 +122,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		!third dimension: timestep
 		TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
-		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
+		LOGICAL,DIMENSION(:),ALLOCATABLE :: molecules_to_print
+		
 	END TYPE molecule
 	REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
 	REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
@@ -159,7 +161,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_number_of_molecules_per_step,give_mass_of_molecule,show_molecular_settings,print_memory_requirement
 	PUBLIC :: give_total_number_of_molecules_per_step,show_drude_settings,give_box_volume,give_box_limit
 	PUBLIC :: assign_drudes,give_intramolecular_distances,give_total_temperature,give_sum_formula,constraints_available
-	PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
+	PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,compute_drude_temperature
 	PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles,give_atom_position
 	PUBLIC :: give_smallest_distance,give_number_of_neighbours,wrap_vector,give_smallest_distance_squared,compute_drude_properties
 	PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
@@ -171,8 +173,103 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
 	PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
 	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
-	PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index
+	PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index,give_smallest_distance_to_point_squared
+	PUBLIC :: initialise_print_members,reset_print_members,finalise_print_members,print_members,add_print_member,invert_print_members
 	CONTAINS
+
+		SUBROUTINE initialise_print_members()
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index,allocstatus
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print)) THEN
+					CALL report_error(0)
+				ELSE
+					ALLOCATE(molecule_list(molecule_type_index)%molecules_to_print(&
+					&molecule_list(molecule_type_index)%total_molecule_count),STAT=allocstatus)
+					IF (allocstatus/=0) THEN
+						CALL report_error(22,exit_status=allocstatus)
+						RETURN
+					ENDIF
+				ENDIF
+				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+					molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+				ENDDO
+				printmember_output_atom_count=0
+			ENDDO
+		END SUBROUTINE initialise_print_members
+
+		SUBROUTINE reset_print_members()
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+					molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+				ENDDO
+			ENDDO
+			printmember_output_atom_count=0
+		END SUBROUTINE reset_print_members
+
+		SUBROUTINE invert_print_members()
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index
+			printmember_output_atom_count=0
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+					IF (molecule_list(molecule_type_index)%molecules_to_print(molecule_index)) THEN
+						molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+					ELSE
+						molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
+						printmember_output_atom_count=printmember_output_atom_count+1
+					ENDIF
+				ENDDO
+			ENDDO
+		END SUBROUTINE invert_print_members
+
+		SUBROUTINE print_members(timestep,filename,header)
+		IMPLICIT NONE
+		CHARACTER(LEN=*),INTENT(IN) :: filename,header
+		INTEGER,INTENT(IN) :: timestep
+		INTEGER :: molecule_type_index,molecule_index
+			IF (printmember_output_atom_count>0) THEN
+				OPEN(UNIT=4,FILE=TRIM(filename))
+				WRITE(4,'(I0)') printmember_output_atom_count
+				WRITE(4,'(A)') TRIM(header)
+				DO molecule_type_index=1,give_number_of_molecule_types(),1
+					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+						IF (molecule_list(molecule_type_index)%molecules_to_print(molecule_index)) THEN
+							CALL write_molecule(4,timestep,molecule_type_index,molecule_index,include_header=.FALSE.)
+						ENDIF
+					ENDDO
+				ENDDO
+				WRITE(4,*)
+				WRITE(4,*)
+				ENDFILE 4
+				CLOSE(UNIT=4)
+			ENDIF
+		END SUBROUTINE print_members
+
+		SUBROUTINE finalise_print_members()
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index,deallocstatus
+			DO molecule_type_index=1,give_number_of_molecule_types(),1
+				IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print)) THEN
+					DEALLOCATE(molecule_list(molecule_type_index)%molecules_to_print,STAT=deallocstatus)
+					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+				ELSE
+					CALL report_error(0)
+				ENDIF
+			ENDDO
+		END SUBROUTINE finalise_print_members
+
+		SUBROUTINE add_print_member(molecule_type_index,molecule_index)
+		IMPLICIT NONE
+		INTEGER :: molecule_type_index,molecule_index
+			IF (.NOT.(molecule_list(molecule_type_index)%molecules_to_print(molecule_index))) THEN
+				molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
+				printmember_output_atom_count=printmember_output_atom_count+&
+				&give_number_of_atoms_per_molecule(molecule_type_index)
+			ENDIF
+		END SUBROUTINE add_print_member
 
 		LOGICAL FUNCTION check_charges(molecule_type_index)
 		IMPLICIT NONE
@@ -962,6 +1059,49 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			IF (PRESENT(translation).AND.(.NOT.(WRAP_TRAJECTORY))) translation(:)=translation(:)+wrapshift(:)
 		END FUNCTION give_smallest_distance_squared
 
+		!This FUNCTION returns the smallest squared distance of a given molecule (as centre of mass) to a given point considering all PBCs - as well as the corresponding translation vector.
+		REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_distance_to_point_squared&
+		&(pos_1_in,timestep2,molecule_type_index_2,&
+		&molecule_index_2,translation)
+		IMPLICIT NONE
+		INTEGER :: a,b,c
+		INTEGER,INTENT(IN) :: timestep2,molecule_type_index_2,molecule_index_2
+		REAL(KIND=WORKING_PRECISION),INTENT(IN) :: pos_1_in(3)
+		REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip,wrapshift(3)
+		REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3)
+			pos_1(:)=pos_1_in(:)
+			pos_2(:)=give_center_of_mass(timestep2,molecule_type_index_2,molecule_index_2)
+			!two molecules can be no further apart than the diagonale of the box... that's what I initialise to
+			give_smallest_distance_to_point_squared=maximum_distance_squared
+			IF (.NOT.(WRAP_TRAJECTORY)) THEN	
+				CALL wrap_vector(pos_1,shift(:))	
+				CALL wrap_vector(pos_2,wrapshift(:))
+				!"shift" is now the vector to translate the reference molecule into the box by wrapping.
+				!"wrapshift" is the same for the second, observed molecule.
+				!now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
+				wrapshift(:)=wrapshift(:)-shift(:)
+			ENDIF
+			!Now, check all mirror images
+			DO a=-1,1,1! a takes the values (-1, 0, 1)
+				DO b=-1,1,1! b takes the values (-1, 0, 1)
+					DO c=-1,1,1! c takes the values (-1, 0, 1)
+						shift(1)=FLOAT(a)
+						shift(2)=FLOAT(b)
+						shift(3)=FLOAT(c)
+						shift=shift*box_size
+						!shift is now the translation vector to the mirror image.
+						distance_clip=SUM(((pos_2+shift)-pos_1)**2)
+						IF (distance_clip<give_smallest_distance_to_point_squared) THEN
+							!a distance has been found that's closer than the current best - amend that.
+							give_smallest_distance_to_point_squared=distance_clip
+							IF (PRESENT(translation)) translation(:)=shift(:)
+						ENDIF
+				   ENDDO
+				ENDDO
+			ENDDO
+			IF (PRESENT(translation).AND.(.NOT.(WRAP_TRAJECTORY))) translation(:)=translation(:)+wrapshift(:)
+		END FUNCTION give_smallest_distance_to_point_squared
+
 		SUBROUTINE give_number_of_neighbours&
 		&(timestep,molecule_type_index,molecule_index,neighbour_molecules,neighbour_atoms,cutoff,output_unit)
 		IMPLICIT NONE
@@ -996,240 +1136,6 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDDO
 			ENDDO
 		END SUBROUTINE give_number_of_neighbours
-
-		!The task of convert_parallel is to reduce a trajectory to centre-of-mass. Not part of the official version. Doesn't really work, because File I/O is the slow part.
-		SUBROUTINE convert_parallel()
-		IMPLICIT NONE
-		INTEGER :: queuesize,first_in,last_in,stepcounter,nprocs,number_of_molecules
-		INTEGER,DIMENSION(:),ALLOCATABLE :: element_status !0=to convert, 1=converting currently, 2=converted, 3=written
-		CHARACTER(LEN=1),DIMENSION(:),ALLOCATABLE :: list_of_elements_output
-		REAL(KIND=WORKING_PRECISION),DIMENSION(:,:,:),ALLOCATABLE :: coordinates_output
-		LOGICAL :: completed,skip
-	 !$ INTERFACE
-	 !$ 	FUNCTION OMP_get_thread_num()
-	 !$ 	INTEGER :: OMP_get_thread_num
-	 !$ 	END FUNCTION OMP_get_thread_num
-	 !$ 	FUNCTION OMP_get_max_threads()
-	 !$ 	INTEGER :: OMP_get_max_threads
-	 !$ 	END FUNCTION OMP_get_max_threads
-	 !$ 	SUBROUTINE OMP_set_nested(enable)
-	 !$ 	LOGICAL,INTENT(IN) :: enable
-	 !$ 	END SUBROUTINE OMP_set_nested
-	 !$ END INTERFACE
-		 !$ nprocs=OMP_get_max_threads()
-		 !$ IF (nprocs<3) THEN
-		 !$ 	WRITE(*,*) " ! less than 3 threads available. Returning control to main module."
-		 !$ 	RETURN
-		 !$ ENDIF
-		 !$ CALL OMP_set_num_threads(nprocs)
-		 !$ WRITE(*,'("  ! number of threads set to ",I0)') nprocs
-			!omp: if false then return.
-		 !$ IF (.FALSE.) THEN
-				WRITE(*,*) " ! -fopenmp flag not set. Returning control to main module."
-				RETURN
-		 !$ ENDIF
-			first_in=0
-			last_in=0
-			completed=.FALSE.
-			queuesize=100
-			CALL initialise_queue()
-			REWIND 9
-			!$OMP PARALLEL DEFAULT(SHARED) PRIVATE(stepcounter,skip)
-			!$OMP SECTIONS
-			!$OMP SECTION
-		 !$ WRITE(*,'("  ! Thread number ",I0," is reading the trajectory file.")') OMP_get_thread_num()
-			!This thread is reading the trajectory step by step, writing into the queue, and marking as 'to convert'.
-			DO stepcounter=1,number_of_steps,1
-				CALL enqueue()
-			ENDDO
-		 !$ WRITE(*,'("  ! Thread number ",I0," is done reading the trajectory.")') OMP_get_thread_num()
-			!$OMP SECTION
-		 !$ WRITE(*,'("  ! Thread number ",I0," writes to output trajectory.")') OMP_get_thread_num()
-			DO stepcounter=1,number_of_steps,1
-			1	IF (element_status((MOD(stepcounter-1,queuesize)+1))==2) THEN
-					!write this step.
-					CALL write_from_queue(stepcounter*TIME_SCALING_FACTOR,(MOD(stepcounter-1,queuesize)+1))
-					!set flag to 'written'.
-					element_status(MOD(stepcounter-1,queuesize)+1)=3
-				ELSE
-					GOTO 1
-				ENDIF
-			ENDDO
-		 !$ WRITE(*,'("  ! Thread number ",I0," is done writing to output trajectory.")') OMP_get_thread_num()
-			completed=.TRUE.
-			!$OMP END SECTIONS NOWAIT
-			IF (.NOT.completed) THEN
-		 !$ WRITE(*,'("  ! Thread ",I0," is ready to convert.")') OMP_get_thread_num()
-			!These threads are constantly converting everything that needs converting.
-				DO stepcounter=1,number_of_steps,1
-				2	skip=.FALSE.
-					IF (completed) THEN
-				 !$ 	WRITE(*,'("  ! Thread number ",I0," caught termination signal.")') OMP_get_thread_num()
-						EXIT
-					ENDIF
-					!$OMP CRITICAL
-					!Check if this step is to be converted, and if yes, change flag to '1' and start converting.
-					IF (element_status(MOD(stepcounter-1,queuesize)+1)==0) THEN
-						element_status(MOD(stepcounter-1,queuesize)+1)=1
-					ELSE
-						skip=.TRUE.
-					ENDIF
-					!$OMP END CRITICAL
-					IF (skip) GOTO 2
-					CALL convert_queue(MOD(stepcounter-1,queuesize)+1)
-					!set flag to 'converted'
-					element_status(MOD(stepcounter-1,queuesize)+1)=2
-				ENDDO
-			ENDIF
-			!$OMP END PARALLEL
-			CALL finalise_queue()
-			CALL reset_trajectory_file()
-			CONTAINS
-
-				SUBROUTINE initialise_queue()
-				IMPLICIT NONE
-				INTEGER :: allocstatus,n,m,counter
-				LOGICAL :: connected
-				CHARACTER(LEN=1024) :: fstring
-					INQUIRE(UNIT=3,OPENED=connected)
-					IF (connected) CALL report_error(27,exit_status=3)
-					WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_parallel.lmp"
-					OPEN(UNIT=3,FILE=TRIM(fstring))
-					number_of_molecules=0
-					ALLOCATE(element_status(queuesize),STAT=allocstatus)
-					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-					!converted elements must be initialised to 'written', to keep every thread but the read thread idle at the beginning.
-					element_status(:)=3
-					DO n=1,number_of_molecule_types,1
-						number_of_molecules=number_of_molecules+molecule_list(n)%total_molecule_count
-						ALLOCATE(molecule_list(n)%queue(queuesize,molecule_list(n)%total_molecule_count,molecule_list(n)%number_of_atoms)&
-						&,STAT=allocstatus)
-						IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-					ENDDO
-					ALLOCATE(list_of_elements_output(number_of_molecules),STAT=allocstatus)
-					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-					ALLOCATE(coordinates_output(queuesize,number_of_molecules,3),STAT=allocstatus)
-					IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-					counter=0
-					DO n=1,number_of_molecule_types,1
-						DO m=1,molecule_list(n)%total_molecule_count,1
-							counter=counter+1
-							list_of_elements_output(counter)=CHAR(ALPHABET_small(MOD((n-1),26)+1))
-						ENDDO
-					ENDDO
-				END SUBROUTINE initialise_queue
-
-				SUBROUTINE enqueue() !reads a step and puts it in the queue
-				IMPLICIT NONE
-				INTEGER :: dummy_iterations,molecule_type_index,atom_index,molecule_index,counter
-				CHARACTER(LEN=2) :: dummystring
-					dummy_iterations=0
-					last_in=MOD(last_in,queuesize)+1
-					DO
-						IF ((first_in/=last_in).AND.(element_status(last_in)==3)) THEN
-							!read/skip the header
-							DO counter=1,headerlines_to_skip,1
-								READ(9,*)
-							ENDDO
-							!read the body into queue(last_in)
-							DO molecule_type_index=1,number_of_molecule_types,1
-								!For each molecule type, read the corresponding number of molecules:
-								DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of queue
-									!Finally, iterate over the atoms in that particular molecule:
-									DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of queue
-										!LOOP VARIABLES:
-										!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-										!molecule_index: current explicit molecule, e.g. molecule number 231
-										!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-										READ(9,*) dummystring,&
-										&molecule_list(molecule_type_index)%queue(last_in,molecule_index,atom_index)%coordinates
-									ENDDO
-								ENDDO	
-							ENDDO
-							!set flag to convert. Only one thread can change back to zero - this one.
-							element_status(last_in)=0
-							EXIT
-						ELSE
-							dummy_iterations=dummy_iterations+1
-						ENDIF
-					ENDDO
-					IF (dummy_iterations>0) PRINT *,"DUMMY ITERATIONS ",dummy_iterations
-				END SUBROUTINE enqueue
-
-				SUBROUTINE convert_queue(position_input) !convert queue to coordinates_output, which is centre of mass
-				IMPLICIT NONE
-				REAL(KIND=WORKING_PRECISION) :: weighted_pos(3)
-				INTEGER :: counter,molecule_type_index,molecule_index,atom_index,position_input
-					coordinates_output(position_input,:,:)=0.0d0
-					counter=1
-					DO molecule_type_index=1,number_of_molecule_types,1
-						DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of queue
-							DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of queue
-								!molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-								!molecule_index: current explicit molecule, e.g. molecule number 231
-								!atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-								!store current atom position in weighted_pos
-								weighted_pos=DBLE(molecule_list(molecule_type_index)%queue(position_input,molecule_index,atom_index)%coordinates(:))
-								!weigh position with mass...
-								weighted_pos(:)=weighted_pos(:)*DBLE(molecule_list(molecule_type_index)%list_of_atom_masses(atom_index))
-								!... and add to centre of mass.
-								coordinates_output(position_input,counter,:)=coordinates_output(position_input,counter,:)+weighted_pos(:)
-							ENDDO
-							!normalise, increase counter for the next molecule.
-							coordinates_output(position_input,counter,:)=&
-							&coordinates_output(position_input,counter,:)/DBLE(molecule_list(molecule_type_index)%mass)
-							counter=counter+1
-						ENDDO	
-					ENDDO
-				END SUBROUTINE convert_queue
-
-				SUBROUTINE write_from_queue(step_number,position_input)
-				IMPLICIT NONE
-				INTEGER,INTENT(IN) :: step_number,position_input
-				INTEGER :: n
-					!WRITE header
-					WRITE(3,'("ITEM: TIMESTEP")')
-					WRITE(3,'(I0)') step_number
-					WRITE(3,'("ITEM: NUMBER OF ATOMS")')
-					WRITE(3,'(I0)') number_of_molecules
-					WRITE(3,'("ITEM: BOX BOUNDS pp pp pp")')
-					WRITE(3,*) box_dimensions(:,1)
-					WRITE(3,*) box_dimensions(:,2)
-					WRITE(3,*) box_dimensions(:,3)
-					!Append the line that tells the user about the content!
-					SELECT CASE (INFORMATION_IN_TRAJECTORY)
-					CASE("UNK")
-						WRITE(3,'("ITEM: ATOMS element x? y? z?")')
-					CASE("VEL")
-						WRITE(3,'("ITEM: ATOMS element vx vy vz")')
-					CASE("POS")
-						WRITE(3,'("ITEM: ATOMS element xu yu zu")')
-					CASE DEFAULT
-						CALL report_error(0)
-					END SELECT
-					!WRITE body (centre of mass)
-					DO n=1,number_of_molecules,1
-						WRITE(3,'(A2,3E19.10)') list_of_elements_output(n),coordinates_output(position_input,n,:)
-					ENDDO
-				END SUBROUTINE write_from_queue
-
-				SUBROUTINE finalise_queue()
-				IMPLICIT NONE
-				INTEGER :: deallocstatus,n
-					CLOSE(UNIT=3)
-					DEALLOCATE(element_status,STAT=deallocstatus)
-					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-					DEALLOCATE(list_of_elements_output,STAT=deallocstatus)
-					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-					DEALLOCATE(coordinates_output,STAT=deallocstatus)
-					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-					DO n=1,number_of_molecule_types,1
-						DEALLOCATE(molecule_list(n)%queue,STAT=deallocstatus)
-						IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-					ENDDO
-				END SUBROUTINE finalise_queue
-
-		END SUBROUTINE convert_parallel
 
 		!This subroutine rewinds the trajectory file and adjusts the 'pointer' accordingly. (Hell, I'm not starting with real pointers here)
 		SUBROUTINE reset_trajectory_file()
@@ -1570,27 +1476,34 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		IMPLICIT NONE
 		INTEGER :: molecule_type_index,molecule_index
 		REAL :: centre_of_mass(3)
-		INTEGER :: xyzcounter
+		INTEGER :: xyzcounter,safetycounter
 			!Parallelisation is not available anyway...
 			DO molecule_type_index=1,number_of_molecule_types,1
 				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
 					!timestep has no meaning because snapshot.
 					centre_of_mass=give_center_of_mass(file_position,molecule_type_index,molecule_index)
 					DO xyzcounter=1,3,1
-					!Apologies for the jump. We are all weak sometimes.
-					10  IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
-							centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
-							molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
-							&molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
-							GOTO 10
-						ELSE
-							IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
-								centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
+					!removed the jump.
+						DO safetycounter=1,1000,1
+							IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
+								!centre of mass is outside of box (smaller)
+								centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
 								molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
-								&molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
-								GOTO 10
+								&molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
+								CYCLE
+							ELSE
+								IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
+									!centre of mass is outside of box (bigger)
+									centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
+									molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
+									&molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
+									CYCLE
+								ELSE
+									!centre of mass is inside box!
+									EXIT
+								ENDIF
 							ENDIF
-						ENDIF
+						ENDDO
 					ENDDO
 				ENDDO
 			ENDDO
@@ -3971,6 +3884,11 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					!deallocate memory for detailed drude pair list
 					DEALLOCATE(molecule_list(n)%list_of_drude_pairs,STAT=deallocstatus)
 					IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
+				ENDIF
+				IF (ALLOCATED(molecule_list(n)%molecules_to_print)) THEN
+					CALL report_error(0)
+					DEALLOCATE(molecule_list(n)%molecules_to_print,STAT=deallocstatus)
+					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 				ENDIF
 				DEALLOCATE(molecule_list(n)%list_of_elements,STAT=deallocstatus)
 				IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)

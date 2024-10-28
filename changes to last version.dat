@@ -1,3 +1,6 @@
+28.10.2024:
+	Cluster analysis and peripherals debugged.
+	Two operation modes available, PAIRS and GLOBAL.
 26.10.2024:
 	The cluster analysis I have been working on is now embedded in the main module.
 	Will fix bugs and outputs over the coming days.

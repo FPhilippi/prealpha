@@ -1,9 +1,10 @@
-! RELEASED ON 26_Oct_2024 AT 19:06
+! RELEASED ON 28_Oct_2024 AT 20:44
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
- ! This work is funded by the Japan Society for the Promotion of Science
+ ! This work is funded by the Japan Society for the Promotion of Science.
+ ! This work is funded by the European Union.
 
     ! This program is free software: you can redistribute it and/or modify
     ! it under the terms of the GNU General Public License as published by
@@ -292,6 +293,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !174 no cutoffs specified in cluster.inp
  !175 nonsensical values for the cutoff scan
  !176 nonsensical values for molecule_type_index or atom_index
+ !177 operation mode missing in cluster.inp
+ !178 option not available in the current operation mode.
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -1005,6 +1008,11 @@ MODULE SETTINGS !This module contains important globals and subprograms.
     CASE (176)
      WRITE(*,*) " #  ERROR 176: atoms not specified correctly in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
      WRITE(*,*) "--> please check the use of 'add_molecule' or 'add_atom' in your cluster input file."
+    CASE (177)
+     WRITE(*,*) " #  ERROR 177: Operation mode missing in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+     WRITE(*,*) "--> please add 'GLOBAL' or 'PAIRS' to the beginning of your cluster input file."
+    CASE (178)
+     WRITE(*,*) " #  ERROR 178: This option is not available in the current operation mode. This line is ignored."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1670,6 +1678,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_tip(:) !List of centre-of-mass fragments (defined as atom_indices) for tip atom
  INTEGER :: number_of_tip_atoms,number_of_base_atoms !extent of the two fragment_lists
  REAL(KIND=WORKING_PRECISION) :: mass_of_tip_fragment,mass_of_base_fragment !total masses of the two fragments
+ INTEGER :: printmember_output_atom_count !how many *ATOMS* are currently logged in the molecules_to_print
  INTEGER :: molecule_type_index_for_fragments !molecule type index of the molecule to which tip and base atoms belong to
  LOGICAL :: dihedrals_initialised=.FALSE.!Status boolean, is true if the dihedral_member_indices has been initialised.
  LOGICAL :: drudes_assigned=.FALSE.
@@ -1711,7 +1720,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
   !third dimension: timestep
   TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
   TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
-  TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: queue!the queue for circular parallel operation. conceptually the same as 'trajectory', but only big enough to act as a buffer.
+  LOGICAL,DIMENSION(:),ALLOCATABLE :: molecules_to_print
+  
  END TYPE molecule
  REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
  REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
@@ -1749,7 +1759,7 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  PUBLIC :: give_number_of_molecules_per_step,give_mass_of_molecule,show_molecular_settings,print_memory_requirement
  PUBLIC :: give_total_number_of_molecules_per_step,show_drude_settings,give_box_volume,give_box_limit
  PUBLIC :: assign_drudes,give_intramolecular_distances,give_total_temperature,give_sum_formula,constraints_available
- PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,convert_parallel,compute_drude_temperature
+ PUBLIC :: give_total_degrees_of_freedom,give_number_of_atoms_per_step,compute_drude_temperature
  PUBLIC :: initialise_fragments,give_tip_fragment,give_base_fragment,give_number_of_drude_particles,give_atom_position
  PUBLIC :: give_smallest_distance,give_number_of_neighbours,wrap_vector,give_smallest_distance_squared,compute_drude_properties
  PUBLIC :: compute_squared_radius_of_gyration,are_drudes_assigned,write_molecule_merged_drudes,set_cubic_box
@@ -1761,8 +1771,103 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
  PUBLIC :: give_number_of_specific_atoms_per_molecule,give_indices_of_specific_atoms_per_molecule,give_number_of_specific_atoms
  PUBLIC :: give_indices_of_specific_atoms,give_element_symbol,give_center_of_charge,give_realcharge_of_molecule,write_trajectory
  PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
- PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index
+ PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index,give_smallest_distance_to_point_squared
+ PUBLIC :: initialise_print_members,reset_print_members,finalise_print_members,print_members,add_print_member,invert_print_members
  CONTAINS
+
+  SUBROUTINE initialise_print_members()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index,allocstatus
+   DO molecule_type_index=1,give_number_of_molecule_types(),1
+    IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print)) THEN
+     CALL report_error(0)
+    ELSE
+     ALLOCATE(molecule_list(molecule_type_index)%molecules_to_print(&
+     &molecule_list(molecule_type_index)%total_molecule_count),STAT=allocstatus)
+     IF (allocstatus/=0) THEN
+      CALL report_error(22,exit_status=allocstatus)
+      RETURN
+     ENDIF
+    ENDIF
+    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+     molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+    ENDDO
+    printmember_output_atom_count=0
+   ENDDO
+  END SUBROUTINE initialise_print_members
+
+  SUBROUTINE reset_print_members()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index
+   DO molecule_type_index=1,give_number_of_molecule_types(),1
+    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+     molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+    ENDDO
+   ENDDO
+   printmember_output_atom_count=0
+  END SUBROUTINE reset_print_members
+
+  SUBROUTINE invert_print_members()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index
+   printmember_output_atom_count=0
+   DO molecule_type_index=1,give_number_of_molecule_types(),1
+    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+     IF (molecule_list(molecule_type_index)%molecules_to_print(molecule_index)) THEN
+      molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+     ELSE
+      molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
+      printmember_output_atom_count=printmember_output_atom_count+1
+     ENDIF
+    ENDDO
+   ENDDO
+  END SUBROUTINE invert_print_members
+
+  SUBROUTINE print_members(timestep,filename,header)
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: filename,header
+  INTEGER,INTENT(IN) :: timestep
+  INTEGER :: molecule_type_index,molecule_index
+   IF (printmember_output_atom_count>0) THEN
+    OPEN(UNIT=4,FILE=TRIM(filename))
+    WRITE(4,'(I0)') printmember_output_atom_count
+    WRITE(4,'(A)') TRIM(header)
+    DO molecule_type_index=1,give_number_of_molecule_types(),1
+     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+      IF (molecule_list(molecule_type_index)%molecules_to_print(molecule_index)) THEN
+       CALL write_molecule(4,timestep,molecule_type_index,molecule_index,include_header=.FALSE.)
+      ENDIF
+     ENDDO
+    ENDDO
+    WRITE(4,*)
+    WRITE(4,*)
+    ENDFILE 4
+    CLOSE(UNIT=4)
+   ENDIF
+  END SUBROUTINE print_members
+
+  SUBROUTINE finalise_print_members()
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index,deallocstatus
+   DO molecule_type_index=1,give_number_of_molecule_types(),1
+    IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print)) THEN
+     DEALLOCATE(molecule_list(molecule_type_index)%molecules_to_print,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ELSE
+     CALL report_error(0)
+    ENDIF
+   ENDDO
+  END SUBROUTINE finalise_print_members
+
+  SUBROUTINE add_print_member(molecule_type_index,molecule_index)
+  IMPLICIT NONE
+  INTEGER :: molecule_type_index,molecule_index
+   IF (.NOT.(molecule_list(molecule_type_index)%molecules_to_print(molecule_index))) THEN
+    molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
+    printmember_output_atom_count=printmember_output_atom_count+&
+    &give_number_of_atoms_per_molecule(molecule_type_index)
+   ENDIF
+  END SUBROUTINE add_print_member
 
   LOGICAL FUNCTION check_charges(molecule_type_index)
   IMPLICIT NONE
@@ -2552,6 +2657,49 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    IF (PRESENT(translation).AND.(.NOT.(WRAP_TRAJECTORY))) translation(:)=translation(:)+wrapshift(:)
   END FUNCTION give_smallest_distance_squared
 
+  !This FUNCTION returns the smallest squared distance of a given molecule (as centre of mass) to a given point considering all PBCs - as well as the corresponding translation vector.
+  REAL(KIND=GENERAL_PRECISION) FUNCTION give_smallest_distance_to_point_squared&
+  &(pos_1_in,timestep2,molecule_type_index_2,&
+  &molecule_index_2,translation)
+  IMPLICIT NONE
+  INTEGER :: a,b,c
+  INTEGER,INTENT(IN) :: timestep2,molecule_type_index_2,molecule_index_2
+  REAL(KIND=WORKING_PRECISION),INTENT(IN) :: pos_1_in(3)
+  REAL(KIND=WORKING_PRECISION) :: pos_1(3),pos_2(3),shift(3),distance_clip,wrapshift(3)
+  REAL(KIND=WORKING_PRECISION),INTENT(OUT),OPTIONAL :: translation(3)
+   pos_1(:)=pos_1_in(:)
+   pos_2(:)=give_center_of_mass(timestep2,molecule_type_index_2,molecule_index_2)
+   !two molecules can be no further apart than the diagonale of the box... that's what I initialise to
+   give_smallest_distance_to_point_squared=maximum_distance_squared
+   IF (.NOT.(WRAP_TRAJECTORY)) THEN 
+    CALL wrap_vector(pos_1,shift(:)) 
+    CALL wrap_vector(pos_2,wrapshift(:))
+    !"shift" is now the vector to translate the reference molecule into the box by wrapping.
+    !"wrapshift" is the same for the second, observed molecule.
+    !now, store in wrapshift the vector to bring the second *into the same box* as the first molecule:
+    wrapshift(:)=wrapshift(:)-shift(:)
+   ENDIF
+   !Now, check all mirror images
+   DO a=-1,1,1! a takes the values (-1, 0, 1)
+    DO b=-1,1,1! b takes the values (-1, 0, 1)
+     DO c=-1,1,1! c takes the values (-1, 0, 1)
+      shift(1)=FLOAT(a)
+      shift(2)=FLOAT(b)
+      shift(3)=FLOAT(c)
+      shift=shift*box_size
+      !shift is now the translation vector to the mirror image.
+      distance_clip=SUM(((pos_2+shift)-pos_1)**2)
+      IF (distance_clip<give_smallest_distance_to_point_squared) THEN
+       !a distance has been found that's closer than the current best - amend that.
+       give_smallest_distance_to_point_squared=distance_clip
+       IF (PRESENT(translation)) translation(:)=shift(:)
+      ENDIF
+       ENDDO
+    ENDDO
+   ENDDO
+   IF (PRESENT(translation).AND.(.NOT.(WRAP_TRAJECTORY))) translation(:)=translation(:)+wrapshift(:)
+  END FUNCTION give_smallest_distance_to_point_squared
+
   SUBROUTINE give_number_of_neighbours&
   &(timestep,molecule_type_index,molecule_index,neighbour_molecules,neighbour_atoms,cutoff,output_unit)
   IMPLICIT NONE
@@ -2586,240 +2734,6 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     ENDDO
    ENDDO
   END SUBROUTINE give_number_of_neighbours
-
-  !The task of convert_parallel is to reduce a trajectory to centre-of-mass. Not part of the official version. Doesn't really work, because File I/O is the slow part.
-  SUBROUTINE convert_parallel()
-  IMPLICIT NONE
-  INTEGER :: queuesize,first_in,last_in,stepcounter,nprocs,number_of_molecules
-  INTEGER,DIMENSION(:),ALLOCATABLE :: element_status !0=to convert, 1=converting currently, 2=converted, 3=written
-  CHARACTER(LEN=1),DIMENSION(:),ALLOCATABLE :: list_of_elements_output
-  REAL(KIND=WORKING_PRECISION),DIMENSION(:,:,:),ALLOCATABLE :: coordinates_output
-  LOGICAL :: completed,skip
-  !$ INTERFACE
-  !$  FUNCTION OMP_get_thread_num()
-  !$  INTEGER :: OMP_get_thread_num
-  !$  END FUNCTION OMP_get_thread_num
-  !$  FUNCTION OMP_get_max_threads()
-  !$  INTEGER :: OMP_get_max_threads
-  !$  END FUNCTION OMP_get_max_threads
-  !$  SUBROUTINE OMP_set_nested(enable)
-  !$  LOGICAL,INTENT(IN) :: enable
-  !$  END SUBROUTINE OMP_set_nested
-  !$ END INTERFACE
-   !$ nprocs=OMP_get_max_threads()
-   !$ IF (nprocs<3) THEN
-   !$  WRITE(*,*) " ! less than 3 threads available. Returning control to main module."
-   !$  RETURN
-   !$ ENDIF
-   !$ CALL OMP_set_num_threads(nprocs)
-   !$ WRITE(*,'("  ! number of threads set to ",I0)') nprocs
-   !omp: if false then return.
-   !$ IF (.FALSE.) THEN
-    WRITE(*,*) " ! -fopenmp flag not set. Returning control to main module."
-    RETURN
-   !$ ENDIF
-   first_in=0
-   last_in=0
-   completed=.FALSE.
-   queuesize=100
-   CALL initialise_queue()
-   REWIND 9
-   !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(stepcounter,skip)
-   !$OMP SECTIONS
-   !$OMP SECTION
-   !$ WRITE(*,'("  ! Thread number ",I0," is reading the trajectory file.")') OMP_get_thread_num()
-   !This thread is reading the trajectory step by step, writing into the queue, and marking as 'to convert'.
-   DO stepcounter=1,number_of_steps,1
-    CALL enqueue()
-   ENDDO
-   !$ WRITE(*,'("  ! Thread number ",I0," is done reading the trajectory.")') OMP_get_thread_num()
-   !$OMP SECTION
-   !$ WRITE(*,'("  ! Thread number ",I0," writes to output trajectory.")') OMP_get_thread_num()
-   DO stepcounter=1,number_of_steps,1
-   1 IF (element_status((MOD(stepcounter-1,queuesize)+1))==2) THEN
-     !write this step.
-     CALL write_from_queue(stepcounter*TIME_SCALING_FACTOR,(MOD(stepcounter-1,queuesize)+1))
-     !set flag to 'written'.
-     element_status(MOD(stepcounter-1,queuesize)+1)=3
-    ELSE
-     GOTO 1
-    ENDIF
-   ENDDO
-   !$ WRITE(*,'("  ! Thread number ",I0," is done writing to output trajectory.")') OMP_get_thread_num()
-   completed=.TRUE.
-   !$OMP END SECTIONS NOWAIT
-   IF (.NOT.completed) THEN
-   !$ WRITE(*,'("  ! Thread ",I0," is ready to convert.")') OMP_get_thread_num()
-   !These threads are constantly converting everything that needs converting.
-    DO stepcounter=1,number_of_steps,1
-    2 skip=.FALSE.
-     IF (completed) THEN
-     !$  WRITE(*,'("  ! Thread number ",I0," caught termination signal.")') OMP_get_thread_num()
-      EXIT
-     ENDIF
-     !$OMP CRITICAL
-     !Check if this step is to be converted, and if yes, change flag to '1' and start converting.
-     IF (element_status(MOD(stepcounter-1,queuesize)+1)==0) THEN
-      element_status(MOD(stepcounter-1,queuesize)+1)=1
-     ELSE
-      skip=.TRUE.
-     ENDIF
-     !$OMP END CRITICAL
-     IF (skip) GOTO 2
-     CALL convert_queue(MOD(stepcounter-1,queuesize)+1)
-     !set flag to 'converted'
-     element_status(MOD(stepcounter-1,queuesize)+1)=2
-    ENDDO
-   ENDIF
-   !$OMP END PARALLEL
-   CALL finalise_queue()
-   CALL reset_trajectory_file()
-   CONTAINS
-
-    SUBROUTINE initialise_queue()
-    IMPLICIT NONE
-    INTEGER :: allocstatus,n,m,counter
-    LOGICAL :: connected
-    CHARACTER(LEN=1024) :: fstring
-     INQUIRE(UNIT=3,OPENED=connected)
-     IF (connected) CALL report_error(27,exit_status=3)
-     WRITE(fstring,'(2A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"COM_parallel.lmp"
-     OPEN(UNIT=3,FILE=TRIM(fstring))
-     number_of_molecules=0
-     ALLOCATE(element_status(queuesize),STAT=allocstatus)
-     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-     !converted elements must be initialised to 'written', to keep every thread but the read thread idle at the beginning.
-     element_status(:)=3
-     DO n=1,number_of_molecule_types,1
-      number_of_molecules=number_of_molecules+molecule_list(n)%total_molecule_count
-      ALLOCATE(molecule_list(n)%queue(queuesize,molecule_list(n)%total_molecule_count,molecule_list(n)%number_of_atoms)&
-      &,STAT=allocstatus)
-      IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-     ENDDO
-     ALLOCATE(list_of_elements_output(number_of_molecules),STAT=allocstatus)
-     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-     ALLOCATE(coordinates_output(queuesize,number_of_molecules,3),STAT=allocstatus)
-     IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-     counter=0
-     DO n=1,number_of_molecule_types,1
-      DO m=1,molecule_list(n)%total_molecule_count,1
-       counter=counter+1
-       list_of_elements_output(counter)=CHAR(ALPHABET_small(MOD((n-1),26)+1))
-      ENDDO
-     ENDDO
-    END SUBROUTINE initialise_queue
-
-    SUBROUTINE enqueue() !reads a step and puts it in the queue
-    IMPLICIT NONE
-    INTEGER :: dummy_iterations,molecule_type_index,atom_index,molecule_index,counter
-    CHARACTER(LEN=2) :: dummystring
-     dummy_iterations=0
-     last_in=MOD(last_in,queuesize)+1
-     DO
-      IF ((first_in/=last_in).AND.(element_status(last_in)==3)) THEN
-       !read/skip the header
-       DO counter=1,headerlines_to_skip,1
-        READ(9,*)
-       ENDDO
-       !read the body into queue(last_in)
-       DO molecule_type_index=1,number_of_molecule_types,1
-        !For each molecule type, read the corresponding number of molecules:
-        DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of queue
-         !Finally, iterate over the atoms in that particular molecule:
-         DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of queue
-          !LOOP VARIABLES:
-          !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-          !molecule_index: current explicit molecule, e.g. molecule number 231
-          !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-          READ(9,*) dummystring,&
-          &molecule_list(molecule_type_index)%queue(last_in,molecule_index,atom_index)%coordinates
-         ENDDO
-        ENDDO 
-       ENDDO
-       !set flag to convert. Only one thread can change back to zero - this one.
-       element_status(last_in)=0
-       EXIT
-      ELSE
-       dummy_iterations=dummy_iterations+1
-      ENDIF
-     ENDDO
-     IF (dummy_iterations>0) PRINT *,"DUMMY ITERATIONS ",dummy_iterations
-    END SUBROUTINE enqueue
-
-    SUBROUTINE convert_queue(position_input) !convert queue to coordinates_output, which is centre of mass
-    IMPLICIT NONE
-    REAL(KIND=WORKING_PRECISION) :: weighted_pos(3)
-    INTEGER :: counter,molecule_type_index,molecule_index,atom_index,position_input
-     coordinates_output(position_input,:,:)=0.0d0
-     counter=1
-     DO molecule_type_index=1,number_of_molecule_types,1
-      DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1 !gives dimension 2 of queue
-       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1 !gives third dimension of queue
-        !molecule_type_index: current molecule type, e.g. 1 (only 1 and 2 for a binary IL)
-        !molecule_index: current explicit molecule, e.g. molecule number 231
-        !atom_index: current atom in that molecule, e.g. atom 2 (in molecule number 231 of type 1 in timestep 1234...)
-        !store current atom position in weighted_pos
-        weighted_pos=DBLE(molecule_list(molecule_type_index)%queue(position_input,molecule_index,atom_index)%coordinates(:))
-        !weigh position with mass...
-        weighted_pos(:)=weighted_pos(:)*DBLE(molecule_list(molecule_type_index)%list_of_atom_masses(atom_index))
-        !... and add to centre of mass.
-        coordinates_output(position_input,counter,:)=coordinates_output(position_input,counter,:)+weighted_pos(:)
-       ENDDO
-       !normalise, increase counter for the next molecule.
-       coordinates_output(position_input,counter,:)=&
-       &coordinates_output(position_input,counter,:)/DBLE(molecule_list(molecule_type_index)%mass)
-       counter=counter+1
-      ENDDO 
-     ENDDO
-    END SUBROUTINE convert_queue
-
-    SUBROUTINE write_from_queue(step_number,position_input)
-    IMPLICIT NONE
-    INTEGER,INTENT(IN) :: step_number,position_input
-    INTEGER :: n
-     !WRITE header
-     WRITE(3,'("ITEM: TIMESTEP")')
-     WRITE(3,'(I0)') step_number
-     WRITE(3,'("ITEM: NUMBER OF ATOMS")')
-     WRITE(3,'(I0)') number_of_molecules
-     WRITE(3,'("ITEM: BOX BOUNDS pp pp pp")')
-     WRITE(3,*) box_dimensions(:,1)
-     WRITE(3,*) box_dimensions(:,2)
-     WRITE(3,*) box_dimensions(:,3)
-     !Append the line that tells the user about the content!
-     SELECT CASE (INFORMATION_IN_TRAJECTORY)
-     CASE("UNK")
-      WRITE(3,'("ITEM: ATOMS element x? y? z?")')
-     CASE("VEL")
-      WRITE(3,'("ITEM: ATOMS element vx vy vz")')
-     CASE("POS")
-      WRITE(3,'("ITEM: ATOMS element xu yu zu")')
-     CASE DEFAULT
-      CALL report_error(0)
-     END SELECT
-     !WRITE body (centre of mass)
-     DO n=1,number_of_molecules,1
-      WRITE(3,'(A2,3E19.10)') list_of_elements_output(n),coordinates_output(position_input,n,:)
-     ENDDO
-    END SUBROUTINE write_from_queue
-
-    SUBROUTINE finalise_queue()
-    IMPLICIT NONE
-    INTEGER :: deallocstatus,n
-     CLOSE(UNIT=3)
-     DEALLOCATE(element_status,STAT=deallocstatus)
-     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-     DEALLOCATE(list_of_elements_output,STAT=deallocstatus)
-     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-     DEALLOCATE(coordinates_output,STAT=deallocstatus)
-     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-     DO n=1,number_of_molecule_types,1
-      DEALLOCATE(molecule_list(n)%queue,STAT=deallocstatus)
-      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-     ENDDO
-    END SUBROUTINE finalise_queue
-
-  END SUBROUTINE convert_parallel
 
   !This subroutine rewinds the trajectory file and adjusts the 'pointer' accordingly. (Hell, I'm not starting with real pointers here)
   SUBROUTINE reset_trajectory_file()
@@ -3160,27 +3074,34 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
   IMPLICIT NONE
   INTEGER :: molecule_type_index,molecule_index
   REAL :: centre_of_mass(3)
-  INTEGER :: xyzcounter
+  INTEGER :: xyzcounter,safetycounter
    !Parallelisation is not available anyway...
    DO molecule_type_index=1,number_of_molecule_types,1
     DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
      !timestep has no meaning because snapshot.
      centre_of_mass=give_center_of_mass(file_position,molecule_type_index,molecule_index)
      DO xyzcounter=1,3,1
-     !Apologies for the jump. We are all weak sometimes.
-     10  IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
-       centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
-       molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
-       &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
-       GOTO 10
-      ELSE
-       IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
-        centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
+     !removed the jump.
+      DO safetycounter=1,1000,1
+       IF (centre_of_mass(xyzcounter)<box_dimensions(1,xyzcounter)) THEN
+        !centre of mass is outside of box (smaller)
+        centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)+box_size(xyzcounter)
         molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
-        &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
-        GOTO 10
+        &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)+box_size(xyzcounter)
+        CYCLE
+       ELSE
+        IF (centre_of_mass(xyzcounter)>box_dimensions(2,xyzcounter)) THEN
+         !centre of mass is outside of box (bigger)
+         centre_of_mass(xyzcounter)=centre_of_mass(xyzcounter)-box_size(xyzcounter)
+         molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)=&
+         &molecule_list(molecule_type_index)%snapshot(:,molecule_index)%coordinates(xyzcounter)-box_size(xyzcounter)
+         CYCLE
+        ELSE
+         !centre of mass is inside box!
+         EXIT
+        ENDIF
        ENDIF
-      ENDIF
+      ENDDO
      ENDDO
     ENDDO
    ENDDO
@@ -5562,6 +5483,11 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
      DEALLOCATE(molecule_list(n)%list_of_drude_pairs,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     ENDIF
+    IF (ALLOCATED(molecule_list(n)%molecules_to_print)) THEN
+     CALL report_error(0)
+     DEALLOCATE(molecule_list(n)%molecules_to_print,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ENDIF
     DEALLOCATE(molecule_list(n)%list_of_elements,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(8,exit_status=deallocstatus)
     DEALLOCATE(molecule_list(n)%list_of_atom_masses,STAT=deallocstatus)
@@ -6236,7 +6162,7 @@ MODULE DEBUG ! Copyright (C) 2024 Frederik Philippi
  !PRIVATE/PUBLIC declarations
  PUBLIC center_xyz,timing,dump_example,dump_snapshot,dump_split,convert,report_temperature,dump_single,report_drude_temperature
  PUBLIC remove_drudes,dump_dimers,contact_distance,dump_cut,report_gyradius,check_timesteps,jump_analysis,check_timestep
- PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab,dump_split_single,cluster_analysis
+ PUBLIC dump_neighbour_traj,remove_cores,dump_atomic_properties,dump_slab,dump_split_single
  PRIVATE test_dihedrals
  CONTAINS
 
@@ -7508,75 +7434,69 @@ WRITE(4,'("F 0.0 0.0 1.0")')
    ELSE
     useCOC=.FALSE.
    ENDIF
-   IF (DEVELOPERS_VERSION) THEN
-    PRINT *," ! CAREFUL: 'PARALLELISED' CONVERTER USED"
-    CALL convert_parallel()
-    RETURN
-   ELSE
-    !first, get the number of lines that will be added.
-    ncentres=0
-    valid_COC=0
-    IF (useCOC) THEN
-     !count only those molecules with nonzero charge
-     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-      IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
-       valid_COC=valid_COC+1
-       ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-      ENDIF
-     ENDDO
-    ELSE
-     !count everything
-     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+   !first, get the number of lines that will be added.
+   ncentres=0
+   valid_COC=0
+   IF (useCOC) THEN
+    !count only those molecules with nonzero charge
+    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+     IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+      valid_COC=valid_COC+1
       ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-     ENDDO
-    ENDIF
-    IF (ncentres==0) CALL report_error(143)
-    INQUIRE(UNIT=3,OPENED=connected)
-    IF (connected) CALL report_error(27,exit_status=3)
-    IF (useCOC) THEN
-     WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
-    ELSE
-     WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
-    ENDIF
-    OPEN(UNIT=3,FILE=TRIM(fstring))
-    IF (VERBOSE_OUTPUT) THEN
-     WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
-     IF (give_number_of_timesteps()>100) WRITE(*,*)
-     CALL print_progress(give_number_of_timesteps())
-    ENDIF
-    DO stepcounter=1,give_number_of_timesteps(),1
-     !Write head, depending on which type the trajectory has...
-     CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
-     DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-      element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
-      IF (useCOC) THEN
-       !use the centre of charge - but only for charged molecules.
-       IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
-        DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
-         !Sort of high accuracy should be kept here because of the way I use this routine.
-         !reduced to 16.8 from 18.10
-         WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
-        ENDDO
-       ENDIF
-      ELSE
+     ENDIF
+    ENDDO
+   ELSE
+    !count everything
+    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+     ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+    ENDDO
+   ENDIF
+   IF (ncentres==0) CALL report_error(143)
+   INQUIRE(UNIT=3,OPENED=connected)
+   IF (connected) CALL report_error(27,exit_status=3)
+   IF (useCOC) THEN
+    WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
+   ELSE
+    WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+   ENDIF
+   OPEN(UNIT=3,FILE=TRIM(fstring))
+   IF (VERBOSE_OUTPUT) THEN
+    WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
+    IF (give_number_of_timesteps()>100) WRITE(*,*)
+    CALL print_progress(give_number_of_timesteps())
+   ENDIF
+   DO stepcounter=1,give_number_of_timesteps(),1
+    !Write head, depending on which type the trajectory has...
+    CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
+    DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+     element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
+     IF (useCOC) THEN
+      !use the centre of charge - but only for charged molecules.
+      IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
        DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
         !Sort of high accuracy should be kept here because of the way I use this routine.
         !reduced to 16.8 from 18.10
-        WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+        WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
        ENDDO
       ENDIF
-     ENDDO
-     IF (VERBOSE_OUTPUT) CALL print_progress()
-    ENDDO
-    IF (VERBOSE_OUTPUT) THEN
-     IF ((give_number_of_timesteps())>100) THEN
-      WRITE(*,*)
-      WRITE(*,FMT='(" ")',ADVANCE="NO")
+     ELSE
+      DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+       !Sort of high accuracy should be kept here because of the way I use this routine.
+       !reduced to 16.8 from 18.10
+       WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+      ENDDO
      ENDIF
-     WRITE(*,'("done.")')
+    ENDDO
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+   ENDDO
+   IF (VERBOSE_OUTPUT) THEN
+    IF ((give_number_of_timesteps())>100) THEN
+     WRITE(*,*)
+     WRITE(*,FMT='(" ")',ADVANCE="NO")
     ENDIF
-    CLOSE(UNIT=3)
+    WRITE(*,'("done.")')
    ENDIF
+   CLOSE(UNIT=3)
    IF (writemolecularinputfile) THEN
     INQUIRE(UNIT=3,OPENED=connected)
     IF (connected) CALL report_error(27,exit_status=3)
@@ -7831,287 +7751,7 @@ WRITE(4,'("F 0.0 0.0 1.0")')
    IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
   END SUBROUTINE
 
-  SUBROUTINE cluster_analysis(cutoff_in)
-  IMPLICIT NONE
-  CHARACTER(LEN=1024) :: fstring
-  INTEGER :: stepcounter,N_atoms,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,output_atom_count
-  INTEGER :: mp,ip,np,first_entry
-  REAL(KIND=DP) :: current_centre(3)
-  LOGICAL :: first_atom
-  TYPE :: cluster_atom
-   INTEGER :: molecule_type_index
-   INTEGER :: molecule_index
-   INTEGER :: atom_index
-   INTEGER :: cluster_number
-  END TYPE cluster_atom
-  TYPE :: cluster
-   INTEGER :: charge
-   INTEGER :: members
-  END TYPE cluster
-  REAL,INTENT(IN) :: cutoff_in
-  REAL :: cutoff_squared,normalisation,dummy
-  TYPE(cluster_atom),DIMENSION(:),ALLOCATABLE :: list_of_atoms
-  TYPE(cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
-  INTEGER(KIND=DP),DIMENSION(:),ALLOCATABLE :: average_charge,overall_occurrence
-   N_atoms=140
-   ALLOCATE(list_of_atoms(N_atoms),STAT=allocstatus)
-   IF (allocstatus/=0) THEN
-    CALL report_error(22,exit_status=ios)
-    RETURN
-   ENDIF
-   !list_of_clusters cannot be larger than N_atoms (=all monomers...)
-   ALLOCATE(list_of_clusters(N_atoms),STAT=allocstatus)
-   IF (allocstatus/=0) THEN
-    CALL report_error(22,exit_status=ios)
-    RETURN
-   ENDIF
-   ALLOCATE(average_charge(N_atoms),STAT=allocstatus)
-   IF (allocstatus/=0) THEN
-    CALL report_error(22,exit_status=ios)
-    RETURN
-   ENDIF
-   ALLOCATE(overall_occurrence(N_atoms),STAT=allocstatus)
-   IF (allocstatus/=0) THEN
-    CALL report_error(22,exit_status=ios)
-    RETURN
-   ENDIF
-   !initialise...
-   average_charge(:)=0
-   overall_occurrence(:)=0
-   cutoff_squared=cutoff_in**2
-   current_cluster=0
-   DO m=1,70,1
-    list_of_atoms(m)%molecule_type_index=3 !lithium
-    list_of_atoms(m)%molecule_index=m
-    list_of_atoms(m)%atom_index=1
-   ENDDO
-   DO m=1,70,1
-    list_of_atoms(m+70)%molecule_type_index=1 !anion
-    list_of_atoms(m+70)%molecule_index=m
-    list_of_atoms(m+70)%atom_index=1
-   ENDDO
-   DO stepcounter=1,200000,20000
-    current_cluster=0
-    list_of_atoms(:)%cluster_number=0
-    list_of_clusters(:)%charge=0
-    list_of_clusters(:)%members=0
-    DO m=1,N_atoms
-     DO n=m,N_atoms
-      IF (m==n) CYCLE
-      IF (((list_of_atoms(m)%cluster_number==0).OR.(list_of_atoms(n)%cluster_number==0))&
-      &.OR.(list_of_atoms(m)%cluster_number/=list_of_atoms(n)%cluster_number)) THEN
-       !check if closer than cutoff
-       IF (give_smallest_atom_distance_squared&
-       &(stepcounter,stepcounter,&
-       &list_of_atoms(m)%molecule_type_index,list_of_atoms(n)%molecule_type_index,&
-       &list_of_atoms(m)%molecule_index,list_of_atoms(n)%molecule_index,&
-       &list_of_atoms(m)%atom_index,list_of_atoms(n)%atom_index)<cutoff_squared) THEN
-        IF (list_of_atoms(m)%cluster_number==0) THEN
-        ! m is a monomer!
-         IF (list_of_atoms(n)%cluster_number==0) THEN
-         ! n is a monomer!
-          !--> appropriate action: assign new cluster.
-          current_cluster=current_cluster+1
-          list_of_atoms(m)%cluster_number=current_cluster
-          list_of_atoms(n)%cluster_number=current_cluster
-          list_of_clusters(current_cluster)%charge=&
-          &give_charge_of_molecule(list_of_atoms(m)%molecule_type_index)+&
-          &give_charge_of_molecule(list_of_atoms(n)%molecule_type_index)
-          list_of_clusters(current_cluster)%members=2
-         ELSE
-         ! n is NOT a monomer!
-          !--> appropriate action: add entry "m" to cluster "n"
-          list_of_atoms(m)%cluster_number=list_of_atoms(n)%cluster_number
-          list_of_clusters(list_of_atoms(n)%cluster_number)%charge=&
-          &list_of_clusters(list_of_atoms(n)%cluster_number)%charge+&
-          &give_charge_of_molecule(list_of_atoms(m)%molecule_type_index)
-          list_of_clusters(list_of_atoms(n)%cluster_number)%members=&
-          &list_of_clusters(list_of_atoms(n)%cluster_number)%members+1
-         ENDIF
-        ELSE
-        ! m is NOT a monomer!
-         IF (list_of_atoms(n)%cluster_number==0) THEN
-         ! n is a monomer!
-          !--> appropriate action: add entry "n" to cluster "m"
-          list_of_atoms(n)%cluster_number=list_of_atoms(m)%cluster_number
-          list_of_clusters(list_of_atoms(m)%cluster_number)%charge=&
-          &list_of_clusters(list_of_atoms(m)%cluster_number)%charge+&
-          &give_charge_of_molecule(list_of_atoms(n)%molecule_type_index)
-          list_of_clusters(list_of_atoms(m)%cluster_number)%members=&
-          &list_of_clusters(list_of_atoms(m)%cluster_number)%members+1
-         ELSE
-         ! n is NOT a monomer!
-          !--> appropriate action: merge clusters...
-          !based on absolutely nothing, merge n into m
-          cluster_todelete=list_of_atoms(n)%cluster_number
-          list_of_clusters(list_of_atoms(m)%cluster_number)%members=&
-          &list_of_clusters(list_of_atoms(m)%cluster_number)%members+&
-          &list_of_clusters(cluster_todelete)%members
-          list_of_clusters(list_of_atoms(m)%cluster_number)%charge=&
-          &list_of_clusters(list_of_atoms(m)%cluster_number)%charge+&
-          &list_of_clusters(cluster_todelete)%charge
-          DO i=1,N_atoms,1
-           IF (list_of_atoms(i)%cluster_number==cluster_todelete) THEN
-            list_of_atoms(i)%cluster_number=list_of_atoms(m)%cluster_number
-           ENDIF
-          ENDDO
-          !here, entry n is not needed anymore.
-          !rename the cluster with the highest number to be n
-          IF (current_cluster/=cluster_todelete) THEN
-           list_of_clusters(cluster_todelete)%charge=&
-           &list_of_clusters(current_cluster)%charge
-           list_of_clusters(cluster_todelete)%members=&
-           &list_of_clusters(current_cluster)%members
-           DO i=1,N_atoms,1
-            IF (list_of_atoms(i)%cluster_number==current_cluster) THEN
-             list_of_atoms(i)%cluster_number=cluster_todelete
-            ENDIF
-           ENDDO
-          ENDIF
-          !delete the entry for the current_cluster. probably not necessary but safer to have clean memory.
-          list_of_clusters(current_cluster)%charge=0
-          list_of_clusters(current_cluster)%members=0
-          current_cluster=current_cluster-1
-         ENDIF
-        ENDIF
-       ENDIF
-      ENDIF
-     ENDDO
-     
-   !print the glymes
-   WRITE(fstring,'(2A,I0,A)') &
-   &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_glymes.xyz"
-   OPEN(UNIT=4,FILE=TRIM(fstring))
-   output_atom_count=3360
-   CALL write_header(4,1,output_atom_count,"xyz")
-   DO ip=1,210,1
-    CALL write_molecule(4,stepcounter,2,ip,include_header=.FALSE.)
-   ENDDO
-   ENDFILE 4
-   CLOSE(UNIT=4)
-     
-     
-   !print the clusters
-   WRITE(fstring,'(2A,I0,A)') &
-   &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_monomers.xyz"
-   OPEN(UNIT=4,FILE=TRIM(fstring))
-   output_atom_count=0
-   DO ip=1,N_atoms,1
-    IF (list_of_atoms(ip)%cluster_number==0) THEN
-     output_atom_count=output_atom_count+&
-     &give_number_of_atoms_per_molecule(list_of_atoms(ip)%molecule_type_index)
-    ENDIF
-   ENDDO
-   CALL write_header(4,1,output_atom_count,"xyz")
-   DO ip=1,N_atoms,1
-    IF (list_of_atoms(ip)%cluster_number==0) THEN
-     CALL write_molecule(4,stepcounter,list_of_atoms(ip)%molecule_type_index,&
-     &list_of_atoms(ip)%molecule_index,include_header=.FALSE.)
-    ENDIF
-   ENDDO
-   ENDFILE 4
-   CLOSE(UNIT=4)
-   DO ip=2,N_atoms,1
-    output_atom_count=0
-    DO mp=1,current_cluster
-     !iterate over the specified timesteps
-     !check if cluster has the right number of members
-     IF (list_of_clusters(mp)%members==ip) THEN
-      !count atoms
-      DO np=1,N_atoms,1
-       IF (list_of_atoms(np)%cluster_number==mp) THEN
-        output_atom_count=output_atom_count+&
-        &give_number_of_atoms_per_molecule(list_of_atoms(np)%molecule_type_index)
-       ENDIF
-      ENDDO
-     ENDIF
-    ENDDO
-    IF (output_atom_count/=0) THEN
-     WRITE(fstring,'(2A,I0,A,I0,A)') &
-     &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_clusters_",ip,"-mers.xyz"
-     OPEN(UNIT=4,FILE=TRIM(fstring))
-     CALL write_header(4,1,output_atom_count,"xyz")
-     DO mp=1,current_cluster
-      !iterate over the specified timesteps
-      !check if cluster has the right number of members
-      IF (list_of_clusters(mp)%members==ip) THEN
-       !write body
-       first_atom=.TRUE.
-       DO np=1,N_atoms,1
-        IF (list_of_atoms(np)%cluster_number==mp) THEN
-         IF (first_atom) THEN
-          current_centre(:)=0.0d0
-          first_atom=.FALSE.
-          first_entry=np
-         ELSE
-          dummy=give_smallest_atom_distance_squared&
-          &(stepcounter,stepcounter,&
-          &list_of_atoms(first_entry)%molecule_type_index,list_of_atoms(np)%molecule_type_index,&
-          &list_of_atoms(first_entry)%molecule_index,list_of_atoms(np)%molecule_index,&
-          &list_of_atoms(first_entry)%atom_index,list_of_atoms(np)%atom_index,translation=current_centre)
-         ENDIF
-         CALL write_molecule(4,stepcounter,list_of_atoms(np)%molecule_type_index,&
-         &list_of_atoms(np)%molecule_index&
-         &,include_header=.FALSE.,translate_by=current_centre(:))
-        ENDIF
-       ENDDO
-      ENDIF
-     ENDDO
-     ENDFILE 4
-     CLOSE(UNIT=4)
-    ENDIF
-   ENDDO
-   
-   
-   
-   
-   
-    ENDDO
-    DO i=1,current_cluster,1
-     average_charge(list_of_clusters(i)%members)=average_charge(list_of_clusters(i)%members)+list_of_clusters(i)%charge
-     overall_occurrence(list_of_clusters(i)%members)=overall_occurrence(list_of_clusters(i)%members)+1
-    ENDDO
-    DO i=1,N_atoms,1
-     IF (list_of_atoms(i)%cluster_number==0) THEN
-      overall_occurrence(1)=overall_occurrence(1)+1
-      average_charge(1)=average_charge(1)+give_charge_of_molecule(list_of_atoms(i)%molecule_type_index)
-     ENDIF
-    ENDDO
-   ENDDO
-   normalisation=0.0
-   DO i=1,N_atoms,1
-    WRITE(*,'(" Members= ",I0,", charge=",I0,", occurrence=",I0)')i,average_charge(i),overall_occurrence(i)
-    normalisation=normalisation+FLOAT(overall_occurrence(i)*i)
-   ENDDO
-   DO i=1,N_atoms,1
-    WRITE(*,*)"Members ","average_charge ","fraction_of_molecules ","fraction_of_clusters "
-    WRITE(*,*)i,FLOAT(average_charge(i))/FLOAT(overall_occurrence(i)),&
-    &(FLOAT(overall_occurrence(i)*i))/normalisation,&
-    &FLOAT(overall_occurrence(i))/FLOAT(SUM(overall_occurrence(:)))
-   ENDDO
-   DEALLOCATE(list_of_atoms,STAT=deallocstatus)
-   IF (deallocstatus/=0) THEN
-    CALL report_error(23,exit_status=deallocstatus)
-    RETURN
-   ENDIF
-   DEALLOCATE(average_charge,STAT=deallocstatus)
-   IF (deallocstatus/=0) THEN
-    CALL report_error(23,exit_status=deallocstatus)
-    RETURN
-   ENDIF
-   DEALLOCATE(overall_occurrence,STAT=deallocstatus)
-   IF (deallocstatus/=0) THEN
-    CALL report_error(23,exit_status=deallocstatus)
-    RETURN
-   ENDIF
-   DEALLOCATE(list_of_clusters,STAT=deallocstatus)
-   IF (deallocstatus/=0) THEN
-    CALL report_error(23,exit_status=deallocstatus)
-    RETURN
-   ENDIF
-  END SUBROUTINE cluster_analysis
-
-  !This SUBROUTINE writes a SUBROUTINE with removed core particles. This requires assigned drude particles!
+  !This SUBROUTINE writes a trajectory with removed core particles. This requires assigned drude particles!
   SUBROUTINE remove_cores(startstep_in,endstep_in,output_format)
   IMPLICIT NONE
   INTEGER :: stepcounter,molecule_type_index,molecule_index
@@ -19808,43 +19448,39 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
  INTEGER,PARAMETER :: sampling_interval_default=1
  LOGICAL,PARAMETER :: print_statistics_default=.FALSE.
  LOGICAL,PARAMETER :: print_spectators_default=.FALSE.
- LOGICAL,PARAMETER :: print_CDistanceDF_default=.FALSE. !cluster distance distribution function
- LOGICAL,PARAMETER :: print_CCountF_default=.FALSE. !cluster count function
- LOGICAL,PARAMETER :: print_CSizeDF_default=.FALSE. !cluster size distribution function
- LOGICAL,PARAMETER :: print_CChargeDF_default=.FALSE. !cluster charge distribution function
- LOGICAL,PARAMETER :: complete_molecules_default=.TRUE.
  !variables
  CHARACTER (LEN=10) :: operation_mode="NONE"!operation mode of the cluster module.
  !operation_mode="PAIRS": needs pairs of atom indices and their fixed cutoffs
  !operation_mode="GLOBAL": needs a global cutoff operating on a set of atoms. The latter are specified by molecule_type_index and atom_index, and the code iterates over molecule_index.
  INTEGER :: nsteps=nsteps_default !how many steps to use from trajectory
  INTEGER :: sampling_interval=sampling_interval_default
- INTEGER :: N_cutoffs,N_atoms,N_steps_to_print
+ INTEGER :: N_cutoffs,N_atoms,N_steps_to_print,N_Pairs
  INTEGER :: bytes_needed
  LOGICAL :: print_statistics=print_statistics_default
  LOGICAL :: print_spectators=print_spectators_default !if T, print also the molecules which are not members of list_of_atoms
- LOGICAL :: complete_molecules=complete_molecules_default !if T, print whole molecules. If T, only print the atoms from the list.
- LOGICAL :: print_CDistanceDF=print_CDistanceDF_default
- LOGICAL :: print_CCountF=print_CCountF_default
- LOGICAL :: print_CSizeDF=print_CSizeDF_default
- LOGICAL :: print_CChargeDF=print_CChargeDF_default
  LOGICAL :: custom_weights=.FALSE.
  TYPE :: cluster_atom
   INTEGER :: molecule_type_index
   INTEGER :: molecule_index
   INTEGER :: atom_index
-  INTEGER :: cluster_number
   REAL :: atom_weight !usually, this would be the charge.
  END TYPE cluster_atom
- TYPE :: one_cluster
-  REAL :: cluster_weight
-  INTEGER :: members
- END TYPE one_cluster
+ TYPE :: cluster_pair
+  INTEGER :: list_of_atoms_starting_index_A
+  INTEGER :: list_of_atoms_last_index_A
+  INTEGER :: molecule_type_index_A
+  INTEGER :: atom_index_A
+  INTEGER :: list_of_atoms_starting_index_B
+  INTEGER :: list_of_atoms_last_index_B
+  INTEGER :: molecule_type_index_B
+  INTEGER :: atom_index_B
+ END TYPE cluster_pair
  TYPE(cluster_atom),DIMENSION(:),ALLOCATABLE :: list_of_atoms
- TYPE(one_cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
+ TYPE(cluster_pair),DIMENSION(:),ALLOCATABLE :: list_of_pairs
  INTEGER(KIND=DP),DIMENSION(:,:),ALLOCATABLE :: overall_occurrence
  REAL(KIND=DP),DIMENSION(:,:),ALLOCATABLE :: average_weights
  REAL,DIMENSION(:),ALLOCATABLE :: cutoff_list
+ INTEGER(KIND=DP),DIMENSION(:),ALLOCATABLE :: ClusterCountDistributionFunction
  REAL,DIMENSION(:),ALLOCATABLE :: squared_cutoff_list
  INTEGER,DIMENSION(:),ALLOCATABLE :: steps_toprint
  !PRIVATE/PUBLIC declarations
@@ -19868,13 +19504,10 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
   IMPLICIT NONE
    nsteps=nsteps_default
    sampling_interval=sampling_interval_default
-   print_CDistanceDF=print_CDistanceDF_default
-   print_CCountF=print_CCountF_default
-   print_CSizeDF=print_CSizeDF_default
-   print_CChargeDF=print_CChargeDF_default
    print_statistics=print_statistics_default
    custom_weights=.FALSE.
    bytes_needed=0
+   operation_mode="NONE"
   END SUBROUTINE set_defaults
 
   !initialises the cluster module by reading the specified input file.
@@ -19882,7 +19515,7 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
   IMPLICIT NONE
   INTEGER :: i,allocstatus
   LOGICAL :: file_exists,connected
-  INTEGER :: ios
+  INTEGER :: ios,current_step
   !$ INTERFACE
   !$  FUNCTION OMP_get_num_threads()
   !$  INTEGER :: OMP_get_num_threads
@@ -19898,68 +19531,166 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
     &ACTION='READ',IOSTAT=ios)
     IF (ios/=0) CALL report_error(172,exit_status=ios)
     CALL read_first_pass()
+    IF (ERROR_CODE==177) RETURN !couldn't read operation mode...
     !N_atoms, N_cutoffs, N_steps_to_print are initialised
     IF (N_atoms==0) THEN
      CALL report_error(173)
     ELSEIF (N_cutoffs==0) THEN
      CALL report_error(174)
     ELSE
-     WRITE(*,'("   Expecting ",I0," atoms and ",I0," cutoffs.")') N_atoms,N_cutoffs
+     IF (TRIM(operation_mode)=="GLOBAL") THEN
+      WRITE(*,'("   Expecting ",I0," atoms and ",I0," cutoffs.")') N_atoms,N_cutoffs
+     ELSE
+      WRITE(*,'("   Expecting ",I0," pairs and ",I0," atoms.")') N_pairs,N_atoms
+     ENDIF
      !allocate memory which is needed now - that's why I do the firstpass!
+     IF (TRIM(operation_mode)=="PAIRS") THEN
+      ALLOCATE(list_of_pairs(N_pairs),STAT=allocstatus)
+      bytes_needed=bytes_needed+N_pairs*8 !multiply with 4 bytes later
+      IF (allocstatus/=0) THEN
+       CALL report_error(171,exit_status=allocstatus)
+       RETURN
+      ENDIF
+     ENDIF
      ALLOCATE(cutoff_list(N_cutoffs),STAT=allocstatus)
      bytes_needed=bytes_needed+N_cutoffs !multiply with 4 bytes later
      IF (allocstatus/=0) THEN
-      CALL report_error(171,exit_status=ios)
+      CALL report_error(171,exit_status=allocstatus)
       RETURN
      ENDIF
      IF (N_steps_to_print>0) THEN
+      CALL initialise_print_members()
       ALLOCATE(steps_toprint(N_steps_to_print),STAT=allocstatus)
       bytes_needed=bytes_needed+N_steps_to_print !multiply with 4 bytes later
       IF (allocstatus/=0) THEN
-       CALL report_error(171,exit_status=ios)
+       CALL report_error(171,exit_status=allocstatus)
        RETURN
       ENDIF
      ENDIF
      ALLOCATE(list_of_atoms(N_atoms),STAT=allocstatus)
      IF (allocstatus/=0) THEN
-      CALL report_error(171,exit_status=ios)
+      CALL report_error(171,exit_status=allocstatus)
       RETURN
      ENDIF
      CALL read_body()
      ALLOCATE(squared_cutoff_list(N_cutoffs),STAT=allocstatus)
      bytes_needed=bytes_needed+N_cutoffs !multiply with 4 bytes later
      IF (allocstatus/=0) THEN
-      CALL report_error(171,exit_status=ios)
+      CALL report_error(171,exit_status=allocstatus)
       RETURN
      ENDIF
-     bytes_needed=bytes_needed+5*N_atoms !multiply with 4 bytes later
+     bytes_needed=bytes_needed+4*N_atoms !multiply with 4 bytes later
      !list_of_clusters cannot be larger than N_atoms (=all monomers...)
-     ALLOCATE(list_of_clusters(N_atoms),STAT=allocstatus)
-     IF (allocstatus/=0) THEN
-      CALL report_error(171,exit_status=ios)
-      RETURN
-     ENDIF
-     bytes_needed=bytes_needed+2*N_atoms !multiply with 4 bytes later
+     !the following lines are for the variables local to each thread!
+     !$ IF (PARALLEL_OPERATION) THEN
+     !$  bytes_needed=bytes_needed+2*N_atoms*&
+     !$  &*OMP_get_num_threads()!Here we have the list_of_clusters
+     !$  bytes_needed=bytes_needed+OMP_get_num_threads()*N_atoms !this is for the cluster_number list
+     !$ ELSE
+     bytes_needed=bytes_needed+2*N_atoms
+     bytes_needed=bytes_needed+N_atoms
+     !$ ENDIF
      IF (print_statistics) THEN
-      ALLOCATE(average_weights(N_atoms,N_cutoffs),STAT=allocstatus)
-      IF (allocstatus/=0) THEN
-       CALL report_error(171,exit_status=ios)
-       RETURN
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
+       ALLOCATE(ClusterCountDistributionFunction(N_cutoffs),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       ALLOCATE(average_weights(N_atoms,N_cutoffs),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       ALLOCATE(overall_occurrence(N_atoms,N_cutoffs),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       bytes_needed=bytes_needed+2*2*N_atoms*N_cutoffs+2*N_cutoffs !multiply with 4 bytes later
+      ELSE
+       ALLOCATE(ClusterCountDistributionFunction(1),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       ALLOCATE(average_weights(N_atoms,1),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       ALLOCATE(overall_occurrence(N_atoms,1),STAT=allocstatus)
+       IF (allocstatus/=0) THEN
+        CALL report_error(171,exit_status=allocstatus)
+        RETURN
+       ENDIF
+       bytes_needed=bytes_needed+2*2*N_atoms+2 !multiply with 4 bytes later
       ENDIF
-      ALLOCATE(overall_occurrence(N_atoms,N_cutoffs),STAT=allocstatus)
-      IF (allocstatus/=0) THEN
-       CALL report_error(171,exit_status=ios)
-       RETURN
+      IF (.NOT.(custom_weights)) THEN
+       WRITE(*,'(" no custom weights have been specified, using molecular charge.")')
+       WRITE(*,'(" (Note: even for more than one atom, they are all assigned the full charge)")')
+       DO i=1,N_atoms,1
+        list_of_atoms(i)%atom_weight=&
+        &FLOAT(give_charge_of_molecule(list_of_atoms(i)%molecule_type_index))
+       ENDDO
       ENDIF
+      ClusterCountDistributionFunction(:)=0
       average_weights(:,:)=0.0
       overall_occurrence(:,:)=0
-      bytes_needed=bytes_needed+2*2*N_atoms*N_cutoffs !multiply with 4 bytes later
      ENDIF
-     CALL sort_cutoff_list(1,N_cutoffs,cutoff_list)
+     IF (TRIM(operation_mode)=="GLOBAL") THEN
+      CALL sort_cutoff_list(1,N_cutoffs,cutoff_list)
+     ELSE
+      WRITE(*,'(" The following pairs have been read:")')
+      DO i=1,N_pairs
+       WRITE(*,'("   Pair ",I0," out of ",I0,":")')i,N_pairs
+       WRITE(*,'("     From atom #",I0,"(",A,") of molecule type #",I0,"(",A,")...")')&
+       &list_of_pairs(i)%atom_index_A,&
+       &TRIM(give_element_symbol(list_of_pairs(i)%molecule_type_index_A,&
+       &list_of_pairs(i)%atom_index_A)),&
+       &list_of_pairs(i)%molecule_type_index_A,&
+       &TRIM(give_sum_formula(list_of_pairs(i)%molecule_type_index_A))
+       WRITE(*,'("     ... to atom #",I0,"(",A,") of molecule type #",I0,"(",A,"),")')&
+       &list_of_pairs(i)%atom_index_B,&
+       &TRIM(give_element_symbol(list_of_pairs(i)%molecule_type_index_B,&
+       &list_of_pairs(i)%atom_index_B)),&
+       &list_of_pairs(i)%molecule_type_index_B,&
+       &TRIM(give_sum_formula(list_of_pairs(i)%molecule_type_index_B))
+       IF ((cutoff_list(i)<0.01).OR.(cutoff_list(i)>9.99)) THEN
+        WRITE(*,'("     with cutoff = ",E10.3,".")')cutoff_list(i)
+       ELSE
+        WRITE(*,'("     with cutoff =",F5.2,".")')cutoff_list(i)
+       ENDIF
+      ENDDO
+     ENDIF
      CALL sort_steps_to_print_list(1,N_steps_to_print,steps_toprint)
      DO i=1,N_cutoffs,1
       squared_cutoff_list(i)=cutoff_list(i)**2
      ENDDO
+     IF (N_steps_to_print>1) THEN
+      current_step=1
+      DO i=1,nsteps,sampling_interval
+       IF (steps_toprint(current_step)==i) THEN
+        current_step=current_step+1
+       ELSE
+        IF (i>steps_toprint(current_step)) THEN
+         IF (VERBOSE_OUTPUT) THEN
+          WRITE(*,'(A,I0,A,I0)') "  Using step #",i," instead of step #",steps_toprint(current_step)
+         ENDIF
+         steps_toprint(current_step)=i
+         current_step=current_step+1
+        ENDIF
+       ENDIF
+      ENDDO
+      DO i=current_step,N_steps_to_print,1
+       IF (steps_toprint(i)>nsteps) THEN
+        IF (VERBOSE_OUTPUT) THEN
+         WRITE(*,'(A,I0,A,I0)') "  Using step #",nsteps," instead of step #",steps_toprint(i)
+        ENDIF
+        steps_toprint(i)=nsteps
+       ENDIF
+      ENDDO
+     ENDIF
     ENDIF
    ELSE
     CALL report_error(170)!No input - no output. easy as that.
@@ -19967,40 +19698,82 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
 
   CONTAINS
 
-    SUBROUTINE read_first_pass()
-    IMPLICIT NONE
-    CHARACTER(LEN=33) :: inputstring
-    INTEGER :: molecule_type_index,atom_index,scansteps,inputinteger,inputinteger2,n
-    REAL :: dummy,cutlow,cuthigh
-     REWIND 3
-     molecule_type_index=0
-     N_atoms=0
-     N_cutoffs=0
-     N_steps_to_print=0
-     DO n=1,MAXITERATIONS,1
-      READ(3,IOSTAT=ios,FMT=*) inputstring
-      IF (ios/=0) EXIT
-      SELECT CASE (TRIM(inputstring))
-      CASE ("scan_cutoff")
+   SUBROUTINE read_first_pass()
+   IMPLICIT NONE
+   CHARACTER(LEN=33) :: inputstring
+   INTEGER :: scansteps,inputinteger,inputinteger2,n
+   INTEGER :: molecule_type_index,atom_index,molecule_type_index2,atom_index2
+   REAL :: dummy,cutlow,cuthigh,cutoff_in
+    REWIND 3
+    READ(3,IOSTAT=ios,FMT=*) inputstring
+    SELECT CASE (TRIM(inputstring))
+    CASE ("PAIRS","Pairs","pairs","PAIR","Pair","pair")
+     operation_mode="PAIRS"
+     WRITE(*,*) "PAIRS operation mode:"
+     WRITE(*,*) "Uses a set of pairs of atoms with their corresponding cutoffs."
+    CASE ("GLOBAL","Global","global")
+     operation_mode="GLOBAL"
+     WRITE(*,*) "GLOBAL operation mode:"
+     WRITE(*,*) "Uses a set of atoms and a global cutoff, applied to any combination of atoms."
+    CASE DEFAULT
+     CALL report_error(177)
+     RETURN
+    END SELECT
+    molecule_type_index=0
+    N_atoms=0
+    N_Pairs=0
+    N_cutoffs=0
+    N_steps_to_print=0
+    DO n=1,MAXITERATIONS,1
+     READ(3,IOSTAT=ios,FMT=*) inputstring
+     IF (ios/=0) EXIT
+     SELECT CASE (TRIM(inputstring))
+     CASE ("pair","Pair","add_pair")
+      IF (TRIM(operation_mode)=="PAIRS") THEN
+       BACKSPACE 3
+       READ(3,IOSTAT=ios,FMT=*) inputstring,molecule_type_index,atom_index,&
+       &molecule_type_index2,atom_index2,cutoff_in
+       IF (ios==0) THEN
+        IF ((valid_atom_index(molecule_type_index,atom_index))&
+        &.AND.(valid_atom_index(molecule_type_index2,atom_index2))) THEN
+         N_atoms=N_atoms+give_number_of_molecules_per_step(molecule_type_index)
+         N_atoms=N_atoms+give_number_of_molecules_per_step(molecule_type_index2)
+         N_pairs=N_pairs+1
+         N_cutoffs=N_cutoffs+1
+        ENDIF
+       ENDIF
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("scan_cutoff")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,cutlow,cuthigh,scansteps
        IF (ios==0) THEN
         IF ((scansteps>0).OR.(cutlow<0.0).OR.(cutlow>cuthigh))&
         & N_cutoffs=N_cutoffs+scansteps
        ENDIF
-      CASE ("single_cutoff","cutoff")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("single_cutoff","cutoff")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,dummy
        IF (ios==0) THEN
         IF (dummy>0.0d0) N_cutoffs=N_cutoffs+1
        ENDIF
-      CASE ("N_steps_to_print","N_printsteps","n_steps_to_print","n_printsteps")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
-       IF (ios==0) THEN
-        N_steps_to_print=N_steps_to_print+1
-       ENDIF
-      CASE ("add_molecule_type","add_molecule_type_index","add_molecule")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("print_step","printstep","dump","dump_step")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+      IF (ios==0) THEN
+       N_steps_to_print=N_steps_to_print+1
+      ENDIF
+     CASE ("add_molecule_type","add_molecule_type_index","add_molecule")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
        IF (ios==0) THEN
@@ -20010,7 +19783,11 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
          &give_number_of_molecules_per_step(inputinteger)
         ENDIF
        ENDIF
-      CASE ("add_atom_index","add_atom")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("add_atom_index","add_atom")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger,inputinteger2
        IF (ios==0) THEN
@@ -20018,31 +19795,40 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
          N_atoms=N_atoms+give_number_of_molecules_per_step(inputinteger)
         ENDIF
        ENDIF
-      CASE ("quit")
-       EXIT
-      END SELECT
-     ENDDO
-    END SUBROUTINE read_first_pass
-
-    SUBROUTINE read_body()
-    IMPLICIT NONE
-    CHARACTER(LEN=33) :: inputstring
-    INTEGER :: atom_index,current_cutoff,current_printstep,current_atom,molecule_index
-    INTEGER :: scansteps,n,inputinteger,inputinteger2,m
-    REAL :: cutlow,cuthigh,interval
-     REWIND 3
-     current_cutoff=0
-     current_printstep=0
-     current_atom=0
-     DO n=1,MAXITERATIONS,1
-      READ(3,IOSTAT=ios,FMT=*) inputstring
-      IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_CLUSTER_INPUT)
-      IF (ios/=0) THEN
-       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_CLUSTER_INPUT)
-       EXIT
+      ELSE
+       CALL report_error(178)
       ENDIF
-      SELECT CASE (TRIM(inputstring))
-      CASE ("scan_cutoff")
+     CASE ("quit")
+      EXIT
+     END SELECT
+    ENDDO
+   END SUBROUTINE read_first_pass
+
+   SUBROUTINE read_body()
+   IMPLICIT NONE
+   CHARACTER(LEN=33) :: inputstring
+   INTEGER :: current_cutoff,current_printstep,current_atom,molecule_index
+   INTEGER :: scansteps,n,inputinteger,inputinteger2,m,current_pair,pair_counter
+   INTEGER :: molecule_type_index,atom_index,molecule_type_index2,atom_index2
+   LOGICAL :: A_double,B_double
+   REAL :: cutlow,cuthigh,interval,cutoff_in,current_weight,inputreal
+    REWIND 3
+    READ(3,IOSTAT=ios,FMT=*) inputstring
+    current_cutoff=0
+    current_pair=0
+    current_printstep=0
+    current_atom=0
+    current_weight=0.0
+    DO n=1,MAXITERATIONS,1
+     READ(3,IOSTAT=ios,FMT=*) inputstring
+     IF ((ios<0).AND.(VERBOSE_OUTPUT)) WRITE(*,*) "  End-of-file condition in ",TRIM(FILENAME_CLUSTER_INPUT)
+     IF (ios/=0) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_CLUSTER_INPUT)
+      EXIT
+     ENDIF
+     SELECT CASE (TRIM(inputstring))
+     CASE ("scan_cutoff")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,cutlow,cuthigh,scansteps
        IF (ios/=0) THEN
@@ -20063,7 +19849,11 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
          CALL report_error(175)
         ENDIF
        ENDIF
-      CASE ("single_cutoff","cutoff")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("single_cutoff","cutoff")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,cutlow
        IF (ios/=0) THEN
@@ -20076,20 +19866,178 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
          CALL report_error(175)
         ENDIF
        ENDIF
-       IF (VERBOSE_OUTPUT) WRITE(*,'(A,F0.2,A)')&
-       &"   single cutoff (",cutlow,") added."
-      CASE ("N_steps_to_print","N_printsteps","n_steps_to_print","n_printsteps")
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A,I0,A)')&
+       &"   ",1,"/",N_cutoffs," cutoff added via single_cutoff keyword."
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("print_step","printstep","dump","dump_step")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
+      IF (ios/=0) THEN
+       CALL report_error(170)
+      ELSE
+       current_printstep=current_printstep+1
+       steps_toprint(current_printstep)=inputinteger
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+       &"   Added step ",inputinteger," to the list of steps to print."
+      ENDIF
+     CASE ("custom_weight","custom_weights","weight","weights","set_weight","set_weights")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,inputreal
+      IF (ios/=0) THEN
+       CALL report_error(170)
+      ELSE
+       current_weight=inputreal
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,E11.3,A)')&
+       &"   Setting weight to",current_weight," for all atoms below until new 'custom_weight'."
+      ENDIF
+     CASE ("pair","Pair","add_pair")
+      IF (TRIM(operation_mode)=="PAIRS") THEN
        BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
-       IF (ios/=0) THEN
-        CALL report_error(170)
-       ELSE
-        current_printstep=current_printstep+1
-        steps_toprint(current_printstep)=inputinteger
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
-        &"   Added step ",inputinteger," to the list of steps to print."
+       READ(3,IOSTAT=ios,FMT=*) inputstring,molecule_type_index,atom_index,&
+       &molecule_type_index2,atom_index2,cutoff_in
+       IF (ios==0) THEN
+        IF ((valid_atom_index(molecule_type_index,atom_index))&
+        &.AND.(valid_atom_index(molecule_type_index2,atom_index2))) THEN
+         current_pair=current_pair+1
+         list_of_pairs(current_pair)%molecule_type_index_A=molecule_type_index
+         list_of_pairs(current_pair)%atom_index_A=atom_index
+         list_of_pairs(current_pair)%molecule_type_index_B=molecule_type_index2
+         list_of_pairs(current_pair)%atom_index_B=atom_index2
+         cutoff_list(current_pair)=cutoff_in
+         !Check for doubles present in previous pairs
+         A_double=.FALSE.
+         B_double=.FALSE.
+         IF (current_pair>1) THEN
+check_A:        DO pair_counter=1,current_pair-1,1
+           IF ((list_of_pairs(current_pair)%molecule_type_index_A&
+           &==list_of_pairs(pair_counter)%molecule_type_index_A).AND.&
+           &(list_of_pairs(current_pair)%atom_index_A&
+           &==list_of_pairs(pair_counter)%atom_index_A)) THEN
+            !We found a double entry!
+            N_atoms=N_atoms-give_number_of_molecules_per_step&
+            &(list_of_pairs(pair_counter)%molecule_type_index_A)
+            IF (VERBOSE_OUTPUT) WRITE(*,'(3A,I0)') "   Double entry for '",&
+            &TRIM(give_element_symbol(list_of_pairs(current_pair)%molecule_type_index_A,&
+            &list_of_pairs(current_pair)%atom_index_A)),"': reducing N_atoms to ",N_atoms
+            IF (DEVELOPERS_VERSION) WRITE(*,FMT='("  ! Use indices of A for new A")')
+            A_double=.TRUE.
+            list_of_pairs(current_pair)%list_of_atoms_starting_index_A=&
+            &list_of_pairs(pair_counter)%list_of_atoms_starting_index_A
+            list_of_pairs(current_pair)%list_of_atoms_last_index_A=&
+            &list_of_pairs(pair_counter)%list_of_atoms_last_index_A
+            EXIT check_A
+           ELSEIF ((list_of_pairs(current_pair)%molecule_type_index_A&
+           &==list_of_pairs(pair_counter)%molecule_type_index_B).AND.&
+           &(list_of_pairs(current_pair)%atom_index_A&
+           &==list_of_pairs(pair_counter)%atom_index_B)) THEN
+            !We found a double entry!
+            N_atoms=N_atoms-give_number_of_molecules_per_step(&
+            &list_of_pairs(pair_counter)%molecule_type_index_B)
+            IF (VERBOSE_OUTPUT) WRITE(*,'(3A,I0)') "   Double entry for '",&
+            &TRIM(give_element_symbol(list_of_pairs(current_pair)%molecule_type_index_A,&
+            &list_of_pairs(current_pair)%atom_index_A)),"': reducing N_atoms to ",N_atoms
+            IF (DEVELOPERS_VERSION) WRITE(*,FMT='("  ! Use indices of B for new A")')
+            A_double=.TRUE.
+            list_of_pairs(current_pair)%list_of_atoms_starting_index_A=&
+            &list_of_pairs(pair_counter)%list_of_atoms_starting_index_B
+            list_of_pairs(current_pair)%list_of_atoms_last_index_A=&
+            &list_of_pairs(pair_counter)%list_of_atoms_last_index_B
+            EXIT check_A
+           ENDIF
+          ENDDO check_A
+check_B:        DO pair_counter=1,current_pair-1,1
+           IF ((list_of_pairs(current_pair)%molecule_type_index_B&
+           &==list_of_pairs(pair_counter)%molecule_type_index_A).AND.&
+           &(list_of_pairs(current_pair)%atom_index_B&
+           &==list_of_pairs(pair_counter)%atom_index_A)) THEN
+            !We found a double entry!
+            N_atoms=N_atoms-give_number_of_molecules_per_step(&
+            &list_of_pairs(pair_counter)%molecule_type_index_A)
+            IF (VERBOSE_OUTPUT) WRITE(*,'(3A,I0)') "   Double entry for '",&
+            &TRIM(give_element_symbol(list_of_pairs(current_pair)%molecule_type_index_B,&
+            &list_of_pairs(current_pair)%atom_index_B)),"': reducing N_atoms to ",N_atoms
+            IF (DEVELOPERS_VERSION) WRITE(*,FMT='("  ! Use indices of A for new B")')
+            B_double=.TRUE.
+            list_of_pairs(current_pair)%list_of_atoms_starting_index_B=&
+            &list_of_pairs(pair_counter)%list_of_atoms_starting_index_A
+            list_of_pairs(current_pair)%list_of_atoms_last_index_B=&
+            &list_of_pairs(pair_counter)%list_of_atoms_last_index_A
+            EXIT check_B
+           ELSEIF ((list_of_pairs(current_pair)%molecule_type_index_B&
+           &==list_of_pairs(pair_counter)%molecule_type_index_B).AND.&
+           &(list_of_pairs(current_pair)%atom_index_B&
+           &==list_of_pairs(pair_counter)%atom_index_B)) THEN
+            !We found a double entry!
+            N_atoms=N_atoms-give_number_of_molecules_per_step(&
+            &list_of_pairs(pair_counter)%molecule_type_index_B)
+            IF (VERBOSE_OUTPUT) WRITE(*,'(3A,I0)') "   Double entry for '",&
+            &TRIM(give_element_symbol(list_of_pairs(current_pair)%molecule_type_index_B,&
+            &list_of_pairs(current_pair)%atom_index_B)),"': reducing N_atoms to ",N_atoms
+            IF (DEVELOPERS_VERSION) WRITE(*,FMT='("  ! Use indices of B for new B")')
+            B_double=.TRUE.
+            list_of_pairs(current_pair)%list_of_atoms_starting_index_B=&
+            &list_of_pairs(pair_counter)%list_of_atoms_starting_index_B
+            list_of_pairs(current_pair)%list_of_atoms_last_index_B=&
+            &list_of_pairs(pair_counter)%list_of_atoms_last_index_B
+            EXIT check_B
+           ENDIF
+          ENDDO check_B
+         ENDIF !check with old pairs complete, still need to check for A=B
+         IF (.NOT.(A_double)) THEN
+          !assign the molecules of type A to the list_of_atoms
+          list_of_pairs(current_pair)%list_of_atoms_starting_index_A=current_atom+1
+          list_of_pairs(current_pair)%list_of_atoms_last_index_A=current_atom+&
+          &give_number_of_molecules_per_step(molecule_type_index)
+          DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index)
+           current_atom=current_atom+1
+           list_of_atoms(current_atom)%molecule_type_index=molecule_type_index
+           list_of_atoms(current_atom)%molecule_index=molecule_index
+           list_of_atoms(current_atom)%atom_index=atom_index
+           list_of_atoms(current_atom)%atom_weight=current_weight
+          ENDDO
+         ENDIF
+         !Here we check for A=B
+         IF (.NOT.(B_double)) THEN
+          !why do I do this? B is not a double of old members, but can be a double of the new A!
+          IF ((list_of_pairs(current_pair)%molecule_type_index_B&
+          &==list_of_pairs(current_pair)%molecule_type_index_A).AND.&
+          &(list_of_pairs(current_pair)%atom_index_B&
+          &==list_of_pairs(current_pair)%atom_index_A)) THEN
+           !We found a double entry!
+           N_atoms=N_atoms-give_number_of_molecules_per_step(molecule_type_index)
+           IF (VERBOSE_OUTPUT) WRITE(*,'(3A,I0)') "   Double entry for '",&
+           &TRIM(give_element_symbol(list_of_pairs(current_pair)%molecule_type_index_A,&
+           &list_of_pairs(current_pair)%atom_index_A)),"': reducing N_atoms to ",N_atoms
+           IF (DEVELOPERS_VERSION) WRITE(*,FMT='("  ! Use indices of new A for new B")')
+           B_double=.TRUE.
+           list_of_pairs(current_pair)%list_of_atoms_starting_index_B=&
+           &list_of_pairs(current_pair)%list_of_atoms_starting_index_A
+           list_of_pairs(current_pair)%list_of_atoms_last_index_B=&
+           &list_of_pairs(current_pair)%list_of_atoms_last_index_A
+          ENDIF
+         ENDIF
+         IF (.NOT.(B_double)) THEN
+          !assign the molecules of type B to the list_of_atoms
+          list_of_pairs(current_pair)%list_of_atoms_starting_index_B=current_atom+1
+          list_of_pairs(current_pair)%list_of_atoms_last_index_B=current_atom+&
+          &give_number_of_molecules_per_step(molecule_type_index2)
+          DO molecule_index=1,give_number_of_molecules_per_step(molecule_type_index2)
+           current_atom=current_atom+1
+           list_of_atoms(current_atom)%molecule_type_index=molecule_type_index2
+           list_of_atoms(current_atom)%molecule_index=molecule_index
+           list_of_atoms(current_atom)%atom_index=atom_index2
+           list_of_atoms(current_atom)%atom_weight=current_weight
+          ENDDO
+         ENDIF
+        ENDIF
        ENDIF
-      CASE ("add_molecule_type","add_molecule_type_index","add_molecule")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("add_molecule_type","add_molecule_type_index","add_molecule")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger
        IF (ios/=0) THEN
@@ -20102,13 +20050,21 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
            list_of_atoms(current_atom)%molecule_type_index=inputinteger
            list_of_atoms(current_atom)%molecule_index=molecule_index
            list_of_atoms(current_atom)%atom_index=atom_index
-           list_of_atoms(current_atom)%cluster_number=0
-           list_of_atoms(current_atom)%atom_weight=0.0
+           list_of_atoms(current_atom)%atom_weight=current_weight
           ENDDO
          ENDDO
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+         &"   Added ",&
+         give_number_of_molecules_per_step(inputinteger)*&
+         &give_number_of_atoms_per_molecule(inputinteger)&
+         &," atoms to be considered for the cluster analysis."
         ENDIF
        ENDIF
-      CASE ("add_atom_index","add_atom")
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("add_atom_index","add_atom")
+      IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
        READ(3,IOSTAT=ios,FMT=*) inputstring,inputinteger,atom_index
        IF (ios/=0) THEN
@@ -20120,85 +20076,79 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
           list_of_atoms(current_atom)%molecule_type_index=inputinteger
           list_of_atoms(current_atom)%molecule_index=molecule_index
           list_of_atoms(current_atom)%atom_index=atom_index
-          list_of_atoms(current_atom)%cluster_number=0
-          list_of_atoms(current_atom)%atom_weight=0.0
+          list_of_atoms(current_atom)%atom_weight=current_weight
          ENDDO
+         IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+         &"   Added ",&
+         give_number_of_molecules_per_step(inputinteger)&
+         &," atoms to be considered for the cluster analysis."
         ENDIF
        ENDIF
-      CASE ("complete_molecules")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,complete_molecules
-       IF (ios/=0) THEN
-        CALL report_error(170,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &"   setting 'complete_molecules' to default (=",complete_molecules_default,")"
-        complete_molecules=complete_molecules_default
-       ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'complete_molecules' to ",&
-        &complete_molecules
-       ENDIF
-      CASE ("print_statistics","statistics")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,print_statistics
-       IF (ios/=0) THEN
-        CALL report_error(170,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &"   setting 'print_statistics' to default (=",print_statistics_default,")"
-        print_statistics=print_statistics_default
-       ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'print_statistics' to ",&
-        &print_statistics
-       ENDIF
-      CASE ("print_spectators","spectators","print_spectator","spectator")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,print_spectators
-       IF (ios/=0) THEN
-        CALL report_error(170,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
-        &"   setting 'print_spectators' to default (=",print_spectators_default,")"
-        print_spectators=print_spectators_default
-       ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'print_spectators' to ",&
-        &print_spectators
-       ENDIF
-      CASE ("sampling_interval")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
-       IF (ios/=0) THEN
-        CALL report_error(170,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
-        &"  setting 'sampling_interval' to default (=",sampling_interval_default,")"
-        sampling_interval=sampling_interval_default
-       ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'sampling_interval' to ",sampling_interval
-       ENDIF
-      CASE ("nsteps")
-       BACKSPACE 3
-       READ(3,IOSTAT=ios,FMT=*) inputstring,nsteps
-       IF (ios/=0) THEN
-        CALL report_error(170,exit_status=ios)
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
-        &"  setting 'nsteps' to default (=",nsteps_default,")"
-        nsteps=nsteps_default
-       ELSE
-        IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'nsteps' to ",nsteps
-       ENDIF
-      CASE ("quit")
-       IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_CLUSTER_INPUT)
-       EXIT
-      CASE DEFAULT
-       IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
-      END SELECT
-     ENDDO
-     !first, check for sensible input.
-     IF (nsteps<1) THEN
-      CALL report_error(57,exit_status=nsteps)
-      nsteps=1
-     ELSEIF (nsteps>give_number_of_timesteps()) THEN
-      CALL report_error(57,exit_status=nsteps)
-      nsteps=give_number_of_timesteps()
-     ENDIF
-    END SUBROUTINE read_body
+      ELSE
+       CALL report_error(178)
+      ENDIF
+     CASE ("print_statistics","statistics")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,print_statistics
+      IF (ios/=0) THEN
+       CALL report_error(170,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+       &"   setting 'print_statistics' to default (=",print_statistics_default,")"
+       print_statistics=print_statistics_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'print_statistics' to ",&
+       &print_statistics
+      ENDIF
+     CASE ("print_spectators","spectators","print_spectator","spectator")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,print_spectators
+      IF (ios/=0) THEN
+       CALL report_error(170,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+       &"   setting 'print_spectators' to default (=",print_spectators_default,")"
+       print_spectators=print_spectators_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'print_spectators' to ",&
+       &print_spectators
+      ENDIF
+     CASE ("sampling_interval")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,sampling_interval
+      IF (ios/=0) THEN
+       CALL report_error(170,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+       &"  setting 'sampling_interval' to default (=",sampling_interval_default,")"
+       sampling_interval=sampling_interval_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'sampling_interval' to ",sampling_interval
+      ENDIF
+     CASE ("nsteps")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,nsteps
+      IF (ios/=0) THEN
+       CALL report_error(170,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)')&
+       &"  setting 'nsteps' to default (=",nsteps_default,")"
+       nsteps=nsteps_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'nsteps' to ",nsteps
+      ENDIF
+     CASE ("quit")
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Done reading ",TRIM(FILENAME_CLUSTER_INPUT)
+      EXIT
+     CASE DEFAULT
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "  can't interpret line - continue streaming"
+     END SELECT
+    ENDDO
+    !first, check for sensible input.
+    IF (nsteps<1) THEN
+     CALL report_error(57,exit_status=nsteps)
+     nsteps=1
+    ELSEIF (nsteps>give_number_of_timesteps()) THEN
+     CALL report_error(57,exit_status=nsteps)
+     nsteps=give_number_of_timesteps()
+    ENDIF
+   END SUBROUTINE read_body
 
    !The following subroutine is a quicksort algorithm to sort the cutoff list.
    RECURSIVE SUBROUTINE sort_cutoff_list(left,right,cutoff_list_inout)
@@ -20206,7 +20156,7 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
    INTEGER,INTENT(IN) :: left,right
    INTEGER :: a,b
    REAL,DIMENSION(*),INTENT(INOUT) :: cutoff_list_inout
-   INTEGER pivot
+   REAL pivot
    REAL :: cutoff_clip
     IF (left<right) THEN
      pivot=cutoff_list_inout(left)
@@ -20276,14 +20226,16 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
   SUBROUTINE finalise_cluster()
   IMPLICIT NONE
   INTEGER :: deallocstatus
+   IF (TRIM(operation_mode)=="PAIRS") THEN
+    IF (ALLOCATED(list_of_pairs)) THEN
+     DEALLOCATE(list_of_pairs,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ELSE
+     CALL report_error(0)
+    ENDIF
+   ENDIF
    IF (ALLOCATED(list_of_atoms)) THEN
     DEALLOCATE(list_of_atoms,STAT=deallocstatus)
-    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-   ELSE
-    CALL report_error(0)
-   ENDIF
-   IF (ALLOCATED(list_of_clusters)) THEN
-    DEALLOCATE(list_of_clusters,STAT=deallocstatus)
     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
    ELSE
     CALL report_error(0)
@@ -20301,6 +20253,7 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
     CALL report_error(0)
    ENDIF
    IF (N_steps_to_print>0) THEN
+    CALL finalise_print_members()
     IF (ALLOCATED(steps_toprint)) THEN
      DEALLOCATE(steps_toprint,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
@@ -20309,6 +20262,12 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
     ENDIF
    ENDIF
    IF (print_statistics) THEN
+    IF (ALLOCATED(ClusterCountDistributionFunction)) THEN
+     DEALLOCATE(ClusterCountDistributionFunction,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ELSE
+     CALL report_error(0)
+    ENDIF
     IF (ALLOCATED(average_weights)) THEN
      DEALLOCATE(average_weights,STAT=deallocstatus)
      IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
@@ -20327,14 +20286,44 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
   !This subroutine looks at ALL connections between ALL members of list_of_atoms
   SUBROUTINE cluster_analysis_GLOBAL()
   IMPLICIT NONE
-  INTEGER :: stepcounter,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,output_atom_count
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER :: stepcounter,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,cluster_counts
   INTEGER :: cutoff_counter
-  LOGICAL :: first_atom
-  REAL :: normalisation,dummy
+  LOGICAL :: steps_printed
+  REAL :: normalisation,CCF
+  CHARACTER(LEN=1024) :: fstring,outstring
+  TYPE :: one_cluster
+   REAL :: cluster_weight
+   INTEGER :: members
+  END TYPE one_cluster
+  TYPE(one_cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
+  INTEGER,DIMENSION(:),ALLOCATABLE :: cluster_number
+  steps_printed=.FALSE.
+   !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
+   !$OMP PRIVATE(list_of_clusters,cluster_number,m,n,i,current_cluster,cutoff_counter,cluster_todelete,cluster_counts)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (GLOBAL cluster analysis)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
    IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+   !$OMP END SINGLE
+   ALLOCATE(list_of_clusters(N_atoms),STAT=allocstatus)
+   IF (allocstatus/=0) THEN
+    CALL report_error(171,exit_status=allocstatus)
+   ENDIF
+   ALLOCATE(cluster_number(N_atoms),STAT=allocstatus)
+   IF (allocstatus/=0) THEN
+    CALL report_error(171,exit_status=allocstatus)
+   ENDIF
+   !$OMP DO SCHEDULE(STATIC,1) ORDERED
    DO stepcounter=1,nsteps,sampling_interval
     current_cluster=0
-    list_of_atoms(:)%cluster_number=0
+    cluster_number(:)=0
     list_of_clusters(:)%cluster_weight=0.0
     list_of_clusters(:)%members=0
     !Iterate over cutoffs...
@@ -20343,8 +20332,8 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
       DO n=m,N_atoms
        IF (m==n) CYCLE
        !do not need to check pairs that belong together already
-       IF (((list_of_atoms(m)%cluster_number==0).OR.(list_of_atoms(n)%cluster_number==0))&
-       &.OR.(list_of_atoms(m)%cluster_number/=list_of_atoms(n)%cluster_number)) THEN
+       IF (((cluster_number(m)==0).OR.(cluster_number(n)==0))&
+       &.OR.(cluster_number(m)/=cluster_number(n))) THEN
         !check if closer than cutoff
         IF (give_smallest_atom_distance_squared&
         &(stepcounter,stepcounter,&
@@ -20352,14 +20341,14 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
         &list_of_atoms(m)%molecule_index,list_of_atoms(n)%molecule_index,&
         &list_of_atoms(m)%atom_index,list_of_atoms(n)%atom_index)&
         &<squared_cutoff_list(cutoff_counter)) THEN
-         IF (list_of_atoms(m)%cluster_number==0) THEN
+         IF (cluster_number(m)==0) THEN
          ! m is a monomer!
-          IF (list_of_atoms(n)%cluster_number==0) THEN
+          IF (cluster_number(n)==0) THEN
           ! n is a monomer!
            !--> appropriate action: assign new cluster.
            current_cluster=current_cluster+1
-           list_of_atoms(m)%cluster_number=current_cluster
-           list_of_atoms(n)%cluster_number=current_cluster
+           cluster_number(m)=current_cluster
+           cluster_number(n)=current_cluster
            list_of_clusters(current_cluster)%cluster_weight=&
            &list_of_atoms(m)%atom_weight+&
            &list_of_atoms(n)%atom_weight
@@ -20367,38 +20356,38 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
           ELSE
           ! n is NOT a monomer!
            !--> appropriate action: add entry "m" to cluster "n"
-           list_of_atoms(m)%cluster_number=list_of_atoms(n)%cluster_number
-           list_of_clusters(list_of_atoms(n)%cluster_number)%cluster_weight=&
-           &list_of_clusters(list_of_atoms(n)%cluster_number)%cluster_weight+&
-           &give_charge_of_molecule(list_of_atoms(m)%molecule_type_index)
-           list_of_clusters(list_of_atoms(n)%cluster_number)%members=&
-           &list_of_clusters(list_of_atoms(n)%cluster_number)%members+1
+           cluster_number(m)=cluster_number(n)
+           list_of_clusters(cluster_number(n))%cluster_weight=&
+           &list_of_clusters(cluster_number(n))%cluster_weight+&
+           &list_of_atoms(m)%atom_weight
+           list_of_clusters(cluster_number(n))%members=&
+           &list_of_clusters(cluster_number(n))%members+1
           ENDIF
          ELSE
          ! m is NOT a monomer!
-          IF (list_of_atoms(n)%cluster_number==0) THEN
+          IF (cluster_number(n)==0) THEN
           ! n is a monomer!
            !--> appropriate action: add entry "n" to cluster "m"
-           list_of_atoms(n)%cluster_number=list_of_atoms(m)%cluster_number
-           list_of_clusters(list_of_atoms(m)%cluster_number)%cluster_weight=&
-           &list_of_clusters(list_of_atoms(m)%cluster_number)%cluster_weight+&
+           cluster_number(n)=cluster_number(m)
+           list_of_clusters(cluster_number(m))%cluster_weight=&
+           &list_of_clusters(cluster_number(m))%cluster_weight+&
            &list_of_atoms(n)%atom_weight
-           list_of_clusters(list_of_atoms(m)%cluster_number)%members=&
-           &list_of_clusters(list_of_atoms(m)%cluster_number)%members+1
+           list_of_clusters(cluster_number(m))%members=&
+           &list_of_clusters(cluster_number(m))%members+1
           ELSE
           ! n is NOT a monomer!
            !--> appropriate action: merge clusters...
            !based on absolutely nothing, merge n into m
-           cluster_todelete=list_of_atoms(n)%cluster_number
-           list_of_clusters(list_of_atoms(m)%cluster_number)%members=&
-           &list_of_clusters(list_of_atoms(m)%cluster_number)%members+&
+           cluster_todelete=cluster_number(n)
+           list_of_clusters(cluster_number(m))%members=&
+           &list_of_clusters(cluster_number(m))%members+&
            &list_of_clusters(cluster_todelete)%members
-           list_of_clusters(list_of_atoms(m)%cluster_number)%cluster_weight=&
-           &list_of_clusters(list_of_atoms(m)%cluster_number)%cluster_weight+&
+           list_of_clusters(cluster_number(m))%cluster_weight=&
+           &list_of_clusters(cluster_number(m))%cluster_weight+&
            &list_of_clusters(cluster_todelete)%cluster_weight
            DO i=1,N_atoms,1
-            IF (list_of_atoms(i)%cluster_number==cluster_todelete) THEN
-             list_of_atoms(i)%cluster_number=list_of_atoms(m)%cluster_number
+            IF (cluster_number(i)==cluster_todelete) THEN
+             cluster_number(i)=cluster_number(m)
             ENDIF
            ENDDO
            !here, entry n is not needed anymore.
@@ -20409,8 +20398,8 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
             list_of_clusters(cluster_todelete)%members=&
             &list_of_clusters(current_cluster)%members
             DO i=1,N_atoms,1
-             IF (list_of_atoms(i)%cluster_number==current_cluster) THEN
-              list_of_atoms(i)%cluster_number=cluster_todelete
+             IF (cluster_number(i)==current_cluster) THEN
+              cluster_number(i)=cluster_todelete
              ENDIF
             ENDDO
            ENDIF
@@ -20425,141 +20414,453 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
       ENDDO
      ENDDO
      IF (print_statistics) THEN
+      cluster_counts=current_cluster !we found this many non-monomeric clusters!
       DO i=1,current_cluster,1
+       !$OMP CRITICAL(weight_updates)
        average_weights(list_of_clusters(i)%members,cutoff_counter)=&
        &average_weights(list_of_clusters(i)%members,cutoff_counter)+list_of_clusters(i)%cluster_weight
+       !$OMP END CRITICAL(weight_updates)
+       !$OMP CRITICAL(occurrence_updates)
        overall_occurrence(list_of_clusters(i)%members,cutoff_counter)=&
        &overall_occurrence(list_of_clusters(i)%members,cutoff_counter)+1
+       !$OMP END CRITICAL(occurrence_updates)
       ENDDO
       DO i=1,N_atoms,1
-       IF (list_of_atoms(i)%cluster_number==0) THEN
+       IF (cluster_number(i)==0) THEN
+        cluster_counts=cluster_counts+1!every monomer counts as a cluster
+        !$OMP CRITICAL(occurrence_updates)
         overall_occurrence(1,cutoff_counter)=overall_occurrence(1,cutoff_counter)+1
+        !$OMP END CRITICAL(occurrence_updates)
+        !$OMP CRITICAL(weight_updates)
         average_weights(1,cutoff_counter)=average_weights(1,cutoff_counter)+&
         &list_of_atoms(i)%atom_weight
+        !$OMP END CRITICAL(weight_updates)
        ENDIF
       ENDDO
+      !$OMP CRITICAL(CCDF_update)
+      ClusterCountDistributionFunction(cutoff_counter)=&
+      &ClusterCountDistributionFunction(cutoff_counter)+cluster_counts
+      !$OMP END CRITICAL(CCDF_update)
+     ENDIF
+     !print clusters to xyz file if necessary
+     IF (N_steps_to_print>0) THEN
+      IF (ANY(steps_toprint(:)==stepcounter)) THEN
+       !$OMP CRITICAL(print_members)
+       steps_printed=.TRUE.
+       !print this step
+       !print spectators
+       IF (print_spectators) THEN
+        WRITE(fstring,'(2A,I0,A,E9.3,A)') &
+        &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+        &stepcounter,"_cutoff=",cutoff_list(cutoff_counter),"_spectators.xyz"
+        WRITE(outstring,'(A)') &
+        &"These are the molecules which are not considered in the cluster analysis"
+        CALL reset_print_members()
+        DO i=1,N_atoms,1
+         CALL add_print_member&
+         &(list_of_atoms(i)%molecule_type_index,list_of_atoms(i)%molecule_index)
+        ENDDO
+        CALL invert_print_members()
+        CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+       ENDIF
+       !print monomers
+       WRITE(fstring,'(2A,I0,A,E9.3,A)') &
+       &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+       &stepcounter,"_cutoff=",cutoff_list(cutoff_counter),"_monomers.xyz"
+       WRITE(outstring,'(A)') &
+       &"These are the monomers"
+       CALL reset_print_members()
+       DO i=1,N_atoms,1
+        IF (cluster_number(i)==0) THEN
+         CALL add_print_member&
+         &(list_of_atoms(i)%molecule_type_index,list_of_atoms(i)%molecule_index)
+        ENDIF
+       ENDDO
+       CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+       !print oligomers
+       DO i=2,N_atoms,1
+        CALL reset_print_members()
+        WRITE(fstring,'(2A,I0,A,E9.3,A,I0,A)') &
+        &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+        &stepcounter,"_cutoff=",cutoff_list(cutoff_counter),"_",i,"-mers.xyz"
+        WRITE(outstring,'(A,I0,A)') &
+        &"These are the ",i,"-mers"
+        DO m=1,current_cluster
+         !go through all the clusters, find the ones which have "i" members
+         IF (list_of_clusters(m)%members==i) THEN
+          !here, cluster "m" has "i" members, now find all the atoms that belong to it
+          DO n=1,N_atoms,1
+           IF (cluster_number(n)==m) THEN
+            CALL add_print_member&
+            &(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+           ENDIF
+          ENDDO
+          !here we have added all atoms belonging to that cluster to print_members
+         ENDIF
+        ENDDO
+        !here we should have found all relevant clusters
+        CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+       ENDDO
+       !$OMP END CRITICAL(print_members)
+      ENDIF
      ENDIF
     ENDDO
     IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
+   !$OMP END DO
+   IF (ALLOCATED(cluster_number)) THEN
+    DEALLOCATE(cluster_number,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+   IF (ALLOCATED(list_of_clusters)) THEN
+    DEALLOCATE(list_of_clusters,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+   !$OMP END PARALLEL
+   IF ((VERBOSE_OUTPUT).AND.(steps_printed)) WRITE(*,'(" various xyz files of clusters written to output folder.")')
    IF (print_statistics) THEN
+    WRITE(fstring,'(2A)') &
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"cluster_statistics.dat"
+    IF (VERBOSE_OUTPUT) WRITE(*,'(3A)')" Writing cluster statistics to '",TRIM(fstring),"'"
+    OPEN(UNIT=4,FILE=TRIM(fstring))
+    WRITE(4,*) "This file contains cluster statistics based on the input file '"&
+     &,TRIM(FILENAME_CLUSTER_INPUT),"'"
+    WRITE(4,*) "atom_fraction    = #(specified atoms in this cluster size) / total #(specified atoms)"
+    WRITE(4,*) "cluster_fraction = #(clusters of this size) / total number of clusters"
+    IF (N_cutoffs==1) THEN
+     WRITE(4,'(" The cutoff was ",E9.3)') cutoff_list(1)
+    ELSE
+     WRITE(4,ADVANCE="NO",FMT='(A9)') "cutoff"
+    ENDIF
+    WRITE(4,'(A8,2A15,A17,A15)')"members","weight_average","atom_fraction","cluster_fraction"
     DO cutoff_counter=1,N_cutoffs,1
-     PRINT *,"CUTOFF #",cutoff_counter
      normalisation=0.0
      DO i=1,N_atoms,1
-      WRITE(*,'(" Members= ",I0,", charge=",I0,", occurrence=",I0)')&
-      &i,average_weights(i,cutoff_counter),overall_occurrence(i,cutoff_counter)
       normalisation=normalisation+FLOAT(overall_occurrence(i,cutoff_counter)*i)
      ENDDO
      DO i=1,N_atoms,1
-      WRITE(*,*)"Members ","average_weights ","fraction_of_molecules ","fraction_of_clusters "
-      WRITE(*,*)i,average_weights(i,cutoff_counter)/&
-      &FLOAT(overall_occurrence(i,cutoff_counter)),&
-      &(FLOAT(overall_occurrence(i,cutoff_counter)*i))/normalisation,&
-      &FLOAT(overall_occurrence(i,cutoff_counter))/&
-      &FLOAT(SUM(overall_occurrence(:,cutoff_counter)))
+      IF (overall_occurrence(i,cutoff_counter)>0) THEN
+       IF (N_cutoffs>1) WRITE(4,ADVANCE="NO",FMT='(E9.3)') cutoff_list(cutoff_counter)
+       WRITE(4,'(I8,2E15.6,E17.6)')i,average_weights(i,cutoff_counter)/&
+       &FLOAT(overall_occurrence(i,cutoff_counter)),&
+       &(FLOAT(overall_occurrence(i,cutoff_counter)*i))/normalisation,&
+       &FLOAT(overall_occurrence(i,cutoff_counter))/&
+       &FLOAT(SUM(overall_occurrence(:,cutoff_counter)))
+      ENDIF
      ENDDO
     ENDDO
+    ENDFILE 4
+    CLOSE(UNIT=4)
+    WRITE(*,*) "The following values of the CCF were observed:"
+    WRITE(*,'(2A10)') "cutoff","CCF"
+    DO cutoff_counter=1,N_cutoffs,1
+     IF (cutoff_list(cutoff_counter)<0.01) THEN
+      WRITE(*,ADVANCE="NO",FMT='(E10.4)')cutoff_list(cutoff_counter)
+     ELSEIF (cutoff_list(cutoff_counter)<99999.9) THEN
+      WRITE(*,ADVANCE="NO",FMT='(F10.3)')cutoff_list(cutoff_counter)
+     ELSE
+      WRITE(*,ADVANCE="NO",FMT='(E10.4)')cutoff_list(cutoff_counter)
+     ENDIF
+     CCF=FLOAT(ClusterCountDistributionFunction(cutoff_counter))/&
+     &FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+     IF (CCF<0.01) THEN
+      WRITE(*,'(E10.4)')CCF
+     ELSEIF (CCF<99999.9) THEN
+      WRITE(*,'(F10.3)')CCF
+     ELSE
+      WRITE(*,'(E10.4)')CCF
+     ENDIF
+    ENDDO
+    WRITE(*,*) "( CCF = cluster count function, for comparison with TRAVIS:"
+    WRITE(*,*) "J. Chem. Inf. Model., 2022, 62, 5634–5644, dx.doi.org/10.1021/acs.jcim.2c01244 )"
    ENDIF
   END SUBROUTINE cluster_analysis_GLOBAL
 
-  SUBROUTINE print_clusters(logged_clusters)
+  !This is the version that looks only at pair connections. I duplicated the whole routine to not accidentally mess up the GLOBAL analysis.
+  SUBROUTINE cluster_analysis_PAIRS()
   IMPLICIT NONE
-  INTEGER,INTENT(IN) :: logged_clusters
-  REAL(KIND=DP) :: current_centre(3)
-  REAL :: dummy
-  LOGICAL :: first_atom
-  INTEGER :: first_entry,ip,np,mp,output_atom_count,stepcounter
-  CHARACTER(LEN=1024) :: fstring
-    !print the glymes
-    WRITE(fstring,'(2A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_glymes.xyz"
-    OPEN(UNIT=4,FILE=TRIM(fstring))
-    output_atom_count=3360
-    CALL write_header(4,1,output_atom_count,"xyz")
-    DO ip=1,210,1
-     CALL write_molecule(4,stepcounter,2,ip,include_header=.FALSE.)
-    ENDDO
-    ENDFILE 4
-    CLOSE(UNIT=4)
-      
-      
-    !print the clusters
-    WRITE(fstring,'(2A,I0,A)') &
-    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_monomers.xyz"
-    OPEN(UNIT=4,FILE=TRIM(fstring))
-    output_atom_count=0
-    DO ip=1,N_atoms,1
-     IF (list_of_atoms(ip)%cluster_number==0) THEN
-      output_atom_count=output_atom_count+&
-      &give_number_of_atoms_per_molecule(list_of_atoms(ip)%molecule_type_index)
-     ENDIF
-    ENDDO
-    CALL write_header(4,1,output_atom_count,"xyz")
-    DO ip=1,N_atoms,1
-     IF (list_of_atoms(ip)%cluster_number==0) THEN
-      CALL write_molecule(4,stepcounter,list_of_atoms(ip)%molecule_type_index,&
-      &list_of_atoms(ip)%molecule_index,include_header=.FALSE.)
-     ENDIF
-    ENDDO
-    ENDFILE 4
-    CLOSE(UNIT=4)
-    DO ip=2,N_atoms,1
-     output_atom_count=0
-     DO mp=1,logged_clusters
-      !iterate over the specified timesteps
-      !check if cluster has the right number of members
-      IF (list_of_clusters(mp)%members==ip) THEN
-       !count atoms
-       DO np=1,N_atoms,1
-        IF (list_of_atoms(np)%cluster_number==mp) THEN
-         output_atom_count=output_atom_count+&
-         &give_number_of_atoms_per_molecule(list_of_atoms(np)%molecule_type_index)
-        ENDIF
-       ENDDO
-      ENDIF
-     ENDDO
-     IF (output_atom_count/=0) THEN
-      WRITE(fstring,'(2A,I0,A,I0,A)') &
-      &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",stepcounter,"_clusters_",ip,"-mers.xyz"
-      OPEN(UNIT=4,FILE=TRIM(fstring))
-      CALL write_header(4,1,output_atom_count,"xyz")
-      DO mp=1,logged_clusters
-       !iterate over the specified timesteps
-       !check if cluster has the right number of members
-       IF (list_of_clusters(mp)%members==ip) THEN
-        !write body
-        first_atom=.TRUE.
-        DO np=1,N_atoms,1
-         IF (list_of_atoms(np)%cluster_number==mp) THEN
-          IF (first_atom) THEN
-           current_centre(:)=0.0d0
-           first_atom=.FALSE.
-           first_entry=np
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER :: stepcounter,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,cluster_counts
+  INTEGER :: pair_counter
+  LOGICAL :: steps_printed
+  REAL :: normalisation,CCF
+  CHARACTER(LEN=1024) :: fstring,outstring
+  TYPE :: one_cluster
+   REAL :: cluster_weight
+   INTEGER :: members
+  END TYPE one_cluster
+  TYPE(one_cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
+  INTEGER,DIMENSION(:),ALLOCATABLE :: cluster_number
+   steps_printed=.FALSE.
+   !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
+   !$OMP PRIVATE(list_of_clusters,cluster_number,m,n,i,current_cluster,pair_counter,cluster_todelete,cluster_counts)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,'(A,I0,A)') " ### Parallel execution on ",OMP_get_num_threads()," threads (GLOBAL cluster analysis)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
+   IF (VERBOSE_OUTPUT) CALL print_progress(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+   !$OMP END SINGLE
+   ALLOCATE(list_of_clusters(N_atoms),STAT=allocstatus)
+   IF (allocstatus/=0) THEN
+    CALL report_error(171,exit_status=allocstatus)
+   ENDIF
+   ALLOCATE(cluster_number(N_atoms),STAT=allocstatus)
+   IF (allocstatus/=0) THEN
+    CALL report_error(171,exit_status=allocstatus)
+   ENDIF
+   !$OMP DO SCHEDULE(STATIC,1) ORDERED
+   DO stepcounter=1,nsteps,sampling_interval
+    current_cluster=0
+    cluster_number(:)=0
+    list_of_clusters(:)%cluster_weight=0.0
+    list_of_clusters(:)%members=0
+    !Iterate over pairs
+    DO pair_counter=1,N_pairs,1
+     DO m=list_of_pairs(pair_counter)%list_of_atoms_starting_index_A,&
+     &list_of_pairs(pair_counter)%list_of_atoms_last_index_A,1
+      DO n=list_of_pairs(pair_counter)%list_of_atoms_starting_index_B,&
+      &list_of_pairs(pair_counter)%list_of_atoms_last_index_B,1
+       !do not need to check pairs that belong together already
+       IF (((cluster_number(m)==0).OR.(cluster_number(n)==0))&
+       &.OR.(cluster_number(m)/=cluster_number(n))) THEN
+        !check if closer than cutoff
+        IF (give_smallest_atom_distance_squared&
+        &(stepcounter,stepcounter,&
+        &list_of_atoms(m)%molecule_type_index,list_of_atoms(n)%molecule_type_index,&
+        &list_of_atoms(m)%molecule_index,list_of_atoms(n)%molecule_index,&
+        &list_of_atoms(m)%atom_index,list_of_atoms(n)%atom_index)&
+        &<squared_cutoff_list(pair_counter)) THEN
+         IF (cluster_number(m)==0) THEN
+         ! m is a monomer!
+          IF (cluster_number(n)==0) THEN
+          ! n is a monomer!
+           !--> appropriate action: assign new cluster.
+           current_cluster=current_cluster+1
+           cluster_number(m)=current_cluster
+           cluster_number(n)=current_cluster
+           list_of_clusters(current_cluster)%cluster_weight=&
+           &list_of_atoms(m)%atom_weight+&
+           &list_of_atoms(n)%atom_weight
+           list_of_clusters(current_cluster)%members=2
           ELSE
-           dummy=give_smallest_atom_distance_squared&
-           &(stepcounter,stepcounter,&
-           &list_of_atoms(first_entry)%molecule_type_index,list_of_atoms(np)%molecule_type_index,&
-           &list_of_atoms(first_entry)%molecule_index,list_of_atoms(np)%molecule_index,&
-           &list_of_atoms(first_entry)%atom_index,list_of_atoms(np)%atom_index,translation=current_centre)
+          ! n is NOT a monomer!
+           !--> appropriate action: add entry "m" to cluster "n"
+           cluster_number(m)=cluster_number(n)
+           list_of_clusters(cluster_number(n))%cluster_weight=&
+           &list_of_clusters(cluster_number(n))%cluster_weight+&
+           &list_of_atoms(m)%atom_weight
+           list_of_clusters(cluster_number(n))%members=&
+           &list_of_clusters(cluster_number(n))%members+1
           ENDIF
-          CALL write_molecule(4,stepcounter,list_of_atoms(np)%molecule_type_index,&
-          &list_of_atoms(np)%molecule_index&
-          &,include_header=.FALSE.,translate_by=current_centre(:))
+         ELSE
+         ! m is NOT a monomer!
+          IF (cluster_number(n)==0) THEN
+          ! n is a monomer!
+           !--> appropriate action: add entry "n" to cluster "m"
+           cluster_number(n)=cluster_number(m)
+           list_of_clusters(cluster_number(m))%cluster_weight=&
+           &list_of_clusters(cluster_number(m))%cluster_weight+&
+           &list_of_atoms(n)%atom_weight
+           list_of_clusters(cluster_number(m))%members=&
+           &list_of_clusters(cluster_number(m))%members+1
+          ELSE
+          ! n is NOT a monomer!
+           !--> appropriate action: merge clusters...
+           !based on absolutely nothing, merge n into m
+           cluster_todelete=cluster_number(n)
+           list_of_clusters(cluster_number(m))%members=&
+           &list_of_clusters(cluster_number(m))%members+&
+           &list_of_clusters(cluster_todelete)%members
+           list_of_clusters(cluster_number(m))%cluster_weight=&
+           &list_of_clusters(cluster_number(m))%cluster_weight+&
+           &list_of_clusters(cluster_todelete)%cluster_weight
+           DO i=1,N_atoms,1
+            IF (cluster_number(i)==cluster_todelete) THEN
+             cluster_number(i)=cluster_number(m)
+            ENDIF
+           ENDDO
+           !here, entry n is not needed anymore.
+           !rename the cluster with the highest number to be n
+           IF (current_cluster/=cluster_todelete) THEN
+            list_of_clusters(cluster_todelete)%cluster_weight=&
+            &list_of_clusters(current_cluster)%cluster_weight
+            list_of_clusters(cluster_todelete)%members=&
+            &list_of_clusters(current_cluster)%members
+            DO i=1,N_atoms,1
+             IF (cluster_number(i)==current_cluster) THEN
+              cluster_number(i)=cluster_todelete
+             ENDIF
+            ENDDO
+           ENDIF
+           !delete the entry for the current_cluster. probably not necessary but safer to have clean memory.
+           !list_of_clusters(current_cluster)%cluster_weight=0.0
+           !list_of_clusters(current_cluster)%members=0
+           current_cluster=current_cluster-1
+          ENDIF
          ENDIF
-        ENDDO
+        ENDIF
        ENDIF
       ENDDO
-      ENDFILE 4
-      CLOSE(UNIT=4)
+     ENDDO
+    ENDDO !end of pair counter loop
+    IF (print_statistics) THEN
+     cluster_counts=current_cluster !we found this many non-monomeric clusters!
+     DO i=1,current_cluster,1
+      !$OMP CRITICAL(weight_updates)
+      average_weights(list_of_clusters(i)%members,1)=&
+      &average_weights(list_of_clusters(i)%members,1)+list_of_clusters(i)%cluster_weight
+      !$OMP END CRITICAL(weight_updates)
+      !$OMP CRITICAL(occurrence_updates)
+      overall_occurrence(list_of_clusters(i)%members,1)=&
+      &overall_occurrence(list_of_clusters(i)%members,1)+1
+      !$OMP END CRITICAL(occurrence_updates)
+     ENDDO
+     DO i=1,N_atoms,1
+      IF (cluster_number(i)==0) THEN
+       cluster_counts=cluster_counts+1!every monomer counts as a cluster
+       !$OMP CRITICAL(occurrence_updates)
+       overall_occurrence(1,1)=overall_occurrence(1,1)+1
+       !$OMP END CRITICAL(occurrence_updates)
+       !$OMP CRITICAL(weight_updates)
+       average_weights(1,1)=average_weights(1,1)+&
+       &list_of_atoms(i)%atom_weight
+       !$OMP END CRITICAL(weight_updates)
+      ENDIF
+     ENDDO
+     !$OMP CRITICAL(CCDF_update)
+     ClusterCountDistributionFunction(1)=&
+     &ClusterCountDistributionFunction(1)+cluster_counts
+     !$OMP END CRITICAL(CCDF_update)
+    ENDIF
+    !print clusters to xyz file if necessary
+    IF (N_steps_to_print>0) THEN
+     IF (ANY(steps_toprint(:)==stepcounter)) THEN
+      !$OMP CRITICAL(print_members)
+      steps_printed=.TRUE.
+      !print this step
+      !print spectators
+      IF (print_spectators) THEN
+       WRITE(fstring,'(2A,I0,A,A)') &
+       &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+       &stepcounter,"_spectators.xyz"
+       WRITE(outstring,'(A)') &
+       &"These are the molecules which are not considered in the cluster analysis"
+       CALL reset_print_members()
+       DO i=1,N_atoms,1
+        CALL add_print_member&
+        &(list_of_atoms(i)%molecule_type_index,list_of_atoms(i)%molecule_index)
+       ENDDO
+       CALL invert_print_members()
+       CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+      ENDIF
+      !print monomers
+      WRITE(fstring,'(2A,I0,A)') &
+      &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+      &stepcounter,"_monomers.xyz"
+      WRITE(outstring,'(A)') &
+      &"These are the monomers"
+      CALL reset_print_members()
+      DO i=1,N_atoms,1
+       IF (cluster_number(i)==0) THEN
+        CALL add_print_member&
+        &(list_of_atoms(i)%molecule_type_index,list_of_atoms(i)%molecule_index)
+       ENDIF
+      ENDDO
+      CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+      !print oligomers
+      DO i=2,N_atoms,1
+       CALL reset_print_members()
+       WRITE(fstring,'(2A,I0,A,I0,A)') &
+       &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"step_",&
+       &stepcounter,"_",i,"-mers.xyz"
+       WRITE(outstring,'(A,I0,A)') &
+       &"These are the ",i,"-mers"
+       DO m=1,current_cluster
+        !go through all the clusters, find the ones which have "i" members
+        IF (list_of_clusters(m)%members==i) THEN
+         !here, cluster "m" has "i" members, now find all the atoms that belong to it
+         DO n=1,N_atoms,1
+          IF (cluster_number(n)==m) THEN
+           CALL add_print_member&
+           &(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+          ENDIF
+         ENDDO
+         !here we have added all atoms belonging to that cluster to print_members
+        ENDIF
+       ENDDO
+       !here we should have found all relevant clusters
+       CALL print_members(stepcounter,TRIM(fstring),TRIM(outstring))
+      ENDDO
+      !$OMP END CRITICAL(print_members)
+     ENDIF
+    ENDIF
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+   ENDDO
+   !$OMP END DO
+   IF (ALLOCATED(cluster_number)) THEN
+    DEALLOCATE(cluster_number,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+   IF (ALLOCATED(list_of_clusters)) THEN
+    DEALLOCATE(list_of_clusters,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+   !$OMP END PARALLEL
+   IF ((VERBOSE_OUTPUT).AND.(steps_printed)) WRITE(*,'(" various xyz files of clusters written to output folder.")')
+   IF (print_statistics) THEN
+    WRITE(fstring,'(2A)') &
+    &TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"cluster_statistics.dat"
+    IF (VERBOSE_OUTPUT) WRITE(*,'(3A)')" Writing cluster statistics to '",TRIM(fstring),"'"
+    OPEN(UNIT=4,FILE=TRIM(fstring))
+    WRITE(4,*) "This file contains cluster statistics based on the input file '"&
+     &,TRIM(FILENAME_CLUSTER_INPUT),"'"
+    WRITE(4,*) "atom_fraction    = #(specified atoms in this cluster size) / total #(specified atoms)"
+    WRITE(4,*) "cluster_fraction = #(clusters of this size) / total number of clusters"
+    WRITE(4,'(A8,2A15,A17,A15)')"members","weight_average","atom_fraction","cluster_fraction"
+    normalisation=0.0
+    DO i=1,N_atoms,1
+     normalisation=normalisation+FLOAT(overall_occurrence(i,1)*i)
+    ENDDO
+    DO i=1,N_atoms,1
+     IF (overall_occurrence(i,1)>0) THEN
+      WRITE(4,'(I8,2E15.6,E17.6)')i,average_weights(i,1)/&
+      &FLOAT(overall_occurrence(i,1)),&
+      &(FLOAT(overall_occurrence(i,1)*i))/normalisation,&
+      &FLOAT(overall_occurrence(i,1))/&
+      &FLOAT(SUM(overall_occurrence(:,1)))
      ENDIF
     ENDDO
-  END SUBROUTINE print_clusters
+    ENDFILE 4
+    CLOSE(UNIT=4)
+    WRITE(*,ADVANCE="NO",FMT='(A)') " The 'CCF' for this analysis was"
+    CCF=FLOAT(ClusterCountDistributionFunction(1))/&
+    &FLOAT(MAX((nsteps-1+sampling_interval)/sampling_interval,0))
+    IF ((CCF<0.01).OR.(CCF>99.99)) THEN
+     WRITE(*,'(E11.4)')CCF
+    ELSE
+     WRITE(*,'(F6.2)')CCF
+    ENDIF
+    WRITE(*,*) "( CCF = cluster count function = average number of separate clusters per box)"
+   ENDIF
+  END SUBROUTINE cluster_analysis_PAIRS
 
   SUBROUTINE perform_cluster_analysis()
   IMPLICIT NONE
    CALL initialise_cluster()
-   IF ((ERROR_CODE/=170).AND.(ERROR_CODE/=171).AND.(ERROR_CODE/=173).AND.(ERROR_CODE/=174)) THEN
+   IF ((ERROR_CODE/=170).AND.(ERROR_CODE/=171).AND.(ERROR_CODE/=173).AND.(ERROR_CODE/=174).AND.(ERROR_CODE/=177)) THEN
     WRITE(*,'(" Using ",I0," timesteps in intervals of ",I0," for averaging.")')&
     &MAX((nsteps-1+sampling_interval)/sampling_interval,0),sampling_interval
     IF (VERBOSE_OUTPUT) THEN
@@ -20569,7 +20870,11 @@ MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
     ENDIF
     WRITE(*,'(" Starting cluster analysis.")')
     CALL refresh_IO()
-    CALL cluster_analysis_GLOBAL()
+    IF (TRIM(operation_mode)=="GLOBAL") THEN
+     CALL cluster_analysis_GLOBAL()
+    ELSE
+     CALL cluster_analysis_PAIRS()
+    ENDIF
     CALL finalise_cluster()
    ELSE
     ERROR_CODE=ERROR_CODE_DEFAULT
@@ -20635,7 +20940,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 26_Oct_2024"
+ PRINT *, "   Date of Release: 28_Oct_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -24128,7 +24433,6 @@ INTEGER :: ios,n
      !CALL perform_speciation_analysis()
      !FILENAME_SPECIATION_INPUT="speciationX.inp"
      !CALL perform_speciation_analysis()
-     CALL cluster_analysis(4.25)
      WRITE(*,*) "################################DEBUG VERSION"
     CASE DEFAULT
      IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

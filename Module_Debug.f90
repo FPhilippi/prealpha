@@ -1283,75 +1283,69 @@ WRITE(4,'("F 0.0 0.0 1.0")')
 			ELSE
 				useCOC=.FALSE.
 			ENDIF
-			IF (DEVELOPERS_VERSION) THEN
-				PRINT *," ! CAREFUL: 'PARALLELISED' CONVERTER USED"
-				CALL convert_parallel()
-				RETURN
-			ELSE
-				!first, get the number of lines that will be added.
-				ncentres=0
-				valid_COC=0
-				IF (useCOC) THEN
-					!count only those molecules with nonzero charge
-					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-						IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
-							valid_COC=valid_COC+1
-							ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-						ENDIF
-					ENDDO
-				ELSE
-					!count everything
-					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+			!first, get the number of lines that will be added.
+			ncentres=0
+			valid_COC=0
+			IF (useCOC) THEN
+				!count only those molecules with nonzero charge
+				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+					IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
+						valid_COC=valid_COC+1
 						ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
-					ENDDO
-				ENDIF
-				IF (ncentres==0) CALL report_error(143)
-				INQUIRE(UNIT=3,OPENED=connected)
-				IF (connected) CALL report_error(27,exit_status=3)
-				IF (useCOC) THEN
-					WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
-				ELSE
-					WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
-				ENDIF
-				OPEN(UNIT=3,FILE=TRIM(fstring))
-				IF (VERBOSE_OUTPUT) THEN
-					WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
-					IF (give_number_of_timesteps()>100) WRITE(*,*)
-					CALL print_progress(give_number_of_timesteps())
-				ENDIF
-				DO stepcounter=1,give_number_of_timesteps(),1
-					!Write head, depending on which type the trajectory has...
-					CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
-					DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
-						element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
-						IF (useCOC) THEN
-							!use the centre of charge - but only for charged molecules.
-							IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
-								DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
-									!Sort of high accuracy should be kept here because of the way I use this routine.
-									!reduced to 16.8 from 18.10
-									WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
-								ENDDO
-							ENDIF
-						ELSE
+					ENDIF
+				ENDDO
+			ELSE
+				!count everything
+				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+					ncentres=ncentres+give_number_of_molecules_per_step(molecule_type_index)
+				ENDDO
+			ENDIF
+			IF (ncentres==0) CALL report_error(143)
+			INQUIRE(UNIT=3,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=3)
+			IF (useCOC) THEN
+				WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COC.",output_format
+			ELSE
+				WRITE(fstring,'(3A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX)),"traj_COM.",output_format
+			ENDIF
+			OPEN(UNIT=3,FILE=TRIM(fstring))
+			IF (VERBOSE_OUTPUT) THEN
+				WRITE(*,ADVANCE="NO",FMT='(" Writing new trajectory to file ",A,"...")') "'"//TRIM(fstring)//"'"
+				IF (give_number_of_timesteps()>100) WRITE(*,*)
+				CALL print_progress(give_number_of_timesteps())
+			ENDIF
+			DO stepcounter=1,give_number_of_timesteps(),1
+				!Write head, depending on which type the trajectory has...
+				CALL write_header(3,stepcounter*TIME_SCALING_FACTOR,ncentres,output_format)
+				DO molecule_type_index=1,give_number_of_molecule_types(),1 !iterate over number of molecule types. (i.e. cation and anion, usually)
+					element=CHAR(ALPHABET_small(MOD((molecule_type_index-1),26)+1)) !assign the element names a,b,c,... to the centred molecules.
+					IF (useCOC) THEN
+						!use the centre of charge - but only for charged molecules.
+						IF (give_charge_of_molecule(molecule_type_index)/=0) THEN
 							DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
 								!Sort of high accuracy should be kept here because of the way I use this routine.
 								!reduced to 16.8 from 18.10
-								WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+								WRITE(3,'(A1,3E16.8)') element,give_center_of_charge(stepcounter,molecule_type_index,moleculecounter)
 							ENDDO
 						ENDIF
-					ENDDO
-					IF (VERBOSE_OUTPUT) CALL print_progress()
-				ENDDO
-				IF (VERBOSE_OUTPUT) THEN
-					IF ((give_number_of_timesteps())>100) THEN
-						WRITE(*,*)
-						WRITE(*,FMT='(" ")',ADVANCE="NO")
+					ELSE
+						DO moleculecounter=1,give_number_of_molecules_per_step(molecule_type_index),1
+							!Sort of high accuracy should be kept here because of the way I use this routine.
+							!reduced to 16.8 from 18.10
+							WRITE(3,'(A1,3E16.8)') element,give_center_of_mass(stepcounter,molecule_type_index,moleculecounter)
+						ENDDO
 					ENDIF
-					WRITE(*,'("done.")')
+				ENDDO
+				IF (VERBOSE_OUTPUT) CALL print_progress()
+			ENDDO
+			IF (VERBOSE_OUTPUT) THEN
+				IF ((give_number_of_timesteps())>100) THEN
+					WRITE(*,*)
+					WRITE(*,FMT='(" ")',ADVANCE="NO")
 				ENDIF
-				CLOSE(UNIT=3)
+				WRITE(*,'("done.")')
 			ENDIF
+			CLOSE(UNIT=3)
 			IF (writemolecularinputfile) THEN
 				INQUIRE(UNIT=3,OPENED=connected)
 				IF (connected) CALL report_error(27,exit_status=3)
@@ -1606,7 +1600,7 @@ WRITE(4,'("F 0.0 0.0 1.0")')
 			IF (writemolecularinputfile) CALL write_molecule_input_file_without_drudes(endstep_in-startstep_in+1)
 		END SUBROUTINE
 
-		!This SUBROUTINE writes a SUBROUTINE with removed core particles. This requires assigned drude particles!
+		!This SUBROUTINE writes a trajectory with removed core particles. This requires assigned drude particles!
 		SUBROUTINE remove_cores(startstep_in,endstep_in,output_format)
 		IMPLICIT NONE
 		INTEGER :: stepcounter,molecule_type_index,molecule_index

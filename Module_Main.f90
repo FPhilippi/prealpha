@@ -3549,7 +3549,6 @@ INTEGER :: ios,n
 					!CALL perform_speciation_analysis()
 					!FILENAME_SPECIATION_INPUT="speciationX.inp"
 					!CALL perform_speciation_analysis()
-					CALL cluster_analysis(4.25)
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

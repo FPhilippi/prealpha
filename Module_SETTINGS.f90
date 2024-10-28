@@ -292,6 +292,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!174 no cutoffs specified in cluster.inp
 	!175 nonsensical values for the cutoff scan
 	!176 nonsensical values for molecule_type_index or atom_index
+	!177 operation mode missing in cluster.inp
+	!178 option not available in the current operation mode.
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -1005,6 +1007,11 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 				CASE (176)
 					WRITE(*,*) " #  ERROR 176: atoms not specified correctly in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
 					WRITE(*,*) "--> please check the use of 'add_molecule' or 'add_atom' in your cluster input file."
+				CASE (177)
+					WRITE(*,*) " #  ERROR 177: Operation mode missing in '",TRIM(FILENAME_CLUSTER_INPUT),"'"
+					WRITE(*,*) "--> please add 'GLOBAL' or 'PAIRS' to the beginning of your cluster input file."
+				CASE (178)
+					WRITE(*,*) " #  ERROR 178: This option is not available in the current operation mode. This line is ignored."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
