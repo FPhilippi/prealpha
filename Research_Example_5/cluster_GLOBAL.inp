@@ -1,0 +1,12 @@
+GLOBAL
+
+nsteps 40
+sampling_interval 1
+print_spectators T
+print_statistics T
+print_step 1
+add_atom_index 1 1 # P atom
+add_atom_index 3 1 # Li atom
+single_cutoff 4.25 #use this cutoff
+quit
+

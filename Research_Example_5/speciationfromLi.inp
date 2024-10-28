@@ -1,0 +1,22 @@
+ 3 acceptors
+ 1 1 4.25 to phosphorus
+ 2 2 3.0
+ 2 5 3.0
+ 1 donor
+ 3 1 0.0
+ new_acceptor_group 2 #we open a new acceptor group for the glyme
+ assign_to_acceptor_group 2 #we assign the first...
+ assign_to_acceptor_group 5 #... and second oxygen to the same group
+ N_species 40 ### maximum number of species per acceptor molecule type
+ N_neighbours 40 ### maximum number of neighbour connections per acceptor molecule
+ nsteps 40
+ tmax 39
+ use_ccc T #we want to know about communal solvation
+ use_log T
+ sampling_interval 1
+ autocorrelation T
+ print_beads T ### show the connections as beads in the output .xyz files
+ quit
+
+ This is an input file to calculate speciation statistics, lifetimes, and dump structures.
+ To actually perform the implied calculation, it has to be referenced in 'general.inp'.

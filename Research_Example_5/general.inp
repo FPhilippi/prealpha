@@ -1,0 +1,28 @@
+ "LiG1G1G1DFP-noH-1ns.xyz" ### trajectory filename
+ "molecular.inp" ### inputfile for module MOLECULAR
+ "./" ### path to trajectory
+ "./" ### path to other input files
+ "./output/" ### output folder
+ set_threads 4 ### set the number of threads to use to 4
+ time_scaling 1000000 ### factor to scale the timestep with to arrive at a useful time unit.
+ cubic_box_edge 0.0 34.6155
+ dump_example ### write xyz files for all the molecule types
+ show_settings ### show the values of important variables/parameters at this point
+ parallel_operation T ### turn on parallel operation
+ sequential_read F ### Load trajectory into RAM
+ trajectory_type xyz ### which format the (input) trajectory has
+
+ # Here we do the cluster analysis!
+ set_prefix "PAIRS_"
+ cluster cluster_PAIRS.inp
+ set_prefix "GLOBAL_"
+ cluster cluster_GLOBAL.inp
+ 
+ # Here we do the speciation analysis!
+ set_prefix "All-to-Li_"
+ speciation "speciationtoLi.inp" ### calculate speciation statistics
+ set_prefix "Li-to-All_"
+ speciation "speciationfromLi.inp" ### calculate speciation statistics
+
+ quit
+ 

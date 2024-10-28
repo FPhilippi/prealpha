@@ -1,0 +1,22 @@
+ 1 acceptor
+ 3 1 0.0
+ 3 donors
+ 1 1 4.25 to phosphorus
+ 2 2 3.0
+ 2 5 3.0
+ new_donor_group 2
+ assign_to_donor_group 2
+ assign_to_donor_group 5
+ N_species 50 ### maximum number of species per acceptor molecule type
+ N_neighbours 40 ### maximum number of neighbour connections per acceptor molecule
+ nsteps 40
+ tmax 39
+ use_ccc T
+ use_log T
+ sampling_interval 1
+ autocorrelation T
+ print_beads T ### show the connections as beads in the output .xyz files
+ quit
+
+ This is an input file to calculate speciation statistics, lifetimes, and dump structures.
+ To actually perform the implied calculation, it has to be referenced in 'general.inp'.
