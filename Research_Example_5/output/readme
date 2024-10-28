@@ -1,0 +1,6 @@
+Here, your output should appear.
+There should be files starting with:
+- "GLOBAL"    : the output of the cluster analysis using Li-P distances of 4.25 as cutoff
+- "PAIRS"     : cluster analysis considering P-Li and O-Li pairs, distance = minimum from RDF
+- "All-to-Li" : Lithium centred species and statistics
+- "Li-to-All" : species and statistics centred on the anion (acceptor 1) and the glyme (acceptor 2)
