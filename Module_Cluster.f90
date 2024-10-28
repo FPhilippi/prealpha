@@ -135,6 +135,7 @@ MODULE CLUSTER ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						RETURN
 					ENDIF
 					CALL read_body()
+					CLOSE(UNIT=3)
 					ALLOCATE(squared_cutoff_list(N_cutoffs),STAT=allocstatus)
 					bytes_needed=bytes_needed+N_cutoffs !multiply with 4 bytes later
 					IF (allocstatus/=0) THEN

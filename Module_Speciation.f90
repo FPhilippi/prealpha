@@ -1305,19 +1305,19 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		IF (calculate_autocorrelation) THEN
 			maxmol=0
 			DO n_acceptor=1,N_acceptor_types,1
-				INQUIRE(UNIT=10+n_acceptor,OPENED=connected)
-				IF (connected) CALL report_error(27,exit_status=10+n_acceptor)
+				INQUIRE(UNIT=11+n_acceptor,OPENED=connected)
+				IF (connected) CALL report_error(27,exit_status=11+n_acceptor)
 				! WRITE(filename_time_series,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
 				! &//"acceptor",n_acceptor,"_time_series.dat"
-				OPEN(UNIT=10+n_acceptor,STATUS="SCRATCH",IOSTAT=ios)
+				OPEN(UNIT=11+n_acceptor,STATUS="SCRATCH",IOSTAT=ios)
 				IF (ios/=0) CALL report_error(26,exit_status=ios)
-				! WRITE(10+n_acceptor,'(" This file contains the species NUMBER (ordering is different to output!).")')
-				! WRITE(10+n_acceptor,'(" The leftmost column is the time, after that one column per molecule index.")')
-				! WRITE(10+n_acceptor,ADVANCE="NO",FMT='("timeline")')
+				! WRITE(11+n_acceptor,'(" This file contains the species NUMBER (ordering is different to output!).")')
+				! WRITE(11+n_acceptor,'(" The leftmost column is the time, after that one column per molecule index.")')
+				! WRITE(11+n_acceptor,ADVANCE="NO",FMT='("timeline")')
 				! DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
-					! WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')acceptor_molecule_index
+					! WRITE(11+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')acceptor_molecule_index
 				! ENDDO
-				WRITE(10+n_acceptor,*)
+				WRITE(11+n_acceptor,*)
 				IF (maxmol<give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index))&
 				&maxmol=give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index)
 			ENDDO
@@ -1595,13 +1595,13 @@ loop_donortypes:	DO n_donor=1,N_donor_types,1
 			IF (calculate_autocorrelation) THEN
 				!$OMP ORDERED
 				DO n_acceptor=1,N_acceptor_types,1
-					WRITE(10+n_acceptor,ADVANCE="NO",FMT='(I0)')&
+					WRITE(11+n_acceptor,ADVANCE="NO",FMT='(I0)')&
 					&(stepcounter-1)*TIME_SCALING_FACTOR
 					DO acceptor_molecule_index=1,give_number_of_molecules_per_step(acceptor_list(n_acceptor)%molecule_type_index),1
-						WRITE(10+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')&
+						WRITE(11+n_acceptor,ADVANCE="NO",FMT='(" ",I0)')&
 						&all_observed_species_for_timestep(n_acceptor,acceptor_molecule_index)
 					ENDDO
-					WRITE(10+n_acceptor,*)
+					WRITE(11+n_acceptor,*)
 				ENDDO
 				!$OMP END ORDERED
 			ENDIF
@@ -2218,30 +2218,30 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				ENDDO
 			ENDIF
 			IF (communal_cluster_correction) THEN
-				INQUIRE(UNIT=9,OPENED=connected)
-				IF (connected) CALL report_error(27,exit_status=9)
+				INQUIRE(UNIT=11,OPENED=connected)
+				IF (connected) CALL report_error(27,exit_status=11)
 				WRITE(filename_speciation_statistics,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
 				&//"acceptor",n_acceptor_in,"_speciation_statistics_table.dat"
-				OPEN(UNIT=9,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
+				OPEN(UNIT=11,FILE=TRIM(filename_speciation_statistics),IOSTAT=ios)
 				IF (ios/=0) CALL report_error(26,exit_status=ios)
-				WRITE(9,'(" This file contains the detailed communal cluster correction factors.")')
-				WRITE(9,ADVANCE="NO",FMT='(A15,A15)')"#species","<h>"
+				WRITE(11,'(" This file contains the detailed communal cluster correction factors.")')
+				WRITE(11,ADVANCE="NO",FMT='(A15,A15)')"#species","<h>"
 				DO n_donor=1,N_donor_types,1
-					WRITE(9,ADVANCE="NO",FMT='(A15)') TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
+					WRITE(11,ADVANCE="NO",FMT='(A15)') TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index))
 				ENDDO
-				WRITE(9,*) "sum_formula(formally)"
+				WRITE(11,*) "sum_formula(formally)"
 				IF (ALLOCATED(formal_sum_formula)) CALL report_error(0)
 				ALLOCATE(formal_sum_formula(N_donor_types),STAT=allocstatus)
 				IF (allocstatus/=0) CALL report_error(169,exit_status=allocstatus)
 				!is there a species #0?
 				IF (acceptor_list(n_acceptor_in)%no_neighbour_occurrences>0) THEN
-					WRITE(9,ADVANCE="NO",FMT='(I15)') 0
-					WRITE(9,ADVANCE="NO",FMT='(F15.10)')DFLOAT(acceptor_list(n_acceptor_in)%species_overflow+&
+					WRITE(11,ADVANCE="NO",FMT='(I15)') 0
+					WRITE(11,ADVANCE="NO",FMT='(F15.10)')DFLOAT(acceptor_list(n_acceptor_in)%species_overflow+&
 					&acceptor_list(n_acceptor_in)%no_neighbour_occurrences)/total_occurrence
 					DO n_donor=1,N_donor_types,1
-						WRITE(9,ADVANCE="NO",FMT='(E15.6)') 0.0d0
+						WRITE(11,ADVANCE="NO",FMT='(E15.6)') 0.0d0
 					ENDDO
-					WRITE(9,'(" [",A,"]")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+					WRITE(11,'(" [",A,"]")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
 				ENDIF
 			ENDIF
 			!Now, print species in order of decreasing occurrence
@@ -2277,8 +2277,8 @@ loop_connections:				DO connection_counter=0,extra_atom_entries_ref ! step 2)
 				ENDIF
 				IF (communal_cluster_correction) THEN
 					formal_sum_formula(:)=0
-					WRITE(9,ADVANCE="NO",FMT='(I15)') species_output_counter
-					WRITE(9,ADVANCE="NO",FMT='(F15.10)') FLOAT(&
+					WRITE(11,ADVANCE="NO",FMT='(I15)') species_output_counter
+					WRITE(11,ADVANCE="NO",FMT='(F15.10)') FLOAT(&
 					&acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%occurrences)/total_occurrence
 				ENDIF
 				IF (species_output_counter<6) THEN
@@ -2422,7 +2422,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 							acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
 							&communal_cluster_corrected_neighbour_count(n_donor,1)=0.0d0
 						ENDIF
-						WRITE(9,ADVANCE="NO",FMT='(E15.6)') acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
+						WRITE(11,ADVANCE="NO",FMT='(E15.6)') acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
 						&communal_cluster_corrected_neighbour_count(n_donor,1)*FLOAT(connections_perdonor)
 						IF (connections_perdonor>0) THEN
 							IF (acceptor_list(n_acceptor_in)%list_of_all_species(best_index)%&
@@ -2446,13 +2446,13 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 						ENDIF
 					ENDDO
 					!Write the "formal" sum formula, without the corrections
-					WRITE(9,ADVANCE="NO",FMT='(" [",A,"][")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
+					WRITE(11,ADVANCE="NO",FMT='(" [",A,"][")') TRIM(give_sum_formula(acceptor_list(n_acceptor_in)%molecule_type_index))
 					DO n_donor=1,N_donor_types,1
-						WRITE(9,ADVANCE="NO",FMT='("(",A,")",I0)')&
+						WRITE(11,ADVANCE="NO",FMT='("(",A,")",I0)')&
 						&TRIM(give_sum_formula(donor_list(n_donor)%molecule_type_index)),&
 						&formal_sum_formula(n_donor)
 					ENDDO
-					WRITE(9,'("]")')
+					WRITE(11,'("]")')
 				ENDIF
 				!print the first and last occurrence
 				!Note that we are still in the "best_index" loop
@@ -2879,8 +2879,8 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			ENDFILE 4
 			CLOSE(UNIT=4)
 			IF (communal_cluster_correction) THEN
-				ENDFILE 9
-				CLOSE(UNIT=9)
+				ENDFILE 11
+				CLOSE(UNIT=11)
 			ENDIF
 		END SUBROUTINE print_acceptor_summary
 
@@ -2918,11 +2918,11 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 			! OPEN(UNIT=3,FILE=TRIM(filename_time_series),IOSTAT=ios)
 			! IF (ios/=0) CALL report_error(26,exit_status=ios)
 			!the file was filled in the loop "DO stepcounter=1,nsteps,sampling_interval".
-			REWIND 10+n_acceptor_in
+			REWIND 11+n_acceptor_in
 			! WRITE(*,'("     Reading file ",A,"...")')"'"//TRIM(filename_time_series)//"'"
 			DO stepcounter=1,upper_limit,1
 				!the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
-				READ(10+n_acceptor_in,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
+				READ(11+n_acceptor_in,IOSTAT=ios,FMT=*) dummy,molecule_speciesarray(stepcounter,:)
 				!sanity check
 				IF (dummy/=(stepcounter-1)*TIME_SCALING_FACTOR*sampling_interval) CALL report_error(0)
 				IF (ios/=0) THEN
@@ -2931,7 +2931,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 					IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
 				ENDIF
 			ENDDO
-			CLOSE(UNIT=10+n_acceptor_in)
+			CLOSE(UNIT=11+n_acceptor_in)
 			!Count how many entries we will need. safer than me trying to get that number with maths.
 			timeline=0
 			entries=0
@@ -3241,7 +3241,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 				ENDIF
 				WRITE(*,'(" Starting speciation analysis.")')
 				CALL refresh_IO()
-				CALL trajectory_speciation_analysis_parallel() !opens UNIT=10+n_acceptor
+				CALL trajectory_speciation_analysis_parallel() !opens UNIT=11+n_acceptor
 				IF (neighbour_atom_overflow>0) CALL report_error(160,exit_status=neighbour_atom_overflow)
 				IF (ANY(acceptor_list(:)%species_overflow>0))&
 				&CALL report_error(161,exit_status=SUM(acceptor_list(:)%species_overflow))
@@ -3250,7 +3250,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 					WRITE(*,ADVANCE="NO",FMT='(" There was one acceptor: ")')
 					CALL print_acceptor_summary(1) !allocates average_h
 					IF (calculate_autocorrelation) THEN
-						CALL calculate_autocorrelation_function_from_master_array_LOG(1) !deallocates average_h, closes UNIT=10+n_acceptor
+						CALL calculate_autocorrelation_function_from_master_array_LOG(1) !deallocates average_h, closes UNIT=11+n_acceptor
 					ENDIF
 				ELSE
 					WRITE(*,'(" There were ",I0," acceptor molecules:")') N_acceptor_types
@@ -3259,7 +3259,7 @@ doublespecies:			DO species_molecules_doubles=species_molecules+1,acceptor_list(
 						&n_acceptor,N_acceptor_types
 						CALL print_acceptor_summary(n_acceptor)
 						IF (calculate_autocorrelation) THEN
-							CALL calculate_autocorrelation_function_from_master_array_LOG(n_acceptor) !deallocates average_h, closes UNIT=10+n_acceptor
+							CALL calculate_autocorrelation_function_from_master_array_LOG(n_acceptor) !deallocates average_h, closes UNIT=11+n_acceptor
 						ENDIF
 					ENDDO
 				ENDIF
