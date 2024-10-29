@@ -6,12 +6,14 @@ gfortran Module_Main.f90 Module_SETTINGS.o Module_Molecular.o Module_Angles.o Mo
 
 echo "./a.out is compiled"
 
-bash create_master
+bash create_master.sh
+
+cd ../
 
 gfortran -fopenmp pre-alpha.f03 -o prealpha_debug -g -fbacktrace # -Wall
 
 gfortran -fopenmp pre-alpha.f03 -o prealpha
 
-cp prealpha ~/bin/
-cp prealpha_debug ~/bin/
-export PATH=$PATH:/rdsgpfs/general/user/fdp18/home/bin
+#cp prealpha ~/bin/
+#cp prealpha_debug ~/bin/
+#export PATH=$PATH:/rdsgpfs/general/user/fdp18/home/bin

@@ -1,5 +1,8 @@
 # prealpha
-Tool to extract information from molecular dynamics trajectories
+Tool to extract information from molecular dynamics trajectories.
+
+For the impatient, compile with: gfortran -fopenmp pre-alpha.f03 -o prealpha
+
 For more information, see prealpha_manual.pdf, or simply contact me via:
 
 https://www.researchgate.net/profile/Frederik_Philippi
