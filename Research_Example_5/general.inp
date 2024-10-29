@@ -1,11 +1,11 @@
- "LiG1G1G1DFP-noH-1ns.xyz" ### trajectory filename
+ "LiG1G1G1DFP-noH-1ns-363K.xyz" ### trajectory filename
  "molecular.inp" ### inputfile for module MOLECULAR
  "./" ### path to trajectory
  "./" ### path to other input files
  "./output/" ### output folder
  set_threads 4 ### set the number of threads to use to 4
  time_scaling 1000000 ### factor to scale the timestep with to arrive at a useful time unit.
- cubic_box_edge 0.0 34.6155
+ cubic_box_edge 0.0 34.7853
  dump_example ### write xyz files for all the molecule types
  show_settings ### show the values of important variables/parameters at this point
  parallel_operation T ### turn on parallel operation
