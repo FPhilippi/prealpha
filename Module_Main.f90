@@ -18,6 +18,7 @@ CHARACTER(LEN=*),PARAMETER :: filename_msd="diffusion.inp" !diffusion module sta
 CHARACTER(LEN=*),PARAMETER :: filename_distribution="distribution.inp" !distribution module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_distance="distance.inp" !distance module standard filename
 CHARACTER(LEN=*),PARAMETER :: filename_speciation="speciation.inp"
+CHARACTER(LEN=*),PARAMETER :: filename_cluster="cluster.inp"
 INTEGER :: i,number_of_molecules!number_of_molecules is required for some safety checks, and initialised in generate_molecular_input()
 INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initialised in generate_molecular_input()
 	CALL set_default_masses()
@@ -553,8 +554,18 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"   Automatically identifies and reports species based on a set of acceptor and donor atoms."
 			PRINT *,"   Only one molecule type can be acceptor at a time, but many molecule types can be donors."
 			PRINT *,"   (you can specify several molecule_type_index as acceptors at once but they will be automatically separated)"
+			PRINT *,"   It is also possible to estimate communal solvation."
 			PRINT *,"   This feature also has the capability of calculating species lifetimes."
 			PRINT *,"   To this end, the intermittent binary autocorrelation function has been implemented too."
+			PRINT *
+			PRINT *,"   Cluster Analysis:"
+			PRINT *,"   This module performs a cluster analysis based on a set of atoms and cutoffs."
+			PRINT *,"   The analysis is inspired by the cluster analysis implemented in TRAVIS"
+			PRINT *,"   ( J. Chem. Inf. Model., 2022, 62, 5634–5644, dx.doi.org/10.1021/acs.jcim.2c01244"
+			PRINT *,"   which should be used first to get an idea about which cutoff distances are interesting)"
+			PRINT *,"   The benefit of this implementation is that average weights, and thus compositions, can be calculated"
+			PRINT *,"   as a function of size (=cluster members). In addition, the clusters can be written to .xyz files"
+			PRINT *,"   for later visualisation."
 			PRINT *
 			PRINT *,"Each of these blocks is treated as a distinct feature with its own input file."
 			PRINT *,"Some of the more demanding routines exist also in a parallelised version."
@@ -759,6 +770,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'reorientation' (requests feature 'reorientational time correlation')"
 			PRINT *," - 'distribution'  (requests feature 'polar/cylindrical distribution function) (simple mode available)"
 			PRINT *," - 'distance'      (requests feature 'Average distances') (simple mode available)"
+			PRINT *," - 'speciation'    (requests feature 'speciation')"
+			PRINT *," - 'cluster'       (requests feature 'cluster analysis')"
 			PRINT *,"   * diffusion_simple and alpha2_simple"
 			PRINT *
 			PRINT *,"Molecular input file:"
@@ -1101,6 +1114,45 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *," - 'tmax':"
 			PRINT *,"    Expects an integer, which is then taken as the maximum number of steps"
 			PRINT *,"    into the future for the time correlation function."
+			PRINT *
+			PRINT *,"Cluster Input File:"
+			PRINT *,"The first line must contain the operation model"
+			PRINT *,"Two operation modes are available:"
+			PRINT *," - 'GLOBAL': Uses a set of atoms, and a global cutoff applied to them."
+			PRINT *,"             The cutoff can be specified with the switches 'single_cutoff' and 'scan_cutoff'."
+			PRINT *,"             The atoms can be specified with the switches 'add_atom_index' and 'add_molecule_type'."
+			PRINT *," - 'PAIRS' : Uses pairs of atoms, each of which with their own cutoff."
+			PRINT *,"             Pairs are uniquely specified with the 'pair' switch."
+			PRINT *,"These switches are available:"
+			PRINT *," - 'quit' Terminates the analysis. Lines after this switch are ignored."
+			PRINT *," - 'nsteps': Followed by one integer, which is interpreted as the highest timestep number to consider."
+			PRINT *," - 'sampling_interval': Expects one integer - the sampling interval,"
+			PRINT *,"    i.e. every this many steps of the trajectory will be used."
+			PRINT *," - 'print_step': Expects one integer."
+			PRINT *,"    This step will be printed (separate files for monomers, dimers, 3-mers, etc etc.)."
+			PRINT *," - 'print_spectators': expects a logical ('T' or 'F'). If 'T',"
+			PRINT *,"    then the spectators are also printed at every requested 'print_step'."
+			PRINT *,"    Spectators are molecules which do not contribute atoms to the cluster analysis."
+			PRINT *," - 'print_statistics': expects a logical ('T' or 'F'). If 'T',"
+			PRINT *,"    then the detailed cluster statistics are calculated and printed."
+			PRINT *," - 'custom_weight': expects one real number, which will be used as weight for all atoms specified below."
+			PRINT *,"    (or until a new 'custom_weight' switch is encountered)"
+			PRINT *,"    This affects the weight_average in the statistics output."
+			PRINT *,"    By default, the full molecule charge is used, even if more than one atom is specified."
+			PRINT *,"    Only for the 'GLOBAL' operation mode:"
+			PRINT *,"      - 'add_atom_index': expects two integers:"
+			PRINT *,"         The molecule type index and the atom index of the atom to be considered for the analysis."
+			PRINT *,"      - 'add_molecule_type': expects one integer, which is the molecule type index of the molecule to consider."
+			PRINT *,"         All atoms of this molecule will be considered for the cluster analysis."
+			PRINT *,"      - 'single_cutoff': expects one real number, which is the cutoff to add to the list of cutoffs."
+			PRINT *,"      - 'scan_cutoff': expects two real numbers and one integer."
+			PRINT *,"         The real numbers are the lower and upper end for the cutoff scan, respectively."
+			PRINT *,"         The integer specifies the number of steps for the scan including the lower and upper ends."
+			PRINT *,"    Only for the 'PAIRS' operation mode:"
+			PRINT *,"      - 'pair': expects four integers and one real number:"
+			PRINT *,"         The molecule type index and the atom index of the first atom to be considered for the analysis."
+			PRINT *,"         Then, the molecule type index and the atom index of the second atom to be considered for the analysis."
+			PRINT *,"         Finally, as the real number, the corresponding cutoff for this pair of atoms."
 			PRINT *
 		END SUBROUTINE explain_input_files
 
@@ -1857,7 +1909,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				PRINT *," 30 - Write the full trajectory in a specific format."
 				PRINT *," 31 - calculate alpha2 non-gaussian parameter (including MSD)."
 				PRINT *," 32 - Calculate coordination species statistics and lifetimes."
-				SELECT CASE (user_input_integer(0,32))
+				PRINT *," 33 - Cluster analysis: cluster statistics and writing of cluster structures."
+				SELECT CASE (user_input_integer(0,33))
 				CASE (0)!done here.
 					EXIT
 				CASE (1)!dihedral condition analysis
@@ -2519,6 +2572,24 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 					ENDIF
 					CALL append_string('speciation "'//TRIM(OUTPUT_PREFIX)//&
 					&TRIM(filename_speciation)//'" ### calculate speciation statistics')
+					!enough information for the analysis.
+					SKIP_ANALYSIS=.FALSE.
+				CASE (33)!cluster module.
+					smalltask=.FALSE.
+					CALL append_string("set_prefix "//TRIM(OUTPUT_PREFIX)//" ### This prefix will be used subsequently.")
+					IF (own_prefix) THEN
+						own_prefix=.FALSE.
+					ELSE
+						analysis_number=analysis_number+1
+					ENDIF
+					CALL user_cluster_input(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps,filename_cluster)
+					IF (parallelisation_requested) THEN
+						CALL append_string("parallel_operation T ### turn on parallel operation")
+						WRITE(fstring,'("set_threads ",I0," ### set the number of threads to use to ",I0)') nthreads,nthreads
+						CALL append_string(fstring)
+					ENDIF
+					CALL append_string('cluster "'//TRIM(OUTPUT_PREFIX)//&
+					&TRIM(filename_cluster)//'" ### cluster analysis')
 					!enough information for the analysis.
 					SKIP_ANALYSIS=.FALSE.
 				CASE DEFAULT
@@ -3343,7 +3414,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "Speciation module invoked."
 					CALL perform_speciation_analysis()
 					CALL add_reference(6)
-				CASE ("cluster","cluster_analysis") !Module SPECIATION
+				CASE ("cluster","cluster_analysis") !Module CLUSTER
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,dummy
@@ -3605,6 +3676,7 @@ INTEGER :: ios,n
 			WRITE(*,*) '   DISTRIBUTION    "',TRIM(FILENAME_DISTRIBUTION_INPUT),'"'
 			WRITE(*,*) '   DISTANCE        "',TRIM(FILENAME_DISTANCE_INPUT),'"'
 			WRITE(*,*) '   SPECIATION      "',TRIM(FILENAME_SPECIATION_INPUT),'"'
+			WRITE(*,*) '   CLUSTER         "',TRIM(FILENAME_CLUSTER_INPUT),'"'
 			WRITE(*,*) "Paths:"
 			WRITE(*,*) '   TRAJECTORY "',TRIM(PATH_TRAJECTORY),'"'
 			WRITE(*,*) '   INPUT      "',TRIM(PATH_INPUT),'"'

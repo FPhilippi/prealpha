@@ -2,8 +2,8 @@
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) !RELEASEYEAR! Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
-	! This work is funded by the Japan Society for the Promotion of Science.
-	! This work is funded by the European Union.
+    ! This work is funded by the Japan Society for the Promotion of Science.
+    ! This work is funded by the European Union.
 
     ! This program is free software: you can redistribute it and/or modify
     ! it under the terms of the GNU General Public License as published by

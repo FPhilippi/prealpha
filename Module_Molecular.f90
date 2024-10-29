@@ -123,7 +123,6 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
 		LOGICAL,DIMENSION(:),ALLOCATABLE :: molecules_to_print
-		
 	END TYPE molecule
 	REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
 	REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
@@ -1653,6 +1652,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			WRITE(*,'("    ",A," ",I0)') "number_of_molecule_types  ",number_of_molecule_types
 			WRITE(*,'("    ",A," ",I0)') "number_of_drude_particles ",number_of_drude_particles
 			WRITE(*,'("    ",A," ",I0)') "number_of_steps           ",number_of_steps
+			WRITE(*,'("    ",A," ",I0)') "printmembers              ",printmember_output_atom_count
 			WRITE(*,'("    ",A," ",F5.3)')"drude_mass (Dalton)       ",drude_mass
 			IF (drudes_assigned) WRITE(*,*) "invoke 'show_drude' to print detailed drude particle assignments."
 			WRITE(*,*) "Memory requirement for storage of entire trajectory in RAM:"

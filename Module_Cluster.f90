@@ -52,14 +52,127 @@ MODULE CLUSTER ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 
 		!WRITING input file to unit 8, which shouldn't be open.
 		SUBROUTINE user_cluster_input&
-		&(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps_in,filename_speciation)
+		&(parallelisation_possible,parallelisation_requested,number_of_molecules,nsteps_in,filename_cluster)
 		IMPLICIT NONE
-		CHARACTER (LEN=*) :: filename_speciation
+		CHARACTER (LEN=*) :: filename_cluster
 		LOGICAL,INTENT(INOUT) :: parallelisation_possible,parallelisation_requested
 		INTEGER,INTENT(IN) :: nsteps_in,number_of_molecules
+		INTEGER :: molecule_type_index,molecule_type_index2,atom_index,atom_index2,inputinteger,ios,maxmol
 		REAL :: inputreal
 		LOGICAL :: connected
-
+			PRINT *,"Generating input for cluster analysis."
+			PRINT *,"A good range of analysis covers usually 1000 steps in total, distributed over the whole trajectory."
+			PRINT *,"Up to which step number of the trajectory do you want the analysis to run?"
+			WRITE(*,'(" The default is currently set to ",I0,".")') nsteps_default
+			nsteps=user_input_integer(1,nsteps_in)
+			PRINT *,"Every how many steps would you like to use?"
+			WRITE(*,'(A54,I0,A2)') " (Type '1' for full accuracy. The current default is '",sampling_interval_default,"')"
+			sampling_interval=user_input_integer(1,nsteps_in)
+			parallelisation_possible=.TRUE.
+			maxmol=number_of_molecules
+			IF (number_of_molecules==-1) maxmol=10000!unknown molecule number... expect the worst.
+			WRITE(*,FMT='(A)',ADVANCE="NO") " opening cluster input file..."
+			INQUIRE(UNIT=8,OPENED=connected)
+			IF (connected) CALL report_error(27,exit_status=8)
+			OPEN(UNIT=8,FILE=TRIM(PATH_INPUT)//TRIM(OUTPUT_PREFIX)//TRIM(filename_cluster),IOSTAT=ios)
+			IF (ios/=0) CALL report_error(46,exit_status=ios)
+			PRINT *,"There are two operation modes available:"
+			PRINT *,"  - GLOBAL uses a set of atoms, and a global cutoff applied to them."
+			PRINT *,"  - PAIRS uses pairs of atoms, each of which with their own cutoff."
+			PRINT *,"Do you want to use the GLOBAL operation mode (y) or PAIRS (n)?"
+			IF (user_input_logical()) THEN
+				operation_mode="GLOBAL"
+				WRITE(8,'(" GLOBAL ### using a set of atoms and one (or more) global cutoffs applied to them")')
+				DO
+					PRINT *,"Do you want to add a specific atom (y) or all atoms in a molecule (n)?"
+					IF (user_input_logical()) THEN
+						PRINT *,"Please enter the molecule_type_index of the molecule this atom belongs to:"
+						molecule_type_index=user_input_integer(1,maxmol)
+						PRINT *,"Please enter the atom_index of this atom:"
+						atom_index=user_input_integer(1,10000)
+						WRITE(8,'(" add_atom_index ",I0," ",I0)') molecule_type_index,atom_index
+					ELSE
+						PRINT *,"Please enter the molecule_type_index of the molecule this atom belongs to:"
+						molecule_type_index=user_input_integer(1,maxmol)
+						WRITE(8,'(" add_molecule_type ",I0)') molecule_type_index,atom_index
+					ENDIF
+					PRINT *,"Do you want to specify another atom/molecule? (y/n)"
+					IF (.NOT.(user_input_logical())) EXIT
+				ENDDO
+				PRINT *,"You now need to specify the global cutoffs."
+				PRINT *,"This can be done by giving values one by one, or by specifying a scan range."
+				DO
+					PRINT *,"Do you want to add a specific cutoff (y) or scan a range (n)?"
+					IF (user_input_logical()) THEN
+						PRINT *,"Please enter the cutoff you want to add to the analysis:"
+						inputreal=user_input_real(0.0,100000.0)
+						WRITE(8,ADVANCE="NO",FMT='(" single_cutoff ")')
+						WRITE(8,*)inputreal
+					ELSE
+						PRINT *,"You now need to specify the lower+upper bound for the scan and the number of scan steps."
+						PRINT *,"Please enter the lower bound for the cutoff scan:"
+						inputreal=user_input_real(0.0,100000.0)
+						WRITE(8,ADVANCE="NO",FMT='(" scan_cutoff",E14.6)') inputreal
+						PRINT *,"Please enter the upper bound for the cutoff scan:"
+						inputreal=user_input_real(0.0,100000.0)
+						WRITE(8,ADVANCE="NO",FMT='(E14.6)') inputreal
+						PRINT *,"Please enter the number of scan steps (including lower+upper bound):"
+						inputinteger=user_input_integer(1,1000)
+						WRITE(8,FMT='(" ",I0)') inputinteger
+					ENDIF
+					PRINT *,"Do you want to specify more cutoffs? (y/n)"
+					IF (.NOT.(user_input_logical())) EXIT
+				ENDDO
+			ELSE
+				operation_mode="PAIRS"
+				WRITE(8,'(" PAIRS ### using pairs of specific atoms and their respective cutoffs")')
+				PRINT *,"You now need to specify the pairs by giving the molecule_type_index and atom_index"
+				PRINT *,"for each of the two atom types involved."
+				DO
+					PRINT *,"Please enter the molecule_type_index for the first atom:"
+					molecule_type_index=user_input_integer(1,maxmol)
+					PRINT *,"Please enter the atom_index of the first atom:"
+					atom_index=user_input_integer(1,10000)
+					PRINT *,"Please enter the molecule_type_index for the second atom:"
+					molecule_type_index2=user_input_integer(1,maxmol)
+					PRINT *,"Please enter the atom_index of the second atom:"
+					atom_index2=user_input_integer(1,10000)
+					PRINT *,"Please enter the cutoff for this pair:"
+					inputreal=user_input_real(0.0,100000.0)
+					WRITE(8,ADVANCE="NO",FMT='(" pair ",I0," ",I0," ",I0," ",I0," ")') &
+					&molecule_type_index,atom_index,molecule_type_index2,atom_index2
+					WRITE(8,*)inputreal
+					PRINT *,"Do you want to specify another pair? (y/n)"
+					IF (.NOT.(user_input_logical())) EXIT
+				ENDDO
+			ENDIF
+			PRINT *,"It is possible to print the cluster separated by spectators, monomers, dimers, etc."
+			PRINT *,"Do you want to print the clusters in any step? (y/n)"
+			IF (user_input_logical()) THEN
+				DO
+					PRINT *,"Please enter the timestep you wish to print:"
+					inputinteger=user_input_integer(1,nsteps)
+					WRITE(8,FMT='(" print_step ",I0)') inputinteger
+					PRINT *,"Do you want to specify another step to print? (y/n)"
+					IF (.NOT.(user_input_logical())) EXIT
+				ENDDO
+				PRINT *,"Do you also want to print the spectators? (y/n)"
+				PRINT *,"(That is, molecules which do not contribute atoms to the cluster analysis.)"
+				WRITE(8,FMT='(" print_spectators ",L1)')user_input_logical()
+			ENDIF
+			PRINT *,"Do you want to print detailed statistics? (y/n)"
+			WRITE(8,'(" print_statistics ",L1)')user_input_logical()
+			IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
+				PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
+				parallelisation_requested=user_input_logical()
+			ENDIF
+			WRITE(8,*) "quit"
+			WRITE(8,*)
+			WRITE(8,*) "This is a cluster analysis input file."
+			WRITE(8,*) "To actually perform the implied calculation, it has to be referenced in 'general.inp'."
+			ENDFILE 8
+			CLOSE(UNIT=8)
+			WRITE(*,*) "done"
 		END SUBROUTINE user_cluster_input
 
 		SUBROUTINE set_defaults()!setting defaults, so that there are no bad surprises between subsequent calls.
