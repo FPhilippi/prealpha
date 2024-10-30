@@ -1,4 +1,4 @@
-! RELEASED ON 29_Oct_2024 AT 17:30
+! RELEASED ON 30_Oct_2024 AT 12:46
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2024 Frederik Philippi
@@ -1816,7 +1816,8 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
       molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
      ELSE
       molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
-      printmember_output_atom_count=printmember_output_atom_count+1
+      printmember_output_atom_count=printmember_output_atom_count+&
+      &give_number_of_atoms_per_molecule(molecule_type_index)
      ENDIF
     ENDDO
    ENDDO
@@ -21055,7 +21056,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2024 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 29_Oct_2024"
+ PRINT *, "   Date of Release: 30_Oct_2024"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
