@@ -1,3 +1,7 @@
+30.10.2024:
+	Bug fixes
+29.10.2024:
+	Decluttered the repository, moved separate module files in 'Development'.
 28.10.2024:
 	Cluster analysis and peripherals debugged.
 	Two operation modes available, PAIRS and GLOBAL.
