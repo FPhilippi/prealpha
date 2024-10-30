@@ -218,7 +218,8 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 						molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
 					ELSE
 						molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
-						printmember_output_atom_count=printmember_output_atom_count+1
+						printmember_output_atom_count=printmember_output_atom_count+&
+						&give_number_of_atoms_per_molecule(molecule_type_index)
 					ENDIF
 				ENDDO
 			ENDDO
