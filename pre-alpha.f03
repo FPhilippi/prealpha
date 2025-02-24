@@ -1,7 +1,7 @@
-! RELEASED ON 30_Oct_2024 AT 12:46
+! RELEASED ON 24_Feb_2025 AT 19:10
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
-    ! Copyright (C) 2024 Frederik Philippi
+    ! Copyright (C) 2025 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
     ! This work is funded by the Japan Society for the Promotion of Science.
     ! This work is funded by the European Union.
@@ -401,8 +401,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  Results might be biased!"
      WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
     CASE (4)
-     WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge: unknown element"
-     WRITE(*,*) " #  If necessary, add element to function atomic_weight and atomic_charge in module MOLECULAR"
+     WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge/element_name_full: unknown element"
+     WRITE(*,*) " #  If necessary, add element to the module MOLECULAR."
      CALL finalise_global()
      STOP
     CASE (5)
@@ -1415,7 +1415,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
-MODULE ANGLES ! Copyright (C) 2024 Frederik Philippi
+MODULE ANGLES ! Copyright (C) 2025 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -1598,80 +1598,352 @@ MODULE ANGLES ! Copyright (C) 2024 Frederik Philippi
 END MODULE ANGLES
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This module is responsible for handling the trajectory and passing information to other modules.
-MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
+MODULE MOLECULAR ! Copyright (C) 2025 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
  !parameter
- REAL,PARAMETER :: default_mass_hydrogen=01.008
- REAL,PARAMETER :: default_mass_fluorine=18.998
- REAL,PARAMETER :: default_mass_boron=10.81
- REAL,PARAMETER :: default_mass_chlorine=35.45
- REAL,PARAMETER :: default_mass_bromine=79.904
- REAL,PARAMETER :: default_mass_iodine=126.904
- REAL,PARAMETER :: default_mass_nitrogen=14.007
- REAL,PARAMETER :: default_mass_oxygen=15.999
- REAL,PARAMETER :: default_mass_carbon=12.011
- REAL,PARAMETER :: default_mass_sulfur=32.066
- REAL,PARAMETER :: default_mass_phosphorus=30.974
- REAL,PARAMETER :: default_mass_lithium=6.94
- REAL,PARAMETER :: default_mass_sodium=22.990
- REAL,PARAMETER :: default_mass_magnesium=24.305
- REAL,PARAMETER :: default_mass_zinc=65.38
- REAL,PARAMETER :: default_mass_calcium=40.078
+ REAL,PARAMETER :: default_mass_H=1.008
+ REAL,PARAMETER :: default_mass_He=4.002
+ REAL,PARAMETER :: default_mass_Li=6.94
+ REAL,PARAMETER :: default_mass_Be=9.012
+ REAL,PARAMETER :: default_mass_B=10.81
+ REAL,PARAMETER :: default_mass_C=12.011
+ REAL,PARAMETER :: default_mass_N=14.007
+ REAL,PARAMETER :: default_mass_O=15.999
+ REAL,PARAMETER :: default_mass_F=18.998
+ REAL,PARAMETER :: default_mass_Ne=20.1797
+ REAL,PARAMETER :: default_mass_Na=22.989
+ REAL,PARAMETER :: default_mass_Mg=24.305
+ REAL,PARAMETER :: default_mass_Al=26.981
+ REAL,PARAMETER :: default_mass_Si=28.085
+ REAL,PARAMETER :: default_mass_P=30.973762
+ REAL,PARAMETER :: default_mass_S=32.06
+ REAL,PARAMETER :: default_mass_Cl=35.45
+ REAL,PARAMETER :: default_mass_Ar=39.95
+ REAL,PARAMETER :: default_mass_K=39.0983
+ REAL,PARAMETER :: default_mass_Ca=40.078
+ REAL,PARAMETER :: default_mass_Sc=44.955
+ REAL,PARAMETER :: default_mass_Ti=47.867
+ REAL,PARAMETER :: default_mass_V=50.9415
+ REAL,PARAMETER :: default_mass_Cr=51.9961
+ REAL,PARAMETER :: default_mass_Mn=54.938
+ REAL,PARAMETER :: default_mass_Fe=55.845
+ REAL,PARAMETER :: default_mass_Co=58.933
+ REAL,PARAMETER :: default_mass_Ni=58.6934
+ REAL,PARAMETER :: default_mass_Cu=63.546
+ REAL,PARAMETER :: default_mass_Zn=65.38
+ REAL,PARAMETER :: default_mass_Ga=69.723
+ REAL,PARAMETER :: default_mass_Ge=72.63
+ REAL,PARAMETER :: default_mass_As=74.921
+ REAL,PARAMETER :: default_mass_Se=78.971
+ REAL,PARAMETER :: default_mass_Br=79.904
+ REAL,PARAMETER :: default_mass_Kr=83.798
+ REAL,PARAMETER :: default_mass_Rb=85.4678
+ REAL,PARAMETER :: default_mass_Sr=87.62
+ REAL,PARAMETER :: default_mass_Y=88.905
+ REAL,PARAMETER :: default_mass_Zr=91.222
+ REAL,PARAMETER :: default_mass_Nb=92.906
+ REAL,PARAMETER :: default_mass_Mo=95.95
+ REAL,PARAMETER :: default_mass_Ru=101.07
+ REAL,PARAMETER :: default_mass_Rh=102.905
+ REAL,PARAMETER :: default_mass_Pd=106.42
+ REAL,PARAMETER :: default_mass_Ag=107.8682
+ REAL,PARAMETER :: default_mass_Cd=112.414
+ REAL,PARAMETER :: default_mass_In=114.818
+ REAL,PARAMETER :: default_mass_Sn=118.71
+ REAL,PARAMETER :: default_mass_Sb=121.76
+ REAL,PARAMETER :: default_mass_Te=127.6
+ REAL,PARAMETER :: default_mass_I=126.904
+ REAL,PARAMETER :: default_mass_Xe=131.293
+ REAL,PARAMETER :: default_mass_Cs=132.905
+ REAL,PARAMETER :: default_mass_Ba=137.327
+ REAL,PARAMETER :: default_mass_La=138.905
+ REAL,PARAMETER :: default_mass_Ce=140.116
+ REAL,PARAMETER :: default_mass_Pr=140.907
+ REAL,PARAMETER :: default_mass_Nd=144.242
+ REAL,PARAMETER :: default_mass_Sm=150.36
+ REAL,PARAMETER :: default_mass_Eu=151.964
+ REAL,PARAMETER :: default_mass_Gd=157.249
+ REAL,PARAMETER :: default_mass_Tb=158.925
+ REAL,PARAMETER :: default_mass_Dy=162.5
+ REAL,PARAMETER :: default_mass_Ho=164.93
+ REAL,PARAMETER :: default_mass_Er=167.259
+ REAL,PARAMETER :: default_mass_Tm=168.934
+ REAL,PARAMETER :: default_mass_Yb=173.045
+ REAL,PARAMETER :: default_mass_Lu=174.966
+ REAL,PARAMETER :: default_mass_Hf=178.486
+ REAL,PARAMETER :: default_mass_Ta=180.947
+ REAL,PARAMETER :: default_mass_W=183.84
+ REAL,PARAMETER :: default_mass_Re=186.207
+ REAL,PARAMETER :: default_mass_Os=190.23
+ REAL,PARAMETER :: default_mass_Ir=192.217
+ REAL,PARAMETER :: default_mass_Pt=195.084
+ REAL,PARAMETER :: default_mass_Au=196.966
+ REAL,PARAMETER :: default_mass_Hg=200.592
+ REAL,PARAMETER :: default_mass_Tl=204.38
+ REAL,PARAMETER :: default_mass_Pb=207.2
+ REAL,PARAMETER :: default_mass_Bi=208.98
+ REAL,PARAMETER :: default_mass_Th=232.0377
+ REAL,PARAMETER :: default_mass_Pa=231.035
+ REAL,PARAMETER :: default_mass_U=238.028
 
- REAL,PARAMETER :: default_charge_hydrogen=0.0
- REAL,PARAMETER :: default_charge_fluorine=0.0
- REAL,PARAMETER :: default_charge_boron=0.0
- REAL,PARAMETER :: default_charge_chlorine=0.0
- REAL,PARAMETER :: default_charge_bromine=0.0
- REAL,PARAMETER :: default_charge_sodium=0.0
- REAL,PARAMETER :: default_charge_iodine=0.0
- REAL,PARAMETER :: default_charge_nitrogen=0.0
- REAL,PARAMETER :: default_charge_oxygen=0.0
- REAL,PARAMETER :: default_charge_carbon=0.0
- REAL,PARAMETER :: default_charge_sulfur=0.0
- REAL,PARAMETER :: default_charge_phosphorus=0.0
- REAL,PARAMETER :: default_charge_lithium=0.0
- REAL,PARAMETER :: default_charge_magnesium=0.0
- REAL,PARAMETER :: default_charge_zinc=0.0
- REAL,PARAMETER :: default_charge_calcium=0.0
+ REAL,PARAMETER :: default_charge_H=0.0
+ REAL,PARAMETER :: default_charge_He=0.0
+ REAL,PARAMETER :: default_charge_Li=0.0
+ REAL,PARAMETER :: default_charge_Be=0.0
+ REAL,PARAMETER :: default_charge_B=0.0
+ REAL,PARAMETER :: default_charge_C=0.0
+ REAL,PARAMETER :: default_charge_N=0.0
+ REAL,PARAMETER :: default_charge_O=0.0
+ REAL,PARAMETER :: default_charge_F=0.0
+ REAL,PARAMETER :: default_charge_Ne=0.0
+ REAL,PARAMETER :: default_charge_Na=0.0
+ REAL,PARAMETER :: default_charge_Mg=0.0
+ REAL,PARAMETER :: default_charge_Al=0.0
+ REAL,PARAMETER :: default_charge_Si=0.0
+ REAL,PARAMETER :: default_charge_P=0.0
+ REAL,PARAMETER :: default_charge_S=0.0
+ REAL,PARAMETER :: default_charge_Cl=0.0
+ REAL,PARAMETER :: default_charge_Ar=0.0
+ REAL,PARAMETER :: default_charge_K=0.0
+ REAL,PARAMETER :: default_charge_Ca=0.0
+ REAL,PARAMETER :: default_charge_Sc=0.0
+ REAL,PARAMETER :: default_charge_Ti=0.0
+ REAL,PARAMETER :: default_charge_V=0.0
+ REAL,PARAMETER :: default_charge_Cr=0.0
+ REAL,PARAMETER :: default_charge_Mn=0.0
+ REAL,PARAMETER :: default_charge_Fe=0.0
+ REAL,PARAMETER :: default_charge_Co=0.0
+ REAL,PARAMETER :: default_charge_Ni=0.0
+ REAL,PARAMETER :: default_charge_Cu=0.0
+ REAL,PARAMETER :: default_charge_Zn=0.0
+ REAL,PARAMETER :: default_charge_Ga=0.0
+ REAL,PARAMETER :: default_charge_Ge=0.0
+ REAL,PARAMETER :: default_charge_As=0.0
+ REAL,PARAMETER :: default_charge_Se=0.0
+ REAL,PARAMETER :: default_charge_Br=0.0
+ REAL,PARAMETER :: default_charge_Kr=0.0
+ REAL,PARAMETER :: default_charge_Rb=0.0
+ REAL,PARAMETER :: default_charge_Sr=0.0
+ REAL,PARAMETER :: default_charge_Y=0.0
+ REAL,PARAMETER :: default_charge_Zr=0.0
+ REAL,PARAMETER :: default_charge_Nb=0.0
+ REAL,PARAMETER :: default_charge_Mo=0.0
+ REAL,PARAMETER :: default_charge_Ru=0.0
+ REAL,PARAMETER :: default_charge_Rh=0.0
+ REAL,PARAMETER :: default_charge_Pd=0.0
+ REAL,PARAMETER :: default_charge_Ag=0.0
+ REAL,PARAMETER :: default_charge_Cd=0.0
+ REAL,PARAMETER :: default_charge_In=0.0
+ REAL,PARAMETER :: default_charge_Sn=0.0
+ REAL,PARAMETER :: default_charge_Sb=0.0
+ REAL,PARAMETER :: default_charge_Te=0.0
+ REAL,PARAMETER :: default_charge_I=0.0
+ REAL,PARAMETER :: default_charge_Xe=0.0
+ REAL,PARAMETER :: default_charge_Cs=0.0
+ REAL,PARAMETER :: default_charge_Ba=0.0
+ REAL,PARAMETER :: default_charge_La=0.0
+ REAL,PARAMETER :: default_charge_Ce=0.0
+ REAL,PARAMETER :: default_charge_Pr=0.0
+ REAL,PARAMETER :: default_charge_Nd=0.0
+ REAL,PARAMETER :: default_charge_Sm=0.0
+ REAL,PARAMETER :: default_charge_Eu=0.0
+ REAL,PARAMETER :: default_charge_Gd=0.0
+ REAL,PARAMETER :: default_charge_Tb=0.0
+ REAL,PARAMETER :: default_charge_Dy=0.0
+ REAL,PARAMETER :: default_charge_Ho=0.0
+ REAL,PARAMETER :: default_charge_Er=0.0
+ REAL,PARAMETER :: default_charge_Tm=0.0
+ REAL,PARAMETER :: default_charge_Yb=0.0
+ REAL,PARAMETER :: default_charge_Lu=0.0
+ REAL,PARAMETER :: default_charge_Hf=0.0
+ REAL,PARAMETER :: default_charge_Ta=0.0
+ REAL,PARAMETER :: default_charge_W=0.0
+ REAL,PARAMETER :: default_charge_Re=0.0
+ REAL,PARAMETER :: default_charge_Os=0.0
+ REAL,PARAMETER :: default_charge_Ir=0.0
+ REAL,PARAMETER :: default_charge_Pt=0.0
+ REAL,PARAMETER :: default_charge_Au=0.0
+ REAL,PARAMETER :: default_charge_Hg=0.0
+ REAL,PARAMETER :: default_charge_Tl=0.0
+ REAL,PARAMETER :: default_charge_Pb=0.0
+ REAL,PARAMETER :: default_charge_Bi=0.0
+ REAL,PARAMETER :: default_charge_Th=0.0
+ REAL,PARAMETER :: default_charge_Pa=0.0
+ REAL,PARAMETER :: default_charge_U=0.0
 
  !variables
- REAL :: charge_hydrogen=default_charge_hydrogen
- REAL :: charge_fluorine=default_charge_fluorine
- REAL :: charge_boron=default_charge_boron
- REAL :: charge_chlorine=default_charge_chlorine
- REAL :: charge_bromine=default_charge_bromine
- REAL :: charge_iodine=default_charge_iodine
- REAL :: charge_nitrogen=default_charge_nitrogen
- REAL :: charge_oxygen=default_charge_oxygen
- REAL :: charge_carbon=default_charge_carbon
- REAL :: charge_sulfur=default_charge_sulfur
- REAL :: charge_phosphorus=default_charge_phosphorus
- REAL :: charge_lithium=default_charge_lithium
- REAL :: charge_sodium=default_charge_sodium
- REAL :: charge_magnesium=default_charge_magnesium
- REAL :: charge_calcium=default_charge_calcium
- REAL :: charge_zinc=default_charge_zinc
+ REAL :: charge_H=default_charge_H
+ REAL :: charge_He=default_charge_He
+ REAL :: charge_Li=default_charge_Li
+ REAL :: charge_Be=default_charge_Be
+ REAL :: charge_B=default_charge_B
+ REAL :: charge_C=default_charge_C
+ REAL :: charge_N=default_charge_N
+ REAL :: charge_O=default_charge_O
+ REAL :: charge_F=default_charge_F
+ REAL :: charge_Ne=default_charge_Ne
+ REAL :: charge_Na=default_charge_Na
+ REAL :: charge_Mg=default_charge_Mg
+ REAL :: charge_Al=default_charge_Al
+ REAL :: charge_Si=default_charge_Si
+ REAL :: charge_P=default_charge_P
+ REAL :: charge_S=default_charge_S
+ REAL :: charge_Cl=default_charge_Cl
+ REAL :: charge_Ar=default_charge_Ar
+ REAL :: charge_K=default_charge_K
+ REAL :: charge_Ca=default_charge_Ca
+ REAL :: charge_Sc=default_charge_Sc
+ REAL :: charge_Ti=default_charge_Ti
+ REAL :: charge_V=default_charge_V
+ REAL :: charge_Cr=default_charge_Cr
+ REAL :: charge_Mn=default_charge_Mn
+ REAL :: charge_Fe=default_charge_Fe
+ REAL :: charge_Co=default_charge_Co
+ REAL :: charge_Ni=default_charge_Ni
+ REAL :: charge_Cu=default_charge_Cu
+ REAL :: charge_Zn=default_charge_Zn
+ REAL :: charge_Ga=default_charge_Ga
+ REAL :: charge_Ge=default_charge_Ge
+ REAL :: charge_As=default_charge_As
+ REAL :: charge_Se=default_charge_Se
+ REAL :: charge_Br=default_charge_Br
+ REAL :: charge_Kr=default_charge_Kr
+ REAL :: charge_Rb=default_charge_Rb
+ REAL :: charge_Sr=default_charge_Sr
+ REAL :: charge_Y=default_charge_Y
+ REAL :: charge_Zr=default_charge_Zr
+ REAL :: charge_Nb=default_charge_Nb
+ REAL :: charge_Mo=default_charge_Mo
+ REAL :: charge_Ru=default_charge_Ru
+ REAL :: charge_Rh=default_charge_Rh
+ REAL :: charge_Pd=default_charge_Pd
+ REAL :: charge_Ag=default_charge_Ag
+ REAL :: charge_Cd=default_charge_Cd
+ REAL :: charge_In=default_charge_In
+ REAL :: charge_Sn=default_charge_Sn
+ REAL :: charge_Sb=default_charge_Sb
+ REAL :: charge_Te=default_charge_Te
+ REAL :: charge_I=default_charge_I
+ REAL :: charge_Xe=default_charge_Xe
+ REAL :: charge_Cs=default_charge_Cs
+ REAL :: charge_Ba=default_charge_Ba
+ REAL :: charge_La=default_charge_La
+ REAL :: charge_Ce=default_charge_Ce
+ REAL :: charge_Pr=default_charge_Pr
+ REAL :: charge_Nd=default_charge_Nd
+ REAL :: charge_Sm=default_charge_Sm
+ REAL :: charge_Eu=default_charge_Eu
+ REAL :: charge_Gd=default_charge_Gd
+ REAL :: charge_Tb=default_charge_Tb
+ REAL :: charge_Dy=default_charge_Dy
+ REAL :: charge_Ho=default_charge_Ho
+ REAL :: charge_Er=default_charge_Er
+ REAL :: charge_Tm=default_charge_Tm
+ REAL :: charge_Yb=default_charge_Yb
+ REAL :: charge_Lu=default_charge_Lu
+ REAL :: charge_Hf=default_charge_Hf
+ REAL :: charge_Ta=default_charge_Ta
+ REAL :: charge_W=default_charge_W
+ REAL :: charge_Re=default_charge_Re
+ REAL :: charge_Os=default_charge_Os
+ REAL :: charge_Ir=default_charge_Ir
+ REAL :: charge_Pt=default_charge_Pt
+ REAL :: charge_Au=default_charge_Au
+ REAL :: charge_Hg=default_charge_Hg
+ REAL :: charge_Tl=default_charge_Tl
+ REAL :: charge_Pb=default_charge_Pb
+ REAL :: charge_Bi=default_charge_Bi
+ REAL :: charge_Th=default_charge_Th
+ REAL :: charge_Pa=default_charge_Pa
+ REAL :: charge_U=default_charge_U
 
- REAL :: mass_hydrogen=default_mass_hydrogen
- REAL :: mass_fluorine=default_mass_fluorine
- REAL :: mass_boron=default_mass_boron
- REAL :: mass_chlorine=default_mass_chlorine
- REAL :: mass_bromine=default_mass_bromine
- REAL :: mass_iodine=default_mass_iodine
- REAL :: mass_nitrogen=default_mass_nitrogen
- REAL :: mass_oxygen=default_mass_oxygen
- REAL :: mass_carbon=default_mass_carbon
- REAL :: mass_sulfur=default_mass_sulfur
- REAL :: mass_phosphorus=default_mass_phosphorus
- REAL :: mass_lithium=default_mass_lithium
- REAL :: mass_sodium=default_mass_sodium
- REAL :: mass_magnesium=default_mass_magnesium
- REAL :: mass_calcium=default_mass_calcium
- REAL :: mass_zinc=default_mass_zinc
+ REAL :: mass_H=default_mass_H
+ REAL :: mass_He=default_mass_He
+ REAL :: mass_Li=default_mass_Li
+ REAL :: mass_Be=default_mass_Be
+ REAL :: mass_B=default_mass_B
+ REAL :: mass_C=default_mass_C
+ REAL :: mass_N=default_mass_N
+ REAL :: mass_O=default_mass_O
+ REAL :: mass_F=default_mass_F
+ REAL :: mass_Ne=default_mass_Ne
+ REAL :: mass_Na=default_mass_Na
+ REAL :: mass_Mg=default_mass_Mg
+ REAL :: mass_Al=default_mass_Al
+ REAL :: mass_Si=default_mass_Si
+ REAL :: mass_P=default_mass_P
+ REAL :: mass_S=default_mass_S
+ REAL :: mass_Cl=default_mass_Cl
+ REAL :: mass_Ar=default_mass_Ar
+ REAL :: mass_K=default_mass_K
+ REAL :: mass_Ca=default_mass_Ca
+ REAL :: mass_Sc=default_mass_Sc
+ REAL :: mass_Ti=default_mass_Ti
+ REAL :: mass_V=default_mass_V
+ REAL :: mass_Cr=default_mass_Cr
+ REAL :: mass_Mn=default_mass_Mn
+ REAL :: mass_Fe=default_mass_Fe
+ REAL :: mass_Co=default_mass_Co
+ REAL :: mass_Ni=default_mass_Ni
+ REAL :: mass_Cu=default_mass_Cu
+ REAL :: mass_Zn=default_mass_Zn
+ REAL :: mass_Ga=default_mass_Ga
+ REAL :: mass_Ge=default_mass_Ge
+ REAL :: mass_As=default_mass_As
+ REAL :: mass_Se=default_mass_Se
+ REAL :: mass_Br=default_mass_Br
+ REAL :: mass_Kr=default_mass_Kr
+ REAL :: mass_Rb=default_mass_Rb
+ REAL :: mass_Sr=default_mass_Sr
+ REAL :: mass_Y=default_mass_Y
+ REAL :: mass_Zr=default_mass_Zr
+ REAL :: mass_Nb=default_mass_Nb
+ REAL :: mass_Mo=default_mass_Mo
+ REAL :: mass_Ru=default_mass_Ru
+ REAL :: mass_Rh=default_mass_Rh
+ REAL :: mass_Pd=default_mass_Pd
+ REAL :: mass_Ag=default_mass_Ag
+ REAL :: mass_Cd=default_mass_Cd
+ REAL :: mass_In=default_mass_In
+ REAL :: mass_Sn=default_mass_Sn
+ REAL :: mass_Sb=default_mass_Sb
+ REAL :: mass_Te=default_mass_Te
+ REAL :: mass_I=default_mass_I
+ REAL :: mass_Xe=default_mass_Xe
+ REAL :: mass_Cs=default_mass_Cs
+ REAL :: mass_Ba=default_mass_Ba
+ REAL :: mass_La=default_mass_La
+ REAL :: mass_Ce=default_mass_Ce
+ REAL :: mass_Pr=default_mass_Pr
+ REAL :: mass_Nd=default_mass_Nd
+ REAL :: mass_Sm=default_mass_Sm
+ REAL :: mass_Eu=default_mass_Eu
+ REAL :: mass_Gd=default_mass_Gd
+ REAL :: mass_Tb=default_mass_Tb
+ REAL :: mass_Dy=default_mass_Dy
+ REAL :: mass_Ho=default_mass_Ho
+ REAL :: mass_Er=default_mass_Er
+ REAL :: mass_Tm=default_mass_Tm
+ REAL :: mass_Yb=default_mass_Yb
+ REAL :: mass_Lu=default_mass_Lu
+ REAL :: mass_Hf=default_mass_Hf
+ REAL :: mass_Ta=default_mass_Ta
+ REAL :: mass_W=default_mass_W
+ REAL :: mass_Re=default_mass_Re
+ REAL :: mass_Os=default_mass_Os
+ REAL :: mass_Ir=default_mass_Ir
+ REAL :: mass_Pt=default_mass_Pt
+ REAL :: mass_Au=default_mass_Au
+ REAL :: mass_Hg=default_mass_Hg
+ REAL :: mass_Tl=default_mass_Tl
+ REAL :: mass_Pb=default_mass_Pb
+ REAL :: mass_Bi=default_mass_Bi
+ REAL :: mass_Th=default_mass_Th
+ REAL :: mass_Pa=default_mass_Pa
+ REAL :: mass_U=default_mass_U
  LOGICAL :: fragments_initialised=.FALSE.!Status boolean, is true if the fragment_list has been initialised.
  !fragment lists: store the atom_indices of the fragments.
  INTEGER,DIMENSION(:),ALLOCATABLE :: fragment_list_base(:) !List of centre-of-mass fragments (defined as atom_indices) for base atom
@@ -1908,58 +2180,194 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
 
   SUBROUTINE set_default_masses()
   IMPLICIT NONE
-   mass_hydrogen=default_mass_hydrogen
-   mass_fluorine=default_mass_fluorine
-   mass_boron=default_mass_boron
-   mass_chlorine=default_mass_chlorine
-   mass_bromine=default_mass_bromine
-   mass_iodine=default_mass_iodine
-   mass_nitrogen=default_mass_nitrogen
-   mass_oxygen=default_mass_oxygen
-   mass_carbon=default_mass_carbon
-   mass_sulfur=default_mass_sulfur
-   mass_phosphorus=default_mass_phosphorus
-   mass_lithium=default_mass_lithium
-   mass_sodium=default_mass_sodium
-   mass_magnesium=default_mass_magnesium
-   mass_calcium=default_mass_calcium
-   mass_zinc=default_mass_zinc
+   mass_H=default_mass_H
+   mass_He=default_mass_He
+   mass_Li=default_mass_Li
+   mass_Be=default_mass_Be
+   mass_B=default_mass_B
+   mass_C=default_mass_C
+   mass_N=default_mass_N
+   mass_O=default_mass_O
+   mass_F=default_mass_F
+   mass_Ne=default_mass_Ne
+   mass_Na=default_mass_Na
+   mass_Mg=default_mass_Mg
+   mass_Al=default_mass_Al
+   mass_Si=default_mass_Si
+   mass_P=default_mass_P
+   mass_S=default_mass_S
+   mass_Cl=default_mass_Cl
+   mass_Ar=default_mass_Ar
+   mass_K=default_mass_K
+   mass_Ca=default_mass_Ca
+   mass_Sc=default_mass_Sc
+   mass_Ti=default_mass_Ti
+   mass_V=default_mass_V
+   mass_Cr=default_mass_Cr
+   mass_Mn=default_mass_Mn
+   mass_Fe=default_mass_Fe
+   mass_Co=default_mass_Co
+   mass_Ni=default_mass_Ni
+   mass_Cu=default_mass_Cu
+   mass_Zn=default_mass_Zn
+   mass_Ga=default_mass_Ga
+   mass_Ge=default_mass_Ge
+   mass_As=default_mass_As
+   mass_Se=default_mass_Se
+   mass_Br=default_mass_Br
+   mass_Kr=default_mass_Kr
+   mass_Rb=default_mass_Rb
+   mass_Sr=default_mass_Sr
+   mass_Y=default_mass_Y
+   mass_Zr=default_mass_Zr
+   mass_Nb=default_mass_Nb
+   mass_Mo=default_mass_Mo
+   mass_Ru=default_mass_Ru
+   mass_Rh=default_mass_Rh
+   mass_Pd=default_mass_Pd
+   mass_Ag=default_mass_Ag
+   mass_Cd=default_mass_Cd
+   mass_In=default_mass_In
+   mass_Sn=default_mass_Sn
+   mass_Sb=default_mass_Sb
+   mass_Te=default_mass_Te
+   mass_I=default_mass_I
+   mass_Xe=default_mass_Xe
+   mass_Cs=default_mass_Cs
+   mass_Ba=default_mass_Ba
+   mass_La=default_mass_La
+   mass_Ce=default_mass_Ce
+   mass_Pr=default_mass_Pr
+   mass_Nd=default_mass_Nd
+   mass_Sm=default_mass_Sm
+   mass_Eu=default_mass_Eu
+   mass_Gd=default_mass_Gd
+   mass_Tb=default_mass_Tb
+   mass_Dy=default_mass_Dy
+   mass_Ho=default_mass_Ho
+   mass_Er=default_mass_Er
+   mass_Tm=default_mass_Tm
+   mass_Yb=default_mass_Yb
+   mass_Lu=default_mass_Lu
+   mass_Hf=default_mass_Hf
+   mass_Ta=default_mass_Ta
+   mass_W=default_mass_W
+   mass_Re=default_mass_Re
+   mass_Os=default_mass_Os
+   mass_Ir=default_mass_Ir
+   mass_Pt=default_mass_Pt
+   mass_Au=default_mass_Au
+   mass_Hg=default_mass_Hg
+   mass_Tl=default_mass_Tl
+   mass_Pb=default_mass_Pb
+   mass_Bi=default_mass_Bi
+   mass_Th=default_mass_Th
+   mass_Pa=default_mass_Pa
+   mass_U=default_mass_U
   END SUBROUTINE set_default_masses
 
   SUBROUTINE set_default_charges()
   IMPLICIT NONE
-   charge_hydrogen=default_charge_hydrogen
-   charge_fluorine=default_charge_fluorine
-   charge_boron=default_charge_boron
-   charge_chlorine=default_charge_chlorine
-   charge_bromine=default_charge_bromine
-   charge_iodine=default_charge_iodine
-   charge_nitrogen=default_charge_nitrogen
-   charge_oxygen=default_charge_oxygen
-   charge_carbon=default_charge_carbon
-   charge_sulfur=default_charge_sulfur
-   charge_phosphorus=default_charge_phosphorus
-   charge_lithium=default_charge_lithium
-   charge_sodium=default_charge_sodium
-   charge_magnesium=default_charge_magnesium
-   charge_calcium=default_charge_calcium
-   charge_zinc=default_charge_zinc
+   charge_H=default_charge_H
+   charge_He=default_charge_He
+   charge_Li=default_charge_Li
+   charge_Be=default_charge_Be
+   charge_B=default_charge_B
+   charge_C=default_charge_C
+   charge_N=default_charge_N
+   charge_O=default_charge_O
+   charge_F=default_charge_F
+   charge_Ne=default_charge_Ne
+   charge_Na=default_charge_Na
+   charge_Mg=default_charge_Mg
+   charge_Al=default_charge_Al
+   charge_Si=default_charge_Si
+   charge_P=default_charge_P
+   charge_S=default_charge_S
+   charge_Cl=default_charge_Cl
+   charge_Ar=default_charge_Ar
+   charge_K=default_charge_K
+   charge_Ca=default_charge_Ca
+   charge_Sc=default_charge_Sc
+   charge_Ti=default_charge_Ti
+   charge_V=default_charge_V
+   charge_Cr=default_charge_Cr
+   charge_Mn=default_charge_Mn
+   charge_Fe=default_charge_Fe
+   charge_Co=default_charge_Co
+   charge_Ni=default_charge_Ni
+   charge_Cu=default_charge_Cu
+   charge_Zn=default_charge_Zn
+   charge_Ga=default_charge_Ga
+   charge_Ge=default_charge_Ge
+   charge_As=default_charge_As
+   charge_Se=default_charge_Se
+   charge_Br=default_charge_Br
+   charge_Kr=default_charge_Kr
+   charge_Rb=default_charge_Rb
+   charge_Sr=default_charge_Sr
+   charge_Y=default_charge_Y
+   charge_Zr=default_charge_Zr
+   charge_Nb=default_charge_Nb
+   charge_Mo=default_charge_Mo
+   charge_Ru=default_charge_Ru
+   charge_Rh=default_charge_Rh
+   charge_Pd=default_charge_Pd
+   charge_Ag=default_charge_Ag
+   charge_Cd=default_charge_Cd
+   charge_In=default_charge_In
+   charge_Sn=default_charge_Sn
+   charge_Sb=default_charge_Sb
+   charge_Te=default_charge_Te
+   charge_I=default_charge_I
+   charge_Xe=default_charge_Xe
+   charge_Cs=default_charge_Cs
+   charge_Ba=default_charge_Ba
+   charge_La=default_charge_La
+   charge_Ce=default_charge_Ce
+   charge_Pr=default_charge_Pr
+   charge_Nd=default_charge_Nd
+   charge_Sm=default_charge_Sm
+   charge_Eu=default_charge_Eu
+   charge_Gd=default_charge_Gd
+   charge_Tb=default_charge_Tb
+   charge_Dy=default_charge_Dy
+   charge_Ho=default_charge_Ho
+   charge_Er=default_charge_Er
+   charge_Tm=default_charge_Tm
+   charge_Yb=default_charge_Yb
+   charge_Lu=default_charge_Lu
+   charge_Hf=default_charge_Hf
+   charge_Ta=default_charge_Ta
+   charge_W=default_charge_W
+   charge_Re=default_charge_Re
+   charge_Os=default_charge_Os
+   charge_Ir=default_charge_Ir
+   charge_Pt=default_charge_Pt
+   charge_Au=default_charge_Au
+   charge_Hg=default_charge_Hg
+   charge_Tl=default_charge_Tl
+   charge_Pb=default_charge_Pb
+   charge_Bi=default_charge_Bi
+   charge_Th=default_charge_Th
+   charge_Pa=default_charge_Pa
+   charge_U=default_charge_U
   END SUBROUTINE set_default_charges
 
   SUBROUTINE subtract_drude_masses()
   IMPLICIT NONE
    IF (VERBOSE_OUTPUT) PRINT *,"Subtracting drude masses from N,O,C,S,P,Li,F,Mg,Ca,Zn,Cl"
-   mass_nitrogen=mass_nitrogen-drude_mass
-   mass_oxygen=mass_oxygen-drude_mass
-   mass_carbon=mass_carbon-drude_mass
-   mass_sulfur=mass_sulfur-drude_mass
-   mass_phosphorus=mass_phosphorus-drude_mass
-   mass_lithium=mass_lithium-drude_mass
-   mass_fluorine=mass_fluorine-drude_mass
-   mass_magnesium=mass_magnesium-drude_mass
-   mass_chlorine=mass_chlorine-drude_mass
-   mass_zinc=mass_zinc-drude_mass
-   mass_calcium=mass_calcium-drude_mass
+   mass_N=mass_N-drude_mass
+   mass_O=mass_O-drude_mass
+   mass_C=mass_C-drude_mass
+   mass_S=mass_S-drude_mass
+   mass_P=mass_P-drude_mass
+   mass_Li=mass_Li-drude_mass
+   mass_F=mass_F-drude_mass
+   mass_Mg=mass_Mg-drude_mass
+   mass_Cl=mass_Cl-drude_mass
+   mass_Zn=mass_Zn-drude_mass
+   mass_Ca=mass_Ca-drude_mass
   END SUBROUTINE subtract_drude_masses
 
   SUBROUTINE write_molecule_input_file_without_drudes(nsteps)
@@ -4963,86 +5371,272 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     REAL :: old_charge
     LOGICAL,SAVE :: print_blank=.TRUE.
     CHARACTER(LEN=*),INTENT(IN) :: element_name_input
-    CHARACTER(LEN=32) :: element_name_full
      IF (print_blank) THEN
       IF (VERBOSE_OUTPUT) WRITE(*,*)
       print_blank=.FALSE.
      ENDIF
      SELECT CASE (TRIM(element_name_input))
      CASE ("H")
-      old_charge=charge_hydrogen
-      charge_hydrogen=new_charge
-      element_name_full="Hydrogen"
-     CASE ("F")
-      old_charge=charge_fluorine
-      charge_fluorine=new_charge
-      element_name_full="Fluorine"
-     CASE ("B")
-      old_charge=charge_boron
-      charge_boron=new_charge
-      element_name_full="Boron"
-     CASE ("Cl")
-      old_charge=charge_chlorine
-      charge_chlorine=new_charge
-      element_name_full="Chlorine"
-     CASE ("Br")
-      old_charge=charge_bromine
-      charge_bromine=new_charge
-      element_name_full="Bromine"
-     CASE ("I")
-      old_charge=charge_iodine
-      charge_iodine=new_charge
-      element_name_full="Iodine"
-     CASE ("N")
-      old_charge=charge_nitrogen
-      charge_nitrogen=new_charge
-      element_name_full="Nitrogen"
-     CASE ("O")
-      old_charge=charge_oxygen
-      charge_oxygen=new_charge
-      element_name_full="Oxygen"
-     CASE ("C")
-      old_charge=charge_carbon
-      charge_carbon=new_charge
-      element_name_full="Carbon"
-     CASE ("S")
-      old_charge=charge_sulfur
-      charge_sulfur=new_charge
-      element_name_full="Sulfur"
-     CASE ("P")
-      old_charge=charge_phosphorus
-      charge_phosphorus=new_charge
-      element_name_full="Phosphorus"
+      old_charge=charge_H
+      charge_H=new_charge
+     CASE ("He")
+      old_charge=charge_He
+      charge_He=new_charge
      CASE ("Li")
-      old_charge=charge_lithium
-      charge_lithium=new_charge
-      element_name_full="Lithium"
+      old_charge=charge_Li
+      charge_Li=new_charge
+     CASE ("Be")
+      old_charge=charge_Be
+      charge_Be=new_charge
+     CASE ("B")
+      old_charge=charge_B
+      charge_B=new_charge
+     CASE ("C")
+      old_charge=charge_C
+      charge_C=new_charge
+     CASE ("N")
+      old_charge=charge_N
+      charge_N=new_charge
+     CASE ("O")
+      old_charge=charge_O
+      charge_O=new_charge
+     CASE ("F")
+      old_charge=charge_F
+      charge_F=new_charge
+     CASE ("Ne")
+      old_charge=charge_Ne
+      charge_Ne=new_charge
      CASE ("Na")
-      old_charge=charge_sodium
-      charge_sodium=new_charge
-      element_name_full="Sodium"
+      old_charge=charge_Na
+      charge_Na=new_charge
      CASE ("Mg")
-      old_charge=charge_magnesium
-      charge_magnesium=new_charge
-      element_name_full="Magnesium"
-     CASE ("Zn")
-      old_charge=charge_zinc
-      charge_zinc=new_charge
-      element_name_full="Zinc"
+      old_charge=charge_Mg
+      charge_Mg=new_charge
+     CASE ("Al")
+      old_charge=charge_Al
+      charge_Al=new_charge
+     CASE ("Si")
+      old_charge=charge_Si
+      charge_Si=new_charge
+     CASE ("P")
+      old_charge=charge_P
+      charge_P=new_charge
+     CASE ("S")
+      old_charge=charge_S
+      charge_S=new_charge
+     CASE ("Cl")
+      old_charge=charge_Cl
+      charge_Cl=new_charge
+     CASE ("Ar")
+      old_charge=charge_Ar
+      charge_Ar=new_charge
+     CASE ("K")
+      old_charge=charge_K
+      charge_K=new_charge
      CASE ("Ca")
-      old_charge=charge_calcium
-      charge_calcium=new_charge
-      element_name_full="Calcium"
+      old_charge=charge_Ca
+      charge_Ca=new_charge
+     CASE ("Sc")
+      old_charge=charge_Sc
+      charge_Sc=new_charge
+     CASE ("Ti")
+      old_charge=charge_Ti
+      charge_Ti=new_charge
+     CASE ("V")
+      old_charge=charge_V
+      charge_V=new_charge
+     CASE ("Cr")
+      old_charge=charge_Cr
+      charge_Cr=new_charge
+     CASE ("Mn")
+      old_charge=charge_Mn
+      charge_Mn=new_charge
+     CASE ("Fe")
+      old_charge=charge_Fe
+      charge_Fe=new_charge
+     CASE ("Co")
+      old_charge=charge_Co
+      charge_Co=new_charge
+     CASE ("Ni")
+      old_charge=charge_Ni
+      charge_Ni=new_charge
+     CASE ("Cu")
+      old_charge=charge_Cu
+      charge_Cu=new_charge
+     CASE ("Zn")
+      old_charge=charge_Zn
+      charge_Zn=new_charge
+     CASE ("Ga")
+      old_charge=charge_Ga
+      charge_Ga=new_charge
+     CASE ("Ge")
+      old_charge=charge_Ge
+      charge_Ge=new_charge
+     CASE ("As")
+      old_charge=charge_As
+      charge_As=new_charge
+     CASE ("Se")
+      old_charge=charge_Se
+      charge_Se=new_charge
+     CASE ("Br")
+      old_charge=charge_Br
+      charge_Br=new_charge
+     CASE ("Kr")
+      old_charge=charge_Kr
+      charge_Kr=new_charge
+     CASE ("Rb")
+      old_charge=charge_Rb
+      charge_Rb=new_charge
+     CASE ("Sr")
+      old_charge=charge_Sr
+      charge_Sr=new_charge
+     CASE ("Y")
+      old_charge=charge_Y
+      charge_Y=new_charge
+     CASE ("Zr")
+      old_charge=charge_Zr
+      charge_Zr=new_charge
+     CASE ("Nb")
+      old_charge=charge_Nb
+      charge_Nb=new_charge
+     CASE ("Mo")
+      old_charge=charge_Mo
+      charge_Mo=new_charge
+     CASE ("Ru")
+      old_charge=charge_Ru
+      charge_Ru=new_charge
+     CASE ("Rh")
+      old_charge=charge_Rh
+      charge_Rh=new_charge
+     CASE ("Pd")
+      old_charge=charge_Pd
+      charge_Pd=new_charge
+     CASE ("Ag")
+      old_charge=charge_Ag
+      charge_Ag=new_charge
+     CASE ("Cd")
+      old_charge=charge_Cd
+      charge_Cd=new_charge
+     CASE ("In")
+      old_charge=charge_In
+      charge_In=new_charge
+     CASE ("Sn")
+      old_charge=charge_Sn
+      charge_Sn=new_charge
+     CASE ("Sb")
+      old_charge=charge_Sb
+      charge_Sb=new_charge
+     CASE ("Te")
+      old_charge=charge_Te
+      charge_Te=new_charge
+     CASE ("I")
+      old_charge=charge_I
+      charge_I=new_charge
+     CASE ("Xe")
+      old_charge=charge_Xe
+      charge_Xe=new_charge
+     CASE ("Cs")
+      old_charge=charge_Cs
+      charge_Cs=new_charge
+     CASE ("Ba")
+      old_charge=charge_Ba
+      charge_Ba=new_charge
+     CASE ("La")
+      old_charge=charge_La
+      charge_La=new_charge
+     CASE ("Ce")
+      old_charge=charge_Ce
+      charge_Ce=new_charge
+     CASE ("Pr")
+      old_charge=charge_Pr
+      charge_Pr=new_charge
+     CASE ("Nd")
+      old_charge=charge_Nd
+      charge_Nd=new_charge
+     CASE ("Sm")
+      old_charge=charge_Sm
+      charge_Sm=new_charge
+     CASE ("Eu")
+      old_charge=charge_Eu
+      charge_Eu=new_charge
+     CASE ("Gd")
+      old_charge=charge_Gd
+      charge_Gd=new_charge
+     CASE ("Tb")
+      old_charge=charge_Tb
+      charge_Tb=new_charge
+     CASE ("Dy")
+      old_charge=charge_Dy
+      charge_Dy=new_charge
+     CASE ("Ho")
+      old_charge=charge_Ho
+      charge_Ho=new_charge
+     CASE ("Er")
+      old_charge=charge_Er
+      charge_Er=new_charge
+     CASE ("Tm")
+      old_charge=charge_Tm
+      charge_Tm=new_charge
+     CASE ("Yb")
+      old_charge=charge_Yb
+      charge_Yb=new_charge
+     CASE ("Lu")
+      old_charge=charge_Lu
+      charge_Lu=new_charge
+     CASE ("Hf")
+      old_charge=charge_Hf
+      charge_Hf=new_charge
+     CASE ("Ta")
+      old_charge=charge_Ta
+      charge_Ta=new_charge
+     CASE ("W")
+      old_charge=charge_W
+      charge_W=new_charge
+     CASE ("Re")
+      old_charge=charge_Re
+      charge_Re=new_charge
+     CASE ("Os")
+      old_charge=charge_Os
+      charge_Os=new_charge
+     CASE ("Ir")
+      old_charge=charge_Ir
+      charge_Ir=new_charge
+     CASE ("Pt")
+      old_charge=charge_Pt
+      charge_Pt=new_charge
+     CASE ("Au")
+      old_charge=charge_Au
+      charge_Au=new_charge
+     CASE ("Hg")
+      old_charge=charge_Hg
+      charge_Hg=new_charge
+     CASE ("Tl")
+      old_charge=charge_Tl
+      charge_Tl=new_charge
+     CASE ("Pb")
+      old_charge=charge_Pb
+      charge_Pb=new_charge
+     CASE ("Bi")
+      old_charge=charge_Bi
+      charge_Bi=new_charge
+     CASE ("Th")
+      old_charge=charge_Th
+      charge_Th=new_charge
+     CASE ("Pa")
+      old_charge=charge_Pa
+      charge_Pa=new_charge
+     CASE ("U")
+      old_charge=charge_U
+      charge_U=new_charge
      CASE ("D","X")
       old_charge=drude_charge
       drude_charge=new_charge
-      element_name_full="drude particle"
      CASE DEFAULT
       CALL report_error(60,exit_status=IACHAR(element_name_input(1:1)))
       RETURN
      END SELECT
      IF (VERBOSE_OUTPUT) WRITE(*,'(" Changing charge of ",A," from ",F0.3," to ",F0.4,"")')&
-     &TRIM(element_name_full),old_charge,new_charge
+     &TRIM(element_name_full(TRIM(element_name_input))),old_charge,new_charge
     END SUBROUTINE change_default_charge
 
     SUBROUTINE change_default_mass(element_name_input,new_mass)
@@ -5052,86 +5646,272 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
     LOGICAL,SAVE :: print_blank=.TRUE.
     !If you change this part, then also change Module_SETTINGS and atomic_weight
     CHARACTER(LEN=*),INTENT(IN) :: element_name_input
-    CHARACTER(LEN=32) :: element_name_full
      IF (print_blank) THEN
       IF (VERBOSE_OUTPUT) WRITE(*,*)
       print_blank=.FALSE.
      ENDIF
      SELECT CASE (TRIM(element_name_input))
      CASE ("H")
-      old_mass=mass_hydrogen
-      mass_hydrogen=new_mass
-      element_name_full="Hydrogen"
-     CASE ("F")
-      old_mass=mass_fluorine
-      mass_fluorine=new_mass
-      element_name_full="Fluorine"
-     CASE ("B")
-      old_mass=mass_boron
-      mass_boron=new_mass
-      element_name_full="Boron"
-     CASE ("Cl")
-      old_mass=mass_chlorine
-      mass_chlorine=new_mass
-      element_name_full="Chlorine"
-     CASE ("Br")
-      old_mass=mass_bromine
-      mass_bromine=new_mass
-      element_name_full="Bromine"
-     CASE ("I")
-      old_mass=mass_iodine
-      mass_iodine=new_mass
-      element_name_full="Iodine"
-     CASE ("N")
-      old_mass=mass_nitrogen
-      mass_nitrogen=new_mass
-      element_name_full="Nitrogen"
-     CASE ("O")
-      old_mass=mass_oxygen
-      mass_oxygen=new_mass
-      element_name_full="Oxygen"
-     CASE ("C")
-      old_mass=mass_carbon
-      mass_carbon=new_mass
-      element_name_full="Carbon"
-     CASE ("S")
-      old_mass=mass_sulfur
-      mass_sulfur=new_mass
-      element_name_full="Sulfur"
-     CASE ("P")
-      old_mass=mass_phosphorus
-      mass_phosphorus=new_mass
-      element_name_full="Phosphorus"
+      old_mass=mass_H
+      mass_H=new_mass
+     CASE ("He")
+      old_mass=mass_He
+      mass_He=new_mass
      CASE ("Li")
-      old_mass=mass_lithium
-      mass_lithium=new_mass
-      element_name_full="Lithium"
+      old_mass=mass_Li
+      mass_Li=new_mass
+     CASE ("Be")
+      old_mass=mass_Be
+      mass_Be=new_mass
+     CASE ("B")
+      old_mass=mass_B
+      mass_B=new_mass
+     CASE ("C")
+      old_mass=mass_C
+      mass_C=new_mass
+     CASE ("N")
+      old_mass=mass_N
+      mass_N=new_mass
+     CASE ("O")
+      old_mass=mass_O
+      mass_O=new_mass
+     CASE ("F")
+      old_mass=mass_F
+      mass_F=new_mass
+     CASE ("Ne")
+      old_mass=mass_Ne
+      mass_Ne=new_mass
      CASE ("Na")
-      old_mass=mass_sodium
-      mass_sodium=new_mass
-      element_name_full="Sodium"
+      old_mass=mass_Na
+      mass_Na=new_mass
      CASE ("Mg")
-      old_mass=mass_magnesium
-      mass_magnesium=new_mass
-      element_name_full="Magnesium"
-     CASE ("Zn")
-      old_mass=mass_zinc
-      mass_zinc=new_mass
-      element_name_full="Zinc"
+      old_mass=mass_Mg
+      mass_Mg=new_mass
+     CASE ("Al")
+      old_mass=mass_Al
+      mass_Al=new_mass
+     CASE ("Si")
+      old_mass=mass_Si
+      mass_Si=new_mass
+     CASE ("P")
+      old_mass=mass_P
+      mass_P=new_mass
+     CASE ("S")
+      old_mass=mass_S
+      mass_S=new_mass
+     CASE ("Cl")
+      old_mass=mass_Cl
+      mass_Cl=new_mass
+     CASE ("Ar")
+      old_mass=mass_Ar
+      mass_Ar=new_mass
+     CASE ("K")
+      old_mass=mass_K
+      mass_K=new_mass
      CASE ("Ca")
-      old_mass=mass_calcium
-      mass_calcium=new_mass
-      element_name_full="Calcium"
+      old_mass=mass_Ca
+      mass_Ca=new_mass
+     CASE ("Sc")
+      old_mass=mass_Sc
+      mass_Sc=new_mass
+     CASE ("Ti")
+      old_mass=mass_Ti
+      mass_Ti=new_mass
+     CASE ("V")
+      old_mass=mass_V
+      mass_V=new_mass
+     CASE ("Cr")
+      old_mass=mass_Cr
+      mass_Cr=new_mass
+     CASE ("Mn")
+      old_mass=mass_Mn
+      mass_Mn=new_mass
+     CASE ("Fe")
+      old_mass=mass_Fe
+      mass_Fe=new_mass
+     CASE ("Co")
+      old_mass=mass_Co
+      mass_Co=new_mass
+     CASE ("Ni")
+      old_mass=mass_Ni
+      mass_Ni=new_mass
+     CASE ("Cu")
+      old_mass=mass_Cu
+      mass_Cu=new_mass
+     CASE ("Zn")
+      old_mass=mass_Zn
+      mass_Zn=new_mass
+     CASE ("Ga")
+      old_mass=mass_Ga
+      mass_Ga=new_mass
+     CASE ("Ge")
+      old_mass=mass_Ge
+      mass_Ge=new_mass
+     CASE ("As")
+      old_mass=mass_As
+      mass_As=new_mass
+     CASE ("Se")
+      old_mass=mass_Se
+      mass_Se=new_mass
+     CASE ("Br")
+      old_mass=mass_Br
+      mass_Br=new_mass
+     CASE ("Kr")
+      old_mass=mass_Kr
+      mass_Kr=new_mass
+     CASE ("Rb")
+      old_mass=mass_Rb
+      mass_Rb=new_mass
+     CASE ("Sr")
+      old_mass=mass_Sr
+      mass_Sr=new_mass
+     CASE ("Y")
+      old_mass=mass_Y
+      mass_Y=new_mass
+     CASE ("Zr")
+      old_mass=mass_Zr
+      mass_Zr=new_mass
+     CASE ("Nb")
+      old_mass=mass_Nb
+      mass_Nb=new_mass
+     CASE ("Mo")
+      old_mass=mass_Mo
+      mass_Mo=new_mass
+     CASE ("Ru")
+      old_mass=mass_Ru
+      mass_Ru=new_mass
+     CASE ("Rh")
+      old_mass=mass_Rh
+      mass_Rh=new_mass
+     CASE ("Pd")
+      old_mass=mass_Pd
+      mass_Pd=new_mass
+     CASE ("Ag")
+      old_mass=mass_Ag
+      mass_Ag=new_mass
+     CASE ("Cd")
+      old_mass=mass_Cd
+      mass_Cd=new_mass
+     CASE ("In")
+      old_mass=mass_In
+      mass_In=new_mass
+     CASE ("Sn")
+      old_mass=mass_Sn
+      mass_Sn=new_mass
+     CASE ("Sb")
+      old_mass=mass_Sb
+      mass_Sb=new_mass
+     CASE ("Te")
+      old_mass=mass_Te
+      mass_Te=new_mass
+     CASE ("I")
+      old_mass=mass_I
+      mass_I=new_mass
+     CASE ("Xe")
+      old_mass=mass_Xe
+      mass_Xe=new_mass
+     CASE ("Cs")
+      old_mass=mass_Cs
+      mass_Cs=new_mass
+     CASE ("Ba")
+      old_mass=mass_Ba
+      mass_Ba=new_mass
+     CASE ("La")
+      old_mass=mass_La
+      mass_La=new_mass
+     CASE ("Ce")
+      old_mass=mass_Ce
+      mass_Ce=new_mass
+     CASE ("Pr")
+      old_mass=mass_Pr
+      mass_Pr=new_mass
+     CASE ("Nd")
+      old_mass=mass_Nd
+      mass_Nd=new_mass
+     CASE ("Sm")
+      old_mass=mass_Sm
+      mass_Sm=new_mass
+     CASE ("Eu")
+      old_mass=mass_Eu
+      mass_Eu=new_mass
+     CASE ("Gd")
+      old_mass=mass_Gd
+      mass_Gd=new_mass
+     CASE ("Tb")
+      old_mass=mass_Tb
+      mass_Tb=new_mass
+     CASE ("Dy")
+      old_mass=mass_Dy
+      mass_Dy=new_mass
+     CASE ("Ho")
+      old_mass=mass_Ho
+      mass_Ho=new_mass
+     CASE ("Er")
+      old_mass=mass_Er
+      mass_Er=new_mass
+     CASE ("Tm")
+      old_mass=mass_Tm
+      mass_Tm=new_mass
+     CASE ("Yb")
+      old_mass=mass_Yb
+      mass_Yb=new_mass
+     CASE ("Lu")
+      old_mass=mass_Lu
+      mass_Lu=new_mass
+     CASE ("Hf")
+      old_mass=mass_Hf
+      mass_Hf=new_mass
+     CASE ("Ta")
+      old_mass=mass_Ta
+      mass_Ta=new_mass
+     CASE ("W")
+      old_mass=mass_W
+      mass_W=new_mass
+     CASE ("Re")
+      old_mass=mass_Re
+      mass_Re=new_mass
+     CASE ("Os")
+      old_mass=mass_Os
+      mass_Os=new_mass
+     CASE ("Ir")
+      old_mass=mass_Ir
+      mass_Ir=new_mass
+     CASE ("Pt")
+      old_mass=mass_Pt
+      mass_Pt=new_mass
+     CASE ("Au")
+      old_mass=mass_Au
+      mass_Au=new_mass
+     CASE ("Hg")
+      old_mass=mass_Hg
+      mass_Hg=new_mass
+     CASE ("Tl")
+      old_mass=mass_Tl
+      mass_Tl=new_mass
+     CASE ("Pb")
+      old_mass=mass_Pb
+      mass_Pb=new_mass
+     CASE ("Bi")
+      old_mass=mass_Bi
+      mass_Bi=new_mass
+     CASE ("Th")
+      old_mass=mass_Th
+      mass_Th=new_mass
+     CASE ("Pa")
+      old_mass=mass_Pa
+      mass_Pa=new_mass
+     CASE ("U")
+      old_mass=mass_U
+      mass_U=new_mass
      CASE ("D","X")
       old_mass=drude_mass
       drude_mass=new_mass
-      element_name_full="drude particle"
      CASE DEFAULT
       CALL report_error(60,exit_status=IACHAR(element_name_input(1:1)))
       RETURN
      END SELECT
      IF (VERBOSE_OUTPUT) WRITE(*,'(" Changing mass of ",A," from ",F0.3," to ",F0.4,"")')&
-     &TRIM(element_name_full),old_mass,new_mass
+     &TRIM(element_name_full(TRIM(element_name_input))),old_mass,new_mass
     END SUBROUTINE change_default_mass
 
     SUBROUTINE read_molecular_input_file_atomic_masses()
@@ -6053,37 +6833,173 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
   CHARACTER(LEN=*),INTENT(IN) :: element_name
    SELECT CASE (TRIM(element_name))
    CASE ("H")
-    atomic_weight=mass_hydrogen
-   CASE ("F")
-    atomic_weight=mass_fluorine
-   CASE ("B")
-    atomic_weight=mass_boron
-   CASE ("Cl")
-    atomic_weight=mass_chlorine
-   CASE ("Br")
-    atomic_weight=mass_bromine
-   CASE ("I")
-    atomic_weight=mass_iodine
-   CASE ("Na")
-    atomic_weight=(mass_sodium)
-   CASE ("Mg")
-    atomic_weight=(mass_magnesium)
-   CASE ("Zn")
-    atomic_weight=(mass_zinc)
-   CASE ("Ca")
-    atomic_weight=(mass_calcium)
-   CASE ("N")
-    atomic_weight=(mass_nitrogen) !IF you change this part, THEN change Module_Main, too!
-   CASE ("O")
-    atomic_weight=(mass_oxygen) !IF you change this part, THEN change Module_Main, too!
-   CASE ("C")
-    atomic_weight=(mass_carbon) !IF you change this part, THEN change Module_Main, too!
-   CASE ("S")
-    atomic_weight=(mass_sulfur) !IF you change this part, THEN change Module_Main, too!
-   CASE ("P")
-    atomic_weight=(mass_phosphorus) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=mass_H
+   CASE ("He")
+    atomic_weight=mass_He
    CASE ("Li")
-    atomic_weight=(mass_lithium) !IF you change this part, THEN change Module_Main, too!
+    atomic_weight=mass_Li
+   CASE ("Be")
+    atomic_weight=mass_Be
+   CASE ("B")
+    atomic_weight=mass_B
+   CASE ("C")
+    atomic_weight=mass_C
+   CASE ("N")
+    atomic_weight=mass_N
+   CASE ("O")
+    atomic_weight=mass_O
+   CASE ("F")
+    atomic_weight=mass_F
+   CASE ("Ne")
+    atomic_weight=mass_Ne
+   CASE ("Na")
+    atomic_weight=mass_Na
+   CASE ("Mg")
+    atomic_weight=mass_Mg
+   CASE ("Al")
+    atomic_weight=mass_Al
+   CASE ("Si")
+    atomic_weight=mass_Si
+   CASE ("P")
+    atomic_weight=mass_P
+   CASE ("S")
+    atomic_weight=mass_S
+   CASE ("Cl")
+    atomic_weight=mass_Cl
+   CASE ("Ar")
+    atomic_weight=mass_Ar
+   CASE ("K")
+    atomic_weight=mass_K
+   CASE ("Ca")
+    atomic_weight=mass_Ca
+   CASE ("Sc")
+    atomic_weight=mass_Sc
+   CASE ("Ti")
+    atomic_weight=mass_Ti
+   CASE ("V")
+    atomic_weight=mass_V
+   CASE ("Cr")
+    atomic_weight=mass_Cr
+   CASE ("Mn")
+    atomic_weight=mass_Mn
+   CASE ("Fe")
+    atomic_weight=mass_Fe
+   CASE ("Co")
+    atomic_weight=mass_Co
+   CASE ("Ni")
+    atomic_weight=mass_Ni
+   CASE ("Cu")
+    atomic_weight=mass_Cu
+   CASE ("Zn")
+    atomic_weight=mass_Zn
+   CASE ("Ga")
+    atomic_weight=mass_Ga
+   CASE ("Ge")
+    atomic_weight=mass_Ge
+   CASE ("As")
+    atomic_weight=mass_As
+   CASE ("Se")
+    atomic_weight=mass_Se
+   CASE ("Br")
+    atomic_weight=mass_Br
+   CASE ("Kr")
+    atomic_weight=mass_Kr
+   CASE ("Rb")
+    atomic_weight=mass_Rb
+   CASE ("Sr")
+    atomic_weight=mass_Sr
+   CASE ("Y")
+    atomic_weight=mass_Y
+   CASE ("Zr")
+    atomic_weight=mass_Zr
+   CASE ("Nb")
+    atomic_weight=mass_Nb
+   CASE ("Mo")
+    atomic_weight=mass_Mo
+   CASE ("Ru")
+    atomic_weight=mass_Ru
+   CASE ("Rh")
+    atomic_weight=mass_Rh
+   CASE ("Pd")
+    atomic_weight=mass_Pd
+   CASE ("Ag")
+    atomic_weight=mass_Ag
+   CASE ("Cd")
+    atomic_weight=mass_Cd
+   CASE ("In")
+    atomic_weight=mass_In
+   CASE ("Sn")
+    atomic_weight=mass_Sn
+   CASE ("Sb")
+    atomic_weight=mass_Sb
+   CASE ("Te")
+    atomic_weight=mass_Te
+   CASE ("I")
+    atomic_weight=mass_I
+   CASE ("Xe")
+    atomic_weight=mass_Xe
+   CASE ("Cs")
+    atomic_weight=mass_Cs
+   CASE ("Ba")
+    atomic_weight=mass_Ba
+   CASE ("La")
+    atomic_weight=mass_La
+   CASE ("Ce")
+    atomic_weight=mass_Ce
+   CASE ("Pr")
+    atomic_weight=mass_Pr
+   CASE ("Nd")
+    atomic_weight=mass_Nd
+   CASE ("Sm")
+    atomic_weight=mass_Sm
+   CASE ("Eu")
+    atomic_weight=mass_Eu
+   CASE ("Gd")
+    atomic_weight=mass_Gd
+   CASE ("Tb")
+    atomic_weight=mass_Tb
+   CASE ("Dy")
+    atomic_weight=mass_Dy
+   CASE ("Ho")
+    atomic_weight=mass_Ho
+   CASE ("Er")
+    atomic_weight=mass_Er
+   CASE ("Tm")
+    atomic_weight=mass_Tm
+   CASE ("Yb")
+    atomic_weight=mass_Yb
+   CASE ("Lu")
+    atomic_weight=mass_Lu
+   CASE ("Hf")
+    atomic_weight=mass_Hf
+   CASE ("Ta")
+    atomic_weight=mass_Ta
+   CASE ("W")
+    atomic_weight=mass_W
+   CASE ("Re")
+    atomic_weight=mass_Re
+   CASE ("Os")
+    atomic_weight=mass_Os
+   CASE ("Ir")
+    atomic_weight=mass_Ir
+   CASE ("Pt")
+    atomic_weight=mass_Pt
+   CASE ("Au")
+    atomic_weight=mass_Au
+   CASE ("Hg")
+    atomic_weight=mass_Hg
+   CASE ("Tl")
+    atomic_weight=mass_Tl
+   CASE ("Pb")
+    atomic_weight=mass_Pb
+   CASE ("Bi")
+    atomic_weight=mass_Bi
+   CASE ("Th")
+    atomic_weight=mass_Th
+   CASE ("Pa")
+    atomic_weight=mass_Pa
+   CASE ("U")
+    atomic_weight=mass_U
    CASE ("X")
     atomic_weight=(drude_mass) !IF you change this part, THEN change Module_Main, too!
    CASE ("D")
@@ -6103,37 +7019,173 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
   CHARACTER(LEN=*),INTENT(IN) :: element_name
    SELECT CASE (TRIM(element_name))
    CASE ("H")
-    atomic_charge=charge_hydrogen
-   CASE ("F")
-    atomic_charge=charge_fluorine
-   CASE ("B")
-    atomic_charge=charge_boron
-   CASE ("Cl")
-    atomic_charge=charge_chlorine
-   CASE ("Br")
-    atomic_charge=charge_bromine
-   CASE ("I")
-    atomic_charge=charge_iodine
-   CASE ("N")
-    atomic_charge=charge_nitrogen
-   CASE ("O")
-    atomic_charge=charge_oxygen
-   CASE ("C")
-    atomic_charge=charge_carbon
-   CASE ("S")
-    atomic_charge=charge_sulfur
-   CASE ("P")
-    atomic_charge=charge_phosphorus
+    atomic_charge=charge_H
+   CASE ("He")
+    atomic_charge=charge_He
    CASE ("Li")
-    atomic_charge=charge_lithium
+    atomic_charge=charge_Li
+   CASE ("Be")
+    atomic_charge=charge_Be
+   CASE ("B")
+    atomic_charge=charge_B
+   CASE ("C")
+    atomic_charge=charge_C
+   CASE ("N")
+    atomic_charge=charge_N
+   CASE ("O")
+    atomic_charge=charge_O
+   CASE ("F")
+    atomic_charge=charge_F
+   CASE ("Ne")
+    atomic_charge=charge_Ne
    CASE ("Na")
-    atomic_charge=charge_sodium
+    atomic_charge=charge_Na
    CASE ("Mg")
-    atomic_charge=charge_magnesium
-   CASE ("Zn")
-    atomic_charge=charge_zinc
+    atomic_charge=charge_Mg
+   CASE ("Al")
+    atomic_charge=charge_Al
+   CASE ("Si")
+    atomic_charge=charge_Si
+   CASE ("P")
+    atomic_charge=charge_P
+   CASE ("S")
+    atomic_charge=charge_S
+   CASE ("Cl")
+    atomic_charge=charge_Cl
+   CASE ("Ar")
+    atomic_charge=charge_Ar
+   CASE ("K")
+    atomic_charge=charge_K
    CASE ("Ca")
-    atomic_charge=charge_calcium
+    atomic_charge=charge_Ca
+   CASE ("Sc")
+    atomic_charge=charge_Sc
+   CASE ("Ti")
+    atomic_charge=charge_Ti
+   CASE ("V")
+    atomic_charge=charge_V
+   CASE ("Cr")
+    atomic_charge=charge_Cr
+   CASE ("Mn")
+    atomic_charge=charge_Mn
+   CASE ("Fe")
+    atomic_charge=charge_Fe
+   CASE ("Co")
+    atomic_charge=charge_Co
+   CASE ("Ni")
+    atomic_charge=charge_Ni
+   CASE ("Cu")
+    atomic_charge=charge_Cu
+   CASE ("Zn")
+    atomic_charge=charge_Zn
+   CASE ("Ga")
+    atomic_charge=charge_Ga
+   CASE ("Ge")
+    atomic_charge=charge_Ge
+   CASE ("As")
+    atomic_charge=charge_As
+   CASE ("Se")
+    atomic_charge=charge_Se
+   CASE ("Br")
+    atomic_charge=charge_Br
+   CASE ("Kr")
+    atomic_charge=charge_Kr
+   CASE ("Rb")
+    atomic_charge=charge_Rb
+   CASE ("Sr")
+    atomic_charge=charge_Sr
+   CASE ("Y")
+    atomic_charge=charge_Y
+   CASE ("Zr")
+    atomic_charge=charge_Zr
+   CASE ("Nb")
+    atomic_charge=charge_Nb
+   CASE ("Mo")
+    atomic_charge=charge_Mo
+   CASE ("Ru")
+    atomic_charge=charge_Ru
+   CASE ("Rh")
+    atomic_charge=charge_Rh
+   CASE ("Pd")
+    atomic_charge=charge_Pd
+   CASE ("Ag")
+    atomic_charge=charge_Ag
+   CASE ("Cd")
+    atomic_charge=charge_Cd
+   CASE ("In")
+    atomic_charge=charge_In
+   CASE ("Sn")
+    atomic_charge=charge_Sn
+   CASE ("Sb")
+    atomic_charge=charge_Sb
+   CASE ("Te")
+    atomic_charge=charge_Te
+   CASE ("I")
+    atomic_charge=charge_I
+   CASE ("Xe")
+    atomic_charge=charge_Xe
+   CASE ("Cs")
+    atomic_charge=charge_Cs
+   CASE ("Ba")
+    atomic_charge=charge_Ba
+   CASE ("La")
+    atomic_charge=charge_La
+   CASE ("Ce")
+    atomic_charge=charge_Ce
+   CASE ("Pr")
+    atomic_charge=charge_Pr
+   CASE ("Nd")
+    atomic_charge=charge_Nd
+   CASE ("Sm")
+    atomic_charge=charge_Sm
+   CASE ("Eu")
+    atomic_charge=charge_Eu
+   CASE ("Gd")
+    atomic_charge=charge_Gd
+   CASE ("Tb")
+    atomic_charge=charge_Tb
+   CASE ("Dy")
+    atomic_charge=charge_Dy
+   CASE ("Ho")
+    atomic_charge=charge_Ho
+   CASE ("Er")
+    atomic_charge=charge_Er
+   CASE ("Tm")
+    atomic_charge=charge_Tm
+   CASE ("Yb")
+    atomic_charge=charge_Yb
+   CASE ("Lu")
+    atomic_charge=charge_Lu
+   CASE ("Hf")
+    atomic_charge=charge_Hf
+   CASE ("Ta")
+    atomic_charge=charge_Ta
+   CASE ("W")
+    atomic_charge=charge_W
+   CASE ("Re")
+    atomic_charge=charge_Re
+   CASE ("Os")
+    atomic_charge=charge_Os
+   CASE ("Ir")
+    atomic_charge=charge_Ir
+   CASE ("Pt")
+    atomic_charge=charge_Pt
+   CASE ("Au")
+    atomic_charge=charge_Au
+   CASE ("Hg")
+    atomic_charge=charge_Hg
+   CASE ("Tl")
+    atomic_charge=charge_Tl
+   CASE ("Pb")
+    atomic_charge=charge_Pb
+   CASE ("Bi")
+    atomic_charge=charge_Bi
+   CASE ("Th")
+    atomic_charge=charge_Th
+   CASE ("Pa")
+    atomic_charge=charge_Pa
+   CASE ("U")
+    atomic_charge=charge_U
    CASE ("X")
     atomic_charge=drude_charge
    CASE ("D")
@@ -6148,11 +7200,197 @@ MODULE MOLECULAR ! Copyright (C) 2024 Frederik Philippi
    END SELECT
   END FUNCTION atomic_charge
 
+  CHARACTER(LEN=32) FUNCTION element_name_full(element_name) !this function returns the full name of a given element.
+  IMPLICIT NONE
+  CHARACTER(LEN=*),INTENT(IN) :: element_name
+   SELECT CASE (TRIM(element_name))
+   CASE ("H")
+    element_name_full="Hydrogen"
+   CASE ("He")
+    element_name_full="Helium"
+   CASE ("Li")
+    element_name_full="Lithium"
+   CASE ("Be")
+    element_name_full="Beryllium"
+   CASE ("B")
+    element_name_full="Boron"
+   CASE ("C")
+    element_name_full="Carbon"
+   CASE ("N")
+    element_name_full="Nitrogen"
+   CASE ("O")
+    element_name_full="Oxygen"
+   CASE ("F")
+    element_name_full="Fluorine"
+   CASE ("Ne")
+    element_name_full="Neon"
+   CASE ("Na")
+    element_name_full="Sodium"
+   CASE ("Mg")
+    element_name_full="Magnesium"
+   CASE ("Al")
+    element_name_full="Aluminium"
+   CASE ("Si")
+    element_name_full="Silicon"
+   CASE ("P")
+    element_name_full="Phosphorus"
+   CASE ("S")
+    element_name_full="Sulfur"
+   CASE ("Cl")
+    element_name_full="Chlorine"
+   CASE ("Ar")
+    element_name_full="Argon"
+   CASE ("K")
+    element_name_full="Potassium"
+   CASE ("Ca")
+    element_name_full="Calcium"
+   CASE ("Sc")
+    element_name_full="Scandium"
+   CASE ("Ti")
+    element_name_full="Titanium"
+   CASE ("V")
+    element_name_full="Vanadium"
+   CASE ("Cr")
+    element_name_full="Chromium"
+   CASE ("Mn")
+    element_name_full="Manganese"
+   CASE ("Fe")
+    element_name_full="Iron"
+   CASE ("Co")
+    element_name_full="Cobalt"
+   CASE ("Ni")
+    element_name_full="Nickel"
+   CASE ("Cu")
+    element_name_full="Copper"
+   CASE ("Zn")
+    element_name_full="Zinc"
+   CASE ("Ga")
+    element_name_full="Gallium"
+   CASE ("Ge")
+    element_name_full="Germanium"
+   CASE ("As")
+    element_name_full="Arsenic"
+   CASE ("Se")
+    element_name_full="Selenium"
+   CASE ("Br")
+    element_name_full="Bromine"
+   CASE ("Kr")
+    element_name_full="Krypton"
+   CASE ("Rb")
+    element_name_full="Rubidium"
+   CASE ("Sr")
+    element_name_full="Strontium"
+   CASE ("Y")
+    element_name_full="Yttrium"
+   CASE ("Zr")
+    element_name_full="Zirconium"
+   CASE ("Nb")
+    element_name_full="Niobium"
+   CASE ("Mo")
+    element_name_full="Molybdenum"
+   CASE ("Ru")
+    element_name_full="Ruthenium"
+   CASE ("Rh")
+    element_name_full="Rhodium"
+   CASE ("Pd")
+    element_name_full="Palladium"
+   CASE ("Ag")
+    element_name_full="Silver"
+   CASE ("Cd")
+    element_name_full="Cadmium"
+   CASE ("In")
+    element_name_full="Indium"
+   CASE ("Sn")
+    element_name_full="Tin"
+   CASE ("Sb")
+    element_name_full="Antimony"
+   CASE ("Te")
+    element_name_full="Tellurium"
+   CASE ("I")
+    element_name_full="Iodine"
+   CASE ("Xe")
+    element_name_full="Xenon"
+   CASE ("Cs")
+    element_name_full="Caesium"
+   CASE ("Ba")
+    element_name_full="Barium"
+   CASE ("La")
+    element_name_full="Lanthanum"
+   CASE ("Ce")
+    element_name_full="Cerium"
+   CASE ("Pr")
+    element_name_full="Praseodymium"
+   CASE ("Nd")
+    element_name_full="Neodymium"
+   CASE ("Sm")
+    element_name_full="Samarium"
+   CASE ("Eu")
+    element_name_full="Europium"
+   CASE ("Gd")
+    element_name_full="Gadolinium"
+   CASE ("Tb")
+    element_name_full="Terbium"
+   CASE ("Dy")
+    element_name_full="Dysprosium"
+   CASE ("Ho")
+    element_name_full="Holmium"
+   CASE ("Er")
+    element_name_full="Erbium"
+   CASE ("Tm")
+    element_name_full="Thulium"
+   CASE ("Yb")
+    element_name_full="Ytterbium"
+   CASE ("Lu")
+    element_name_full="Lutetium"
+   CASE ("Hf")
+    element_name_full="Hafnium"
+   CASE ("Ta")
+    element_name_full="Tantalum"
+   CASE ("W")
+    element_name_full="Tungsten"
+   CASE ("Re")
+    element_name_full="Rhenium"
+   CASE ("Os")
+    element_name_full="Osmium"
+   CASE ("Ir")
+    element_name_full="Iridium"
+   CASE ("Pt")
+    element_name_full="Platinum"
+   CASE ("Au")
+    element_name_full="Gold"
+   CASE ("Hg")
+    element_name_full="Mercury"
+   CASE ("Tl")
+    element_name_full="Thallium"
+   CASE ("Pb")
+    element_name_full="Lead"
+   CASE ("Bi")
+    element_name_full="Bismuth"
+   CASE ("Th")
+    element_name_full="Thorium"
+   CASE ("Pa")
+    element_name_full="Protactinium"
+   CASE ("U")
+    element_name_full="Uranium"
+   CASE ("X")
+    element_name_full="Drude particle"
+   CASE ("D")
+    element_name_full="Drude particle"
+   CASE DEFAULT
+    !the 'convert' keyword produces a trajectory with a,b,c,...,z as element names.
+    IF (ANY(ALPHABET_small==IACHAR(element_name(1:1)))) THEN
+     element_name_full="Mass centre "//element_name(1:1)
+    ELSE
+     CALL report_error(4)
+    ENDIF
+   END SELECT
+  END FUNCTION element_name_full
+
 END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
 !This module contains procedures for debugging and technical purposes.
-MODULE DEBUG ! Copyright (C) 2024 Frederik Philippi
+MODULE DEBUG ! Copyright (C) 2025 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -8059,7 +9297,7 @@ END MODULE DEBUG
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
 !reorientational autocorrelation functions.
 !relative mean molecular velocity correlation functions.
-MODULE AUTOCORRELATION ! Copyright (C) 2024 Frederik Philippi
+MODULE AUTOCORRELATION ! Copyright (C) 2025 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -11633,7 +12871,7 @@ END MODULE AUTOCORRELATION
 
 !This Module calculates (drift corrected) mean squared displacements.
 !The diffusion implementation is shit. Use TRAVIS.
-MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
+MODULE DIFFUSION ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -13014,7 +14252,7 @@ MODULE DIFFUSION ! Copyright (C) 2024 Frederik Philippi
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs low-level command line tasks.
-MODULE RECOGNITION ! Copyright (C) 2024 Frederik Philippi
+MODULE RECOGNITION ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -13651,7 +14889,7 @@ MODULE RECOGNITION ! Copyright (C) 2024 Frederik Philippi
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates special combined distribution functions - such as cylindrical or polar.
-MODULE DISTRIBUTION ! Copyright (C) 2024 Frederik Philippi
+MODULE DISTRIBUTION ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -14924,7 +16162,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2024 Frederik Philippi
 END MODULE DISTRIBUTION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates intra- and intermolecular contact distance estimates (averages of closest distance)
-MODULE DISTANCE ! Copyright (C) 2024 Frederik Philippi
+MODULE DISTANCE ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -16175,7 +17413,7 @@ END MODULE DISTANCE
 !  -  Li coordinated by two DMEs, with two oxygens each
 ! ... and so on, here I only listed those that lead to exactly four neighbours.
 !This module identifies these different species and keeps track of them and how often they occur.
-MODULE SPECIATION ! Copyright (C) 2024 Frederik Philippi
+MODULE SPECIATION ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -19439,7 +20677,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
 END MODULE SPECIATION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs a detailed cluster analysis.
-MODULE CLUSTER ! Copyright (C) 2024 Frederik Philippi
+MODULE CLUSTER ! Copyright (C) 2025 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -21053,10 +22291,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *, "   #######################"
   PRINT *
  ENDIF
- PRINT *, "   Copyright (C) 2024 Frederik Philippi"
+ PRINT *, "   Copyright (C) 2025 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 30_Oct_2024"
+ PRINT *, "   Date of Release: 24_Feb_2025"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -24808,7 +26046,7 @@ INTEGER :: deallocstatus
  IF (DISCONNECTED) CLOSE(UNIT=6)
 END SUBROUTINE finalise_command_line_arguments
 
-PROGRAM PREALPHA ! Copyright (C) 2024 Frederik Philippi
+PROGRAM PREALPHA ! Copyright (C) 2025 Frederik Philippi
 USE SETTINGS
 USE MOLECULAR
 USE DEBUG
