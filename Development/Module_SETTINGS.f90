@@ -400,8 +400,8 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  Results might be biased!"
 					WRITE(*,*) "--> Program will try to continue anyway, probably crashes."
 				CASE (4)
-					WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge: unknown element"
-					WRITE(*,*) " #  If necessary, add element to function atomic_weight and atomic_charge in module MOLECULAR"
+					WRITE(*,*) " #  SEVERE ERROR 4 in atomic_weight/atomic_charge/element_name_full: unknown element"
+					WRITE(*,*) " #  If necessary, add element to the module MOLECULAR."
 					CALL finalise_global()
 					STOP
 				CASE (5)
