@@ -2789,6 +2789,7 @@ USE DISTRIBUTION
 USE DISTANCE
 USE SPECIATION
 USE CLUSTER
+USE SFACTOR
 IMPLICIT NONE
 	 !$ INTERFACE
 	 !$ 	FUNCTION OMP_get_num_threads()
@@ -3620,6 +3621,7 @@ INTEGER :: ios,n
 					!CALL perform_speciation_analysis()
 					!FILENAME_SPECIATION_INPUT="speciationX.inp"
 					!CALL perform_speciation_analysis()
+					CALL perform_sfactor_analysis()
 					WRITE(*,*) "################################DEBUG VERSION"
 				CASE DEFAULT
 					IF ((inputstring(1:1)=="#").OR.(inputstring(1:1)=="!")) THEN

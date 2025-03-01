@@ -446,6 +446,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	PUBLIC :: give_charge_of_atom,give_mass_of_atom,give_center_of_charge_2,give_center_of_mass_2,charge_arm_2,write_molecule_in_slab
 	PUBLIC :: give_box_boundaries,valid_molecule_type_index,valid_atom_index,give_smallest_distance_to_point_squared
 	PUBLIC :: initialise_print_members,reset_print_members,finalise_print_members,print_members,add_print_member,invert_print_members
+	PUBLIC :: give_elements_in_simulation_box
 	CONTAINS
 
 		SUBROUTINE initialise_print_members()
@@ -2335,6 +2336,68 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ENDIF
 			ENDDO
 		END FUNCTION give_sum_formula
+
+		INTEGER FUNCTION give_elements_in_molecule(molecule_type_index,element_list_out)
+		IMPLICIT NONE
+		CHARACTER(LEN=2),DIMENSION(64),INTENT(OUT) :: element_list_out
+		INTEGER,INTENT(IN) :: molecule_type_index
+		INTEGER :: outer,inner,n
+		LOGICAL :: element_unused(molecule_list(molecule_type_index)%number_of_atoms)!has this atom been used up yet?
+		CHARACTER(LEN=2) :: current_element
+			element_unused(:)=.TRUE.
+			element_list_out(:)=""
+			give_elements_in_molecule=0
+			DO outer=1,molecule_list(molecule_type_index)%number_of_atoms,1
+				current_element=TRIM(molecule_list(molecule_type_index)%list_of_elements(outer))
+				!Print the element in outer, if not yet done:
+				IF (element_unused(outer)) THEN
+					!append the new element
+					give_elements_in_molecule=give_elements_in_molecule+1
+					element_list_out(give_elements_in_molecule)=TRIM(current_element)
+					!count how many are there, and label them as used
+					n=1
+					DO inner=(outer+1),molecule_list(molecule_type_index)%number_of_atoms,1
+						IF (TRIM(current_element)==TRIM(molecule_list(molecule_type_index)%list_of_elements(inner))) THEN
+							element_unused(inner)=.FALSE.
+							n=n+1
+						ENDIF
+					ENDDO
+				ENDIF
+			ENDDO
+		END FUNCTION give_elements_in_molecule
+
+		INTEGER FUNCTION give_elements_in_simulation_box(element_list_out)
+		IMPLICIT NONE
+		CHARACTER(LEN=2),DIMENSION(64),INTENT(OUT) :: element_list_out
+		INTEGER :: molecule_type_index,m,stringpos,N_elements_in_molecule
+		CHARACTER(LEN=2),DIMENSION(64) :: molecule_elements
+		LOGICAL :: unique_element_found
+			give_elements_in_simulation_box=0
+			element_list_out(:)=""
+			DO molecule_type_index=1,number_of_molecule_types,1
+				N_elements_in_molecule=give_elements_in_molecule(molecule_type_index,molecule_elements)
+				DO stringpos=1,N_elements_in_molecule
+					unique_element_found=.TRUE.
+					IF (give_elements_in_simulation_box==0) THEN
+						unique_element_found=.TRUE.
+					ELSE
+checkstring:			DO m=1,give_elements_in_simulation_box
+							IF (&
+							&element_list_out(m)==&
+							&molecule_elements(stringpos)) THEN
+								unique_element_found=.FALSE.
+								EXIT checkstring
+							ENDIF
+						ENDDO checkstring
+					ENDIF
+					IF (unique_element_found) THEN
+						give_elements_in_simulation_box=give_elements_in_simulation_box+1
+						element_list_out(give_elements_in_simulation_box)=&
+						&molecule_elements(stringpos)
+					ENDIF
+				ENDDO
+			ENDDO
+		END FUNCTION give_elements_in_simulation_box
 
 		INTEGER FUNCTION give_number_of_molecule_types()
 		IMPLICIT NONE

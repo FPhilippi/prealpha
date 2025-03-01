@@ -294,10 +294,11 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!176 nonsensical values for molecule_type_index or atom_index
 	!177 operation mode missing in cluster.inp
 	!178 option not available in the current operation mode.
+	!179 could not allocate memory for microscopic density fourier components
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
-	PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real
+	PUBLIC :: user_input_string,user_input_integer,user_input_logical,user_input_real,quicksort_realarray
 	PUBLIC :: student_t_value,covalence_radius,give_error_count,DEVELOPERS_VERSION,initialise_references,add_reference,print_references
 	PRIVATE :: q !that's not a typo!
 	PRIVATE :: error_count
@@ -1012,6 +1013,10 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) "--> please add 'GLOBAL' or 'PAIRS' to the beginning of your cluster input file."
 				CASE (178)
 					WRITE(*,*) " #  ERROR 178: This option is not available in the current operation mode. This line is ignored."
+				CASE (179)
+					WRITE(*,*) " #  SEVERE ERROR 179: couldn't allocate memory for microscopic fourier density component."
+					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
+					STOP
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
@@ -1410,6 +1415,40 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		IMPLICIT NONE
 			CALL FLUSH()
 		END SUBROUTINE refresh_IO
+
+		!The following subroutine is a quicksort algorithm to sort an array of TYPE REAL from left to right
+		RECURSIVE SUBROUTINE quicksort_realarray(left,right,realarray_inout)
+		IMPLICIT NONE
+		INTEGER,INTENT(IN) :: left,right
+		INTEGER :: a,b
+		REAL,DIMENSION(*),INTENT(INOUT) :: realarray_inout
+		REAL :: real_clip,pivot
+			IF (left<right) THEN
+				pivot=realarray_inout(left)
+				a=left
+				b=right
+				DO
+					DO WHILE (realarray_inout(a)<pivot)
+						a=a+1
+					ENDDO
+					DO WHILE (realarray_inout(b)>pivot)
+						b=b-1
+					ENDDO
+					IF (a>=b) EXIT
+					!swap elements, unless they're the same
+					IF (realarray_inout(a)==realarray_inout(b)) THEN
+						b=b-1
+						IF (a==b) EXIT
+					ELSE
+						real_clip=realarray_inout(a)
+						realarray_inout(a)=realarray_inout(b)
+						realarray_inout(b)=real_clip
+					ENDIF
+				ENDDO
+				CALL quicksort_realarray(left,b,realarray_inout)
+				CALL quicksort_realarray(b+1,right,realarray_inout)
+			ENDIF
+		END SUBROUTINE quicksort_realarray
 
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
