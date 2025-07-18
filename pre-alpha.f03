@@ -1,4 +1,4 @@
-! RELEASED ON 01_Mar_2025 AT 17:43
+! RELEASED ON 18_Jul_2025 AT 16:34
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2025 Frederik Philippi
@@ -113,7 +113,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
   INTEGER :: reference_number
   LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
- TYPE(reference_entry) :: LIST_OF_REFERENCES(6)
+ TYPE(reference_entry) :: LIST_OF_REFERENCES(7)
  !LIST OF ERRORS HANDLED BY THE ROUTINES:
  !0 unspecified error. These errors should (in theory) never be encountered.
  !1 divided by zero in normalize3D
@@ -328,6 +328,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
    !The battery paper
    LIST_OF_REFERENCES(6)%reference_name="Chem. Sci., 2024, 15, 7342–7358."
    LIST_OF_REFERENCES(6)%reference_DOI="10.1039/D4SC01492H"
+   !The speciation paper
+   LIST_OF_REFERENCES(7)%reference_name="Phys. Chem. Chem. Phys., 2025,27, 15185-15195."
+   LIST_OF_REFERENCES(7)%reference_DOI="10.1039/D5CP00222B"
   END SUBROUTINE initialise_references
 
   SUBROUTINE add_reference(reference_number_to_add)
@@ -23007,7 +23010,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2025 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 01_Mar_2025"
+ PRINT *, "   Date of Release: 18_Jul_2025"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -26365,6 +26368,7 @@ INTEGER :: ios,n
      WRITE(*,*) "Speciation module invoked."
      CALL perform_speciation_analysis()
      CALL add_reference(6)
+     CALL add_reference(7)
     CASE ("cluster","cluster_analysis") !Module CLUSTER
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
      BACKSPACE 7
@@ -26377,6 +26381,7 @@ INTEGER :: ios,n
      WRITE(*,*) "Cluster module invoked."
      CALL perform_cluster_analysis()
      CALL add_reference(6)
+     CALL add_reference(7)
     CASE ("diffusion_simple")
      IF (WRAP_TRAJECTORY) THEN
       CALL report_error(72)
@@ -26413,9 +26418,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
-     CALL add_reference(1)
      CALL add_reference(2)
-     CALL add_reference(3)
      CALL add_reference(4)
     CASE ("distribution_simple")
      IF (BOX_VOLUME_GIVEN) THEN
@@ -26427,9 +26430,7 @@ INTEGER :: ios,n
      ELSE
       CALL report_error(41)
      ENDIF
-     CALL add_reference(1)
      CALL add_reference(2)
-     CALL add_reference(3)
      CALL add_reference(4)
     CASE ("charge_arm_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -26437,9 +26438,7 @@ INTEGER :: ios,n
      WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
      CALL write_simple_charge_arm()
      CALL perform_distribution_analysis()
-     CALL add_reference(1)
      CALL add_reference(2)
-     CALL add_reference(3)
      CALL add_reference(4)
     CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
      IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -26448,9 +26447,7 @@ INTEGER :: ios,n
      WRITE(*,*) "(charge arm with charge lever moment correction)"
      CALL write_simple_charge_arm(normalise=.TRUE.)
      CALL perform_distribution_analysis()
-     CALL add_reference(1)
      CALL add_reference(2)
-     CALL add_reference(3)
      CALL add_reference(4)
     CASE ("conductivity_simple")
      IF (BOX_VOLUME_GIVEN) THEN
