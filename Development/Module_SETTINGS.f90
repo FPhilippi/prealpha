@@ -112,7 +112,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 		INTEGER :: reference_number
 		LOGICAL :: cited !TRUE if cited
     END TYPE reference_entry
-	TYPE(reference_entry) :: LIST_OF_REFERENCES(6)
+	TYPE(reference_entry) :: LIST_OF_REFERENCES(7)
 	!LIST OF ERRORS HANDLED BY THE ROUTINES:
 	!0 unspecified error. These errors should (in theory) never be encountered.
 	!1 divided by zero in normalize3D
@@ -327,6 +327,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 			!The battery paper
 			LIST_OF_REFERENCES(6)%reference_name="Chem. Sci., 2024, 15, 7342–7358."
 			LIST_OF_REFERENCES(6)%reference_DOI="10.1039/D4SC01492H"
+			!The speciation paper
+			LIST_OF_REFERENCES(7)%reference_name="Phys. Chem. Chem. Phys., 2025,27, 15185-15195."
+			LIST_OF_REFERENCES(7)%reference_DOI="10.1039/D5CP00222B"
 		END SUBROUTINE initialise_references
 
 		SUBROUTINE add_reference(reference_number_to_add)

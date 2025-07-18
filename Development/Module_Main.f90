@@ -3415,6 +3415,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "Speciation module invoked."
 					CALL perform_speciation_analysis()
 					CALL add_reference(6)
+					CALL add_reference(7)
 				CASE ("cluster","cluster_analysis") !Module CLUSTER
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
 					BACKSPACE 7
@@ -3427,6 +3428,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "Cluster module invoked."
 					CALL perform_cluster_analysis()
 					CALL add_reference(6)
+					CALL add_reference(7)
 				CASE ("diffusion_simple")
 					IF (WRAP_TRAJECTORY) THEN
 						CALL report_error(72)
@@ -3463,9 +3465,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
-					CALL add_reference(1)
 					CALL add_reference(2)
-					CALL add_reference(3)
 					CALL add_reference(4)
 				CASE ("distribution_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
@@ -3477,9 +3477,7 @@ INTEGER :: ios,n
 					ELSE
 						CALL report_error(41)
 					ENDIF
-					CALL add_reference(1)
 					CALL add_reference(2)
-					CALL add_reference(3)
 					CALL add_reference(4)
 				CASE ("charge_arm_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3487,9 +3485,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "Charge Arm distribution. Requires charges to be initialised."
 					CALL write_simple_charge_arm()
 					CALL perform_distribution_analysis()
-					CALL add_reference(1)
 					CALL add_reference(2)
-					CALL add_reference(3)
 					CALL add_reference(4)
 				CASE ("clm_simple","CLM_simple","charge_lever_moment_simple") !MODULE distribution
 					IF (INFORMATION_IN_TRAJECTORY=="VEL") CALL report_error(56)
@@ -3498,9 +3494,7 @@ INTEGER :: ios,n
 					WRITE(*,*) "(charge arm with charge lever moment correction)"
 					CALL write_simple_charge_arm(normalise=.TRUE.)
 					CALL perform_distribution_analysis()
-					CALL add_reference(1)
 					CALL add_reference(2)
-					CALL add_reference(3)
 					CALL add_reference(4)
 				CASE ("conductivity_simple")
 					IF (BOX_VOLUME_GIVEN) THEN
