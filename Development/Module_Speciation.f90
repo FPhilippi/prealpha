@@ -34,7 +34,7 @@ MODULE SPECIATION ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 	INTEGER :: N_acceptor_types
 	INTEGER :: N_donor_types
 	INTEGER :: bytes_needed
-	INTEGER :: tmax
+	INTEGER :: tmax=tmax_default
 	INTEGER :: neighbour_atom_overflow
 	LOGICAL :: atoms_grouped,grouped_by_elements
 	LOGICAL :: print_connection_beads=print_connection_beads_default

@@ -295,6 +295,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 	!177 operation mode missing in cluster.inp
 	!178 option not available in the current operation mode.
 	!179 could not allocate memory for microscopic density fourier components
+	!180 cluster autocorrelation only available for a single cutoff distance
 	!PRIVATE/PUBLIC declarations
 	PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
 	PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -1020,6 +1021,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 					WRITE(*,*) " #  SEVERE ERROR 179: couldn't allocate memory for microscopic fourier density component."
 					WRITE(*,*) " #  Program will stop immediately. Please report this issue."
 					STOP
+				CASE (180)
+					WRITE(*,*) " #  ERROR 180: time autocorrelation is only available for a single cutoff distance."
+					WRITE(*,*) "--> please choose a cutoff! turning off correlation for now."
 				CASE DEFAULT
 					WRITE(*,*) " #  ERROR: Unspecified error"
 				END SELECT
