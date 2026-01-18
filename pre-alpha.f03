@@ -1,7 +1,7 @@
-! RELEASED ON 18_Jul_2025 AT 16:34
+! RELEASED ON 18_Jan_2026 AT 18:00
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
-    ! Copyright (C) 2025 Frederik Philippi
+    ! Copyright (C) 2026 Frederik Philippi
     ! This work is funded by the Imperial President's PhD Scholarship.
     ! This work is funded by the Japan Society for the Promotion of Science.
     ! This work is funded by the European Union.
@@ -296,6 +296,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
  !177 operation mode missing in cluster.inp
  !178 option not available in the current operation mode.
  !179 could not allocate memory for microscopic density fourier components
+ !180 cluster autocorrelation only available for a single cutoff distance
  !PRIVATE/PUBLIC declarations
  PUBLIC :: normalize2D,normalize3D,crossproduct,report_error,timing_parallel_sections,legendre_polynomial
  PUBLIC :: FILENAME_TRAJECTORY,PATH_TRAJECTORY,PATH_INPUT,PATH_OUTPUT,user_friendly_time_output
@@ -1021,6 +1022,9 @@ MODULE SETTINGS !This module contains important globals and subprograms.
      WRITE(*,*) " #  SEVERE ERROR 179: couldn't allocate memory for microscopic fourier density component."
      WRITE(*,*) " #  Program will stop immediately. Please report this issue."
      STOP
+    CASE (180)
+     WRITE(*,*) " #  ERROR 180: time autocorrelation is only available for a single cutoff distance."
+     WRITE(*,*) "--> please choose a cutoff! turning off correlation for now."
     CASE DEFAULT
      WRITE(*,*) " #  ERROR: Unspecified error"
     END SELECT
@@ -1457,7 +1461,7 @@ MODULE SETTINGS !This module contains important globals and subprograms.
 END MODULE SETTINGS
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module can be used to perform rotations and also to turn a set of coordinates into a dihedral angle.
-MODULE ANGLES ! Copyright (C) 2025 Frederik Philippi
+MODULE ANGLES ! Copyright (C) 2026 Frederik Philippi
     USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -1640,7 +1644,7 @@ MODULE ANGLES ! Copyright (C) 2025 Frederik Philippi
 END MODULE ANGLES
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This module is responsible for handling the trajectory and passing information to other modules.
-MODULE MOLECULAR ! Copyright (C) 2025 Frederik Philippi
+MODULE MOLECULAR ! Copyright (C) 2026 Frederik Philippi
 !Atomic masses are handled with single precision.
     USE SETTINGS
  IMPLICIT NONE
@@ -7495,7 +7499,7 @@ END MODULE MOLECULAR
 !--------------------------------------------------------------------------------------------------------------------------------!
 
 !This module contains procedures for debugging and technical purposes.
-MODULE DEBUG ! Copyright (C) 2025 Frederik Philippi
+MODULE DEBUG ! Copyright (C) 2026 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -9402,7 +9406,7 @@ END MODULE DEBUG
 !these constraints can be only one (e.g. for simple chain conformer analyses), two (e.g. two dihedrals plus folding for cisoid/transoid transitions), or more.
 !reorientational autocorrelation functions.
 !relative mean molecular velocity correlation functions.
-MODULE AUTOCORRELATION ! Copyright (C) 2025 Frederik Philippi
+MODULE AUTOCORRELATION ! Copyright (C) 2026 Frederik Philippi
     USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -12976,7 +12980,7 @@ END MODULE AUTOCORRELATION
 
 !This Module calculates (drift corrected) mean squared displacements.
 !The diffusion implementation is shit. Use TRAVIS.
-MODULE DIFFUSION ! Copyright (C) 2025 Frederik Philippi
+MODULE DIFFUSION ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -14357,7 +14361,7 @@ MODULE DIFFUSION ! Copyright (C) 2025 Frederik Philippi
 END MODULE DIFFUSION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs low-level command line tasks.
-MODULE RECOGNITION ! Copyright (C) 2025 Frederik Philippi
+MODULE RECOGNITION ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  IMPLICIT NONE
  PRIVATE
@@ -14994,7 +14998,7 @@ MODULE RECOGNITION ! Copyright (C) 2025 Frederik Philippi
 END MODULE RECOGNITION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates special combined distribution functions - such as cylindrical or polar.
-MODULE DISTRIBUTION ! Copyright (C) 2025 Frederik Philippi
+MODULE DISTRIBUTION ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -16267,7 +16271,7 @@ MODULE DISTRIBUTION ! Copyright (C) 2025 Frederik Philippi
 END MODULE DISTRIBUTION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates intra- and intermolecular contact distance estimates (averages of closest distance)
-MODULE DISTANCE ! Copyright (C) 2025 Frederik Philippi
+MODULE DISTANCE ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -17518,7 +17522,7 @@ END MODULE DISTANCE
 !  -  Li coordinated by two DMEs, with two oxygens each
 ! ... and so on, here I only listed those that lead to exactly four neighbours.
 !This module identifies these different species and keeps track of them and how often they occur.
-MODULE SPECIATION ! Copyright (C) 2025 Frederik Philippi
+MODULE SPECIATION ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -17544,7 +17548,7 @@ MODULE SPECIATION ! Copyright (C) 2025 Frederik Philippi
  INTEGER :: N_acceptor_types
  INTEGER :: N_donor_types
  INTEGER :: bytes_needed
- INTEGER :: tmax
+ INTEGER :: tmax=tmax_default
  INTEGER :: neighbour_atom_overflow
  LOGICAL :: atoms_grouped,grouped_by_elements
  LOGICAL :: print_connection_beads=print_connection_beads_default
@@ -20782,7 +20786,7 @@ doublespecies:   DO species_molecules_doubles=species_molecules+1,acceptor_list(
 END MODULE SPECIATION
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module calculates properties that require the microscopic density fourier components.
-MODULE SFACTOR ! Copyright (C) 2025 Frederik Philippi
+MODULE SFACTOR ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -21393,7 +21397,7 @@ xloop:  DO nx=0,n_max(1) !loop over n_x
 END MODULE SFACTOR
 !--------------------------------------------------------------------------------------------------------------------------------!
 !This Module performs a detailed cluster analysis.
-MODULE CLUSTER ! Copyright (C) 2025 Frederik Philippi
+MODULE CLUSTER ! Copyright (C) 2026 Frederik Philippi
  USE SETTINGS
  USE MOLECULAR
  IMPLICIT NONE
@@ -21401,19 +21405,25 @@ MODULE CLUSTER ! Copyright (C) 2025 Frederik Philippi
  !default values
  INTEGER,PARAMETER :: nsteps_default=1 !how many steps to use from trajectory
  INTEGER,PARAMETER :: sampling_interval_default=1
+ INTEGER,PARAMETER :: tmax_default=10000
  LOGICAL,PARAMETER :: print_statistics_default=.FALSE.
  LOGICAL,PARAMETER :: print_spectators_default=.FALSE.
+ LOGICAL,PARAMETER :: use_logarithmic_spacing_default=.FALSE.
+ LOGICAL,PARAMETER :: calculate_autocorrelation_default=.TRUE.
  !variables
  CHARACTER (LEN=10) :: operation_mode="NONE"!operation mode of the cluster module.
  !operation_mode="PAIRS": needs pairs of atom indices and their fixed cutoffs
  !operation_mode="GLOBAL": needs a global cutoff operating on a set of atoms. The latter are specified by molecule_type_index and atom_index, and the code iterates over molecule_index.
  INTEGER :: nsteps=nsteps_default !how many steps to use from trajectory
  INTEGER :: sampling_interval=sampling_interval_default
- INTEGER :: N_cutoffs,N_atoms,N_steps_to_print,N_Pairs
+ INTEGER :: N_cutoffs,N_atoms,N_steps_to_print,N_Pairs,N_largest_cluster
  INTEGER :: bytes_needed
+ INTEGER :: tmax=tmax_default
  LOGICAL :: print_statistics=print_statistics_default
  LOGICAL :: print_spectators=print_spectators_default !if T, print also the molecules which are not members of list_of_atoms
+ LOGICAL :: use_logarithmic_spacing=use_logarithmic_spacing_default
  LOGICAL :: custom_weights=.FALSE.
+ LOGICAL :: calculate_autocorrelation=calculate_autocorrelation_default
  TYPE :: cluster_atom
   INTEGER :: molecule_type_index
   INTEGER :: molecule_index
@@ -21576,6 +21586,9 @@ MODULE CLUSTER ! Copyright (C) 2025 Frederik Philippi
    custom_weights=.FALSE.
    bytes_needed=0
    operation_mode="NONE"
+   tmax=tmax_default
+   use_logarithmic_spacing=use_logarithmic_spacing_default
+   calculate_autocorrelation=calculate_autocorrelation_default
   END SUBROUTINE set_defaults
 
   !initialises the cluster module by reading the specified input file.
@@ -21921,6 +21934,40 @@ MODULE CLUSTER ! Copyright (C) 2025 Frederik Philippi
       ELSE
        CALL report_error(178)
       ENDIF
+     CASE ("tmax","t_max")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,tmax
+      IF (ios/=0) THEN
+       CALL report_error(24,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0,A)') "   setting 'tmax' to default (=",tmax_default,")"
+       tmax=tmax_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,I0)') "   setting 'tmax' to ",tmax
+      ENDIF
+     CASE ("logarithmic_spacing","logarithmic","log_spacing","use_logarithmic_spacing","use_log")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,use_logarithmic_spacing
+      IF (ios/=0) THEN
+       CALL report_error(158,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+       &"   setting 'use_logarithmic_spacing' to default (=",use_logarithmic_spacing_default,")"
+       use_logarithmic_spacing=use_logarithmic_spacing_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'use_logarithmic_spacing' to ",&
+       &use_logarithmic_spacing
+      ENDIF
+     CASE ("correlate","autocorrelation","time_correlation","calculate_autocorrelation")
+      BACKSPACE 3
+      READ(3,IOSTAT=ios,FMT=*) inputstring,calculate_autocorrelation
+      IF (ios/=0) THEN
+       CALL report_error(158,exit_status=ios)
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1,A)')&
+       &"   setting 'calculate_autocorrelation' to default (=",calculate_autocorrelation_default,")"
+       calculate_autocorrelation=calculate_autocorrelation_default
+      ELSE
+       IF (VERBOSE_OUTPUT) WRITE(*,'(A,L1)') "   setting 'calculate_autocorrelation' to ",&
+       &calculate_autocorrelation
+      ENDIF
      CASE ("single_cutoff","cutoff")
       IF (TRIM(operation_mode)=="GLOBAL") THEN
        BACKSPACE 3
@@ -22217,6 +22264,10 @@ check_B:        DO pair_counter=1,current_pair-1,1
      CALL report_error(57,exit_status=nsteps)
      nsteps=give_number_of_timesteps()
     ENDIF
+    IF ((tmax>MAX((nsteps-1+sampling_interval)/sampling_interval,0)-1).OR.(tmax<1)) THEN
+     tmax=MAX((nsteps-1+sampling_interval)/sampling_interval,0)-1
+     CALL report_error(28,exit_status=INT(tmax))
+    ENDIF
    END SUBROUTINE read_body
 
    !The following subroutine is a quicksort algorithm to sort the cutoff list.
@@ -22362,7 +22413,7 @@ check_B:        DO pair_counter=1,current_pair-1,1
   !$ END INTERFACE
   INTEGER :: stepcounter,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,cluster_counts
   INTEGER :: cutoff_counter
-  LOGICAL :: steps_printed
+  LOGICAL :: steps_printed,connected
   REAL :: normalisation,CCF
   CHARACTER(LEN=1024) :: fstring,outstring
   TYPE :: one_cluster
@@ -22372,6 +22423,22 @@ check_B:        DO pair_counter=1,current_pair-1,1
   TYPE(one_cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
   INTEGER,DIMENSION(:),ALLOCATABLE :: cluster_number
   steps_printed=.FALSE.
+  N_largest_cluster=0
+  !opening the units for the time series
+  IF (calculate_autocorrelation) THEN
+   IF (N_cutoffs==1) THEN
+    !I need to write a scratch file with one row for each timestep, and as many columns as there are possible cluster members.
+    !the entries are cluster sizes (integer, i.e. 1 if it is a monomer, and so on)
+    INQUIRE(UNIT=11,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=11)
+    OPEN(UNIT=11,STATUS="SCRATCH",IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
+   ELSE
+    !Turn off autocorrelation
+    calculate_autocorrelation=.FALSE.
+    CALL report_error(180,exit_status=N_cutoffs)
+   ENDIF
+  ENDIF
    !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
    !$OMP PRIVATE(list_of_clusters,cluster_number,m,n,i,current_cluster,cutoff_counter,cluster_todelete,cluster_counts)
    !$OMP SINGLE
@@ -22482,6 +22549,11 @@ check_B:        DO pair_counter=1,current_pair-1,1
        ENDIF
       ENDDO
      ENDDO
+     IF (N_largest_cluster<MAXVAL(list_of_clusters(:)%members)) THEN
+      !$OMP CRITICAL(update_largest_cluster)
+      N_largest_cluster=MAXVAL(list_of_clusters(:)%members)
+      !$OMP END CRITICAL(update_largest_cluster)
+     ENDIF
      IF (print_statistics) THEN
       cluster_counts=current_cluster !we found this many non-monomeric clusters!
       DO i=1,current_cluster,1
@@ -22574,6 +22646,19 @@ check_B:        DO pair_counter=1,current_pair-1,1
       ENDIF
      ENDIF
     ENDDO
+    IF (calculate_autocorrelation) THEN
+     !$OMP CRITICAL(write_to_file)
+     WRITE(11,ADVANCE="NO",FMT='(I0," ")') stepcounter
+     DO m=1,N_atoms
+      IF (list_of_clusters(cluster_number(m))%members==0) THEN
+       WRITE(11,ADVANCE="NO",FMT='(I0," ")') 1
+      ELSE
+       WRITE(11,ADVANCE="NO",FMT='(I0," ")') list_of_clusters(cluster_number(m))%members
+      ENDIF
+     ENDDO
+     WRITE(11,*)
+     !$OMP END CRITICAL(write_to_file)
+    ENDIF
     IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
    !$OMP END DO
@@ -22659,7 +22744,7 @@ check_B:        DO pair_counter=1,current_pair-1,1
   !$ END INTERFACE
   INTEGER :: stepcounter,allocstatus,deallocstatus,m,n,current_cluster,i,ios,cluster_todelete,cluster_counts
   INTEGER :: pair_counter
-  LOGICAL :: steps_printed
+  LOGICAL :: steps_printed,connected
   REAL :: normalisation,CCF
   CHARACTER(LEN=1024) :: fstring,outstring
   TYPE :: one_cluster
@@ -22669,6 +22754,22 @@ check_B:        DO pair_counter=1,current_pair-1,1
   TYPE(one_cluster),DIMENSION(:),ALLOCATABLE :: list_of_clusters
   INTEGER,DIMENSION(:),ALLOCATABLE :: cluster_number
    steps_printed=.FALSE.
+   N_largest_cluster=0
+   !opening the units for the time series
+   IF (calculate_autocorrelation) THEN
+    IF (N_cutoffs==1) THEN
+     !I need to write a scratch file with one row for each timestep, and as many columns as there are possible cluster members.
+     !the entries are cluster sizes (integer, i.e. 1 if it is a monomer, and so on)
+     INQUIRE(UNIT=11,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=11)
+     OPEN(UNIT=11,STATUS="SCRATCH",IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+    ELSE
+     !Turn off autocorrelation
+     calculate_autocorrelation=.FALSE.
+     CALL report_error(180,exit_status=N_cutoffs)
+    ENDIF
+   ENDIF
    !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
    !$OMP PRIVATE(list_of_clusters,cluster_number,m,n,i,current_cluster,pair_counter,cluster_todelete,cluster_counts)
    !$OMP SINGLE
@@ -22781,6 +22882,12 @@ check_B:        DO pair_counter=1,current_pair-1,1
       ENDDO
      ENDDO
     ENDDO !end of pair counter loop
+    !Here, all the clusters should be identified
+    IF (N_largest_cluster<MAXVAL(list_of_clusters(:)%members)) THEN
+     !$OMP CRITICAL(update_largest_cluster)
+     N_largest_cluster=MAXVAL(list_of_clusters(:)%members)
+     !$OMP END CRITICAL(update_largest_cluster)
+    ENDIF
     IF (print_statistics) THEN
      cluster_counts=current_cluster !we found this many non-monomeric clusters!
      DO i=1,current_cluster,1
@@ -22872,6 +22979,19 @@ check_B:        DO pair_counter=1,current_pair-1,1
       !$OMP END CRITICAL(print_members)
      ENDIF
     ENDIF
+    IF (calculate_autocorrelation) THEN
+     !$OMP CRITICAL(write_to_file)
+     WRITE(11,ADVANCE="NO",FMT='(I0," ")') stepcounter
+     DO m=1,N_atoms
+      IF (list_of_clusters(cluster_number(m))%members==0) THEN
+       WRITE(11,ADVANCE="NO",FMT='(I0," ")') 1
+      ELSE
+       WRITE(11,ADVANCE="NO",FMT='(I0," ")') list_of_clusters(cluster_number(m))%members
+      ENDIF
+     ENDDO
+     WRITE(11,*)
+     !$OMP END CRITICAL(write_to_file)
+    ENDIF
     IF (VERBOSE_OUTPUT) CALL print_progress()
    ENDDO
    !$OMP END DO
@@ -22926,6 +23046,263 @@ check_B:        DO pair_counter=1,current_pair-1,1
    ENDIF
   END SUBROUTINE cluster_analysis_PAIRS
 
+  !I should really write a general one
+  SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG()
+  IMPLICIT NONE
+  !$ INTERFACE
+  !$  FUNCTION OMP_get_num_threads()
+  !$  INTEGER :: OMP_get_num_threads
+  !$  END FUNCTION OMP_get_num_threads
+  !$ END INTERFACE
+  INTEGER :: timeline,logarithmic_entry_counter,entries
+  REAL(WORKING_PRECISION),DIMENSION(:,:),ALLOCATABLE :: autocorrelation_function
+  !the quantity C(t), which is calculated as uncorrected and THEN afterwards corrected.
+  !here, the first dimension are the timesteps, and the second dimension are the possible cluster sizes.
+  REAL(WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: temp_function !running over the possible cluster sizes.
+  INTEGER,DIMENSION(:,:),ALLOCATABLE :: molecule_clusterarray !This array essentially contains the information in the time_series file. first dimension is timestep, second dimension are the cluster sizes from 1 to N_atoms
+  INTEGER,DIMENSION(:),ALLOCATABLE :: timesteps_array !which timestep is this entry in autocorrelation_function?
+  INTEGER :: allocstatus,deallocstatus,ios,stepcounter,cluster_counter,dummy,atom_counter,upper_limit,firststep
+  LOGICAL :: connected
+  REAL(KIND=WORKING_PRECISION),DIMENSION(:),ALLOCATABLE :: average_h
+   WRITE(*,'("   Calculating cluster autocorrelation functions!")')
+   !allocate memory for the molecule_clusterarray and fill from file.
+   IF (ALLOCATED(molecule_clusterarray)) CALL report_error(0)
+   upper_limit=MAX((nsteps-1+sampling_interval)/sampling_interval,0)
+   ALLOCATE(molecule_clusterarray(upper_limit,N_atoms),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   molecule_clusterarray(:,:)=-1
+   REWIND 11
+   DO dummy=1,upper_limit,1
+    !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
+    READ(11,IOSTAT=ios,FMT=*) stepcounter
+    IF (ios/=0) THEN
+     CALL report_error(167,exit_status=ios)
+     DEALLOCATE(molecule_clusterarray,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ENDIF
+    IF (molecule_clusterarray(stepcounter,1)/=-1) CALL report_error(0) !double entry???
+    BACKSPACE 11
+    READ(11,IOSTAT=ios,FMT=*) stepcounter,molecule_clusterarray(stepcounter,:)
+    IF (ios/=0) THEN
+     CALL report_error(167,exit_status=ios)
+     DEALLOCATE(molecule_clusterarray,STAT=deallocstatus)
+     IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+    ENDIF
+   ENDDO
+   CLOSE(UNIT=11)
+   IF (COUNT(molecule_clusterarray(:,:)==-1)>0) CALL report_error(0) !missing entry???
+   
+   !save the average_h for later. basically the same as the occurrences
+   IF (ALLOCATED(average_h)) CALL report_error(0)
+   ALLOCATE(average_h(1:N_largest_cluster),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   DO cluster_counter=1,N_largest_cluster,1
+    average_h(cluster_counter)=DFLOAT(COUNT(molecule_clusterarray(:,:)==cluster_counter))
+    average_h(cluster_counter)=average_h(cluster_counter)/DFLOAT(upper_limit*N_atoms)
+    IF (DEVELOPERS_VERSION) WRITE(*,FMT='("    ! <h(",I0,")>=",F7.3,"%")') cluster_counter,average_h(cluster_counter)*100.0
+   ENDDO
+   !Count how many entries we will need. safer than me trying to get that number with maths.
+   timeline=0
+   entries=0
+   DO WHILE (timeline<tmax)
+    IF (use_logarithmic_spacing) THEN
+     timeline=timeline+MAX(INT(LOG(FLOAT(timeline))),1)
+    ELSE
+     timeline=timeline+1
+    ENDIF
+    IF (timeline>tmax) timeline=tmax
+    entries=entries+1
+   ENDDO
+   IF (use_logarithmic_spacing) THEN
+    WRITE(*,'("     Logarithmic spacing, autocorrelation function will have ",I0," entries up to ",I0,".")')&
+    &entries,tmax
+   ELSE
+    WRITE(*,'("     Linear spacing, autocorrelation function will have ",I0," entries up to ",I0,".")')&
+    &entries,tmax
+   ENDIF
+   !allocate memory for the timesteps (from t=0 to t=tmax)
+   IF (ALLOCATED(timesteps_array)) CALL report_error(0)
+   ALLOCATE(timesteps_array(0:entries),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   timeline=0
+   entries=0
+   timesteps_array(0)=0
+   !get the entries again - this is needed, because I do not want to work with pointers and dynamic stuff.
+   DO WHILE (timeline<tmax)
+    IF (use_logarithmic_spacing) THEN
+     timeline=timeline+MAX(INT(LOG(FLOAT(timeline))),1)
+    ELSE
+     timeline=timeline+1
+    ENDIF
+    IF (timeline>tmax) timeline=tmax
+    entries=entries+1
+    timesteps_array(entries)=timeline
+   ENDDO
+   !allocate memory for the autocorrelation_function (from t=0 to t=tmax)
+   IF (ALLOCATED(autocorrelation_function)) CALL report_error(0)
+   ALLOCATE(autocorrelation_function(0:entries,1:N_largest_cluster),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   !initialise autocorrelation_function.
+   autocorrelation_function(:,:)=0.0_DP
+   !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(temp_function,timeline,logarithmic_entry_counter,stepcounter)&
+   !$OMP PRIVATE (cluster_counter,allocstatus,firststep)
+   !$OMP SINGLE
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE (*,ADVANCE="NO",FMT='(A,I0)') "     ### Parallel execution on ",OMP_get_num_threads()
+   !$  WRITE (*,'(A)') " threads (intermittent autocorrelation function)"
+   !$  CALL timing_parallel_sections(.TRUE.)
+   !$ ENDIF
+   IF (VERBOSE_OUTPUT) THEN
+    IF (N_atoms>100) WRITE(*,ADVANCE="NO",FMT='("    ")')
+    CALL print_progress(N_atoms)
+    IF (N_atoms>100) WRITE(*,ADVANCE="NO",FMT='("    ")')
+   ENDIF
+   !$OMP END SINGLE
+   !allocate the temporary autocorrelation function
+   IF (ALLOCATED(temp_function)) CALL report_error(0)
+   ALLOCATE(temp_function(1:N_largest_cluster),STAT=allocstatus)
+   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
+   !iterate over molecules and pass chunks to the subroutine that iterates over stepcounter
+   !$OMP DO SCHEDULE(STATIC,1)
+   DO atom_counter=1,N_atoms,1
+    !'timeline' is the argument of the autocorrelation_function, i.e. the time shift of the original function.
+    !for example, if the current shift is timeline=1000, and there are 10000 timesteps in total,
+    !THEN the argument has to be evaluated from (h(0+0)-<h>)(h(0+1000)-<h>) up to (h(9000+0)-<h>)(h(9000+1000)-<h>)
+    !timeline=0 is 1.0 for all
+    DO logarithmic_entry_counter=0,entries,1
+     timeline=timesteps_array(logarithmic_entry_counter)
+     !inner loop iterates over the whole chunk, i.e. the subset of the autocorr_array for the molecule in question.
+     temp_function(:)=0.0d0
+     DO stepcounter=1,upper_limit-timeline,1
+      !the actual steps are stepcounter*sampling_interval*TIME_SCALING_FACTOR
+      !this is the central part of the whole autocorrelation process.
+      !because we have the clusters, it should look something like this.....
+      DO cluster_counter=1,N_largest_cluster,1
+       IF (molecule_clusterarray(stepcounter,atom_counter)==cluster_counter) THEN
+        !h(t0) is one
+        IF (molecule_clusterarray(stepcounter+timeline,atom_counter)==cluster_counter)THEN
+         !h(t0+t) is one
+         temp_function(cluster_counter)=temp_function(cluster_counter)+&
+         &(1.0d0-average_h(cluster_counter))*(1.0d0-average_h(cluster_counter))
+         !which is (1.0d0-average_h(cluster_counter))*(1.0d0-average_h(cluster_counter))
+        ELSE
+         !h(t0+t) is zero
+         temp_function(cluster_counter)=temp_function(cluster_counter)+&
+         &(average_h(cluster_counter)-1.0d0)*(average_h(cluster_counter))
+         !which is (1.0d0-average_h(cluster_counter))*(0.0d0-average_h(cluster_counter))
+        ENDIF
+       ELSE
+        !h(t0) is zero
+        IF (molecule_clusterarray(stepcounter+timeline,atom_counter)==cluster_counter)THEN
+         !h(t0+t) is one
+         temp_function(cluster_counter)=temp_function(cluster_counter)+&
+         &(average_h(cluster_counter))*(average_h(cluster_counter)-1.0d0)
+         !which is (0.0d0-average_h(cluster_counter))*(1.0d0-average_h(cluster_counter))
+        ELSE
+         !h(t0+t) is zero
+         temp_function(cluster_counter)=temp_function(cluster_counter)+&
+         &(average_h(cluster_counter))*(average_h(cluster_counter))
+         !which is (0.0d0-average_h(cluster_counter))*(0.0d0-average_h(cluster_counter))
+        ENDIF
+       ENDIF
+      ENDDO
+     ENDDO
+     !Normalise result. For the above example, this would be division by 9000
+     !$OMP CRITICAL(autocorrelation_updates)
+     autocorrelation_function(logarithmic_entry_counter,:)=&
+     &autocorrelation_function(logarithmic_entry_counter,:)+&
+     &temp_function(:)/DFLOAT(upper_limit-timeline)
+     !$OMP END CRITICAL(autocorrelation_updates)
+    ENDDO! End of outer loop over time shifts
+    !$OMP CRITICAL(progress)
+    IF (VERBOSE_OUTPUT) CALL print_progress()
+    !$OMP END CRITICAL(progress)
+   ENDDO
+   !$OMP END DO
+   DEALLOCATE(temp_function,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   !$OMP END PARALLEL
+   IF ((N_atoms>100)&
+   &.AND.(VERBOSE_OUTPUT)) WRITE(*,*)
+   !$ IF ((VERBOSE_OUTPUT).AND.(PARALLEL_OPERATION)) THEN
+   !$  WRITE(*,ADVANCE="NO",FMT='("     ### End of parallelised section, took ")')
+   !$  CALL timing_parallel_sections(.FALSE.)
+   !$ ENDIF
+   !normalise autocorrelation_function by number of atoms
+   autocorrelation_function(:,:)=autocorrelation_function(:,:)/DFLOAT(N_atoms)
+   !print / report autocorrelation function
+   CALL report_autocorrelation_function()
+   DEALLOCATE(timesteps_array,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   DEALLOCATE(autocorrelation_function,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   DEALLOCATE(molecule_clusterarray,STAT=deallocstatus)
+   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   IF (ALLOCATED(average_h)) THEN
+    DEALLOCATE(average_h,STAT=deallocstatus)
+    IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+   ELSE
+    CALL report_error(0)
+   ENDIF
+
+   CONTAINS
+
+    SUBROUTINE report_autocorrelation_function
+    !Output formats - AUTOCORRELATION module
+    IMPLICIT NONE
+    CHARACTER(LEN=12) :: cluster_number_output
+    CHARACTER(LEN=1024) :: filename_autocorrelationlog
+    REAL :: h_low,h_high,h_stdev,h_local
+     WRITE(filename_autocorrelationlog,'(A,I0,A)') TRIM(PATH_OUTPUT)//TRIM(ADJUSTL(OUTPUT_PREFIX))&
+     &//"cluster_autocorrelation.dat"
+     IF (VERBOSE_OUTPUT) WRITE(*,'(A,A,A)') "     writing autocorrelation function into file '",&
+     &TRIM(ADJUSTL(filename_autocorrelationlog)),"'"
+     INQUIRE(UNIT=3,OPENED=connected)
+     IF (connected) CALL report_error(27,exit_status=3)
+     OPEN(UNIT=3,FILE=TRIM(ADJUSTL(filename_autocorrelationlog)),IOSTAT=ios)
+     IF (ios/=0) CALL report_error(26,exit_status=ios)
+     WRITE(3,*) "This file contains the intermittent autocorrelation function based on the input file '"&
+     &,TRIM(FILENAME_CLUSTER_INPUT),"'"
+   !  IF (VERBOSE_OUTPUT) WRITE(*,'(" normalise autocorrelation function: dividing by ",F5.3)') 0.0
+     WRITE(3,*) "One column per cluster size. First column = timeline, other columns are C(t)=<(h(t0+t)-<h>)(h(t0)-<h>)>/<(h(t0)-<h>)**2>"!up until here, autocorrelation_function is not normalised
+     !sanity check
+     IF (MAX((nsteps-1+sampling_interval)/sampling_interval,0)/=&
+     &SIZE(molecule_clusterarray(:,1))) CALL report_error(0)
+
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<h>"
+     DO cluster_counter=1,N_largest_cluster
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)') average_h(cluster_counter)
+     ENDDO
+     WRITE(3,*)
+
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "<(h(t0)-<h>)^2>"
+     DO cluster_counter=1,N_largest_cluster
+      WRITE(3,ADVANCE="NO",FMT='(F15.10)')autocorrelation_function(0,cluster_counter)
+     ENDDO
+     WRITE(3,*)
+     WRITE(3,ADVANCE="NO",FMT='(A15)') "timeline"
+     DO cluster_counter=1,N_largest_cluster
+      WRITE(cluster_number_output,'("Size=",I0)') cluster_counter
+      WRITE(3,ADVANCE="NO",FMT='(A15)') cluster_number_output
+     ENDDO
+     WRITE(3,*)
+     DO logarithmic_entry_counter=0,entries,1
+      timeline=timesteps_array(logarithmic_entry_counter)
+      WRITE(3,ADVANCE="NO",FMT='(I15)') timeline*TIME_SCALING_FACTOR*sampling_interval
+      DO cluster_counter=1,N_largest_cluster
+       WRITE(3,ADVANCE="NO",FMT='(F15.10)')&
+       &SNGL(autocorrelation_function(logarithmic_entry_counter,cluster_counter)&
+       &/autocorrelation_function(0,cluster_counter))
+      ENDDO
+      WRITE(3,*)
+     ENDDO
+     ENDFILE 3
+     CLOSE(UNIT=3)
+    END SUBROUTINE report_autocorrelation_function
+
+  END SUBROUTINE calculate_autocorrelation_function_from_master_array_LOG
+
   SUBROUTINE perform_cluster_analysis()
   IMPLICIT NONE
    CALL initialise_cluster()
@@ -22943,6 +23320,9 @@ check_B:        DO pair_counter=1,current_pair-1,1
      CALL cluster_analysis_GLOBAL()
     ELSE
      CALL cluster_analysis_PAIRS()
+    ENDIF
+    IF (calculate_autocorrelation) THEN
+     CALL calculate_autocorrelation_function_from_master_array_LOG()
     ENDIF
     CALL finalise_cluster()
    ELSE
@@ -23007,10 +23387,10 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   PRINT *, "   #######################"
   PRINT *
  ENDIF
- PRINT *, "   Copyright (C) 2025 Frederik Philippi"
+ PRINT *, "   Copyright (C) 2026 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 18_Jul_2025"
+ PRINT *, "   Date of Release: 18_Jan_2026"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
@@ -26758,7 +27138,7 @@ INTEGER :: deallocstatus
  IF (DISCONNECTED) CLOSE(UNIT=6)
 END SUBROUTINE finalise_command_line_arguments
 
-PROGRAM PREALPHA ! Copyright (C) 2025 Frederik Philippi
+PROGRAM PREALPHA ! Copyright (C) 2026 Frederik Philippi
 USE SETTINGS
 USE MOLECULAR
 USE DEBUG
