@@ -1,0 +1,268 @@
+21.01.2026:
+	Finishing touches to cluster autocorrelation function. Works best for GLOBAL but implemented for PAIRS, too.
+	Also I improved the wrapping/unwrapping procedure and implemented compatibility with xyz trajectories in this case.
+18.01.2026:
+	Implemented Cluster autocorrelation function
+18.07.2025:
+	Updated references
+01.03.2025:
+	Started working on structure factor module
+24.02.2025:
+	Added elements up to uranium. Everything should now be supported.
+30.10.2024:
+	Bug fixes
+29.10.2024:
+	Decluttered the repository, moved separate module files in 'Development'.
+28.10.2024:
+	Cluster analysis and peripherals debugged.
+	Two operation modes available, PAIRS and GLOBAL.
+26.10.2024:
+	The cluster analysis I have been working on is now embedded in the main module.
+	Will fix bugs and outputs over the coming days.
+02.09.2024:
+	Bug fixes related to the normalisation - the composition was off by up to 10% in some cases. Much more stable numerically now.
+01.09.2024:
+	Introduced communal solvation correction to speciation module
+26.08.2024:
+	Fixed minor bugs (speciation user input, drude particle recognition if xyz files are used)
+25.08.2024:
+	Fixed bug that caused problems when reading very short trajectories
+	added Zinc and Calcium
+23.07.2024:
+	Added Mg to atom list... probably some day I should just do the whole periodic table but who is going to use the code anyways
+22.07.2024:
+	Bug fix in speciation module
+15.07.2024:
+	Updated Reference list
+08.03.2024:
+	Added user input for speciation module.
+06.03.2024:
+	speciation module is now capable of calculating species time correlation functions
+29.02.2024:
+	Simplified statistics output for the speciation module, updated manual
+27.02.2024:
+	Improved speciation module, which is now also parallelised.
+24.02.2024:
+	Improved capability of speciation module. No user interface yet.
+17.02.2024:
+	Introduced speciation module. This module calculates speciation statistics.
+06.02.2024:
+	updated manual with a definition of how prealpha calculates the cross-diffusion coefficients
+30.01.2024:
+	Bug fixes, removed typos
+30.09.2023:
+	Added user input interface for alpha2
+29.09.2023:
+	Added convenient feature to directly calculate alpha2 parameters plus MSD
+28.09.2023:
+	Introduced unwrap trajectory feature.
+	minor bugfixes
+22.09.2022:
+	Updated Reference list
+	Bug Fixes
+10.02.2022:
+	Updated Reference list
+20.10.2021:
+	Minor bugfixes.
+	Added reference list to be shown at the end of output.
+07.08.2021:
+	Minor bugfixes, introduced new switch to export slabs
+28.07.2021:
+	Minor bugfixes, cosmetics (progress bars)
+17.05.2021:
+	Added 'export' to the reorientational autocorrelation module.
+	Also added 'skip_autocorrelation'
+	(which now makes sense with the export being available)
+09.05.2021:
+	Added clm_simple keyword - like charge_arm_simple, but normalised
+	considerably improved maxdist_optimise for charge arms
+23.04.2021:
+	Dumping gro/xyz/lmp trajectories
+21.04.2021:
+	Progress report for parallelised sections. Wrote routine to dump gro/xyz/lmp trajectories, but not yet part of the official release
+11.04.2021:
+	Introduced convert_coc (produces centre of charge trajectory), also some bugfixes
+31.03.2021:
+	centre of charge now available for sum rules
+	(without the uncanny workaround)
+18.02.2021:
+	Debugging, minor changes, tests for yongji
+09.02.2021:
+	Debugging and user interface for new distance module.
+08.02.2021:
+	Introduced distance module, to calculate closest, exponentially weighed, and FFC distances.
+22.10.2020:
+	Introduced charge lever moment correction, changed to proper charge arm definition
+06.10.2020:
+	Bug fixes and cosmetics
+01.10.2020:
+	introduced charge arm analysis to reorientational correlation function.
+15.08.2020:
+	new keyword: remove_cores, which writes a trajectory with only the drude particles minus their respective cores.
+14.08.2020:
+	Bug fixes, user input for cross diffusion
+13.08.2020:
+	Added cross diffusion coefficients from Einstein Relation
+11.08.2020:
+	Some bug fixes
+26.07.2020:
+	Added Sodium to list of elements
+16.07.2020:
+	Progress report while writing trajectory
+07.07.2020:
+	Bug fixes
+18.06.2020:
+	Bug fixes
+17.06.2020:
+	Bug fixes
+16.06.2020:
+	Bug fixes
+12.06.2020:
+	Bug fixes
+11.06.2020:
+	Added jump analysis feature to dihedral part of the autocorrelation module
+10.06.2020:
+	introduced charge arm analysis to distribution module.
+09.06.2020:
+	Added the possibility to manually specify charges of distinct atoms.
+08.06.2020:
+	bug fixes, including a bug in the wrapping procedure.
+	Changes to the druded part of the code - fluorine now also bears a drude particle by default.
+14.05.2020:
+	minor bugfixes, added warning exceptions ("NOTICE")
+12.05.2020:
+	User interface for the new features
+11.05.2020:
+	introduced comboost
+	new keyword 'barycentric', which removes the box centre of mass
+	new features of the autocorrelation module: vcf and ecaf components, overall conductivity
+	(no user interface so far.)
+03.05.2020:
+	implemented new keyword: dump_neighbour_traj
+25.04.2020:
+	introduced simple keywords for sum rules and diffusion
+	improved user interface, including the recognition module, which now prints a general input file.
+10.04.2020:
+	bug fixes, cosmetics
+09.04.2020:
+	both default and atomic masses can be changed now
+	switched to column major order for reading trajectories
+	added jump velocity and jump gyradius tool
+	added 'simple' keywords
+	diffusion module: exponent can be freely chosen - useful for alpha2
+25.03.2020:
+	new keyword 'distribution':
+	Computes cylindrical and polar distribution functions.
+05.03.2020:
+	new keyword 'dump_dimers'
+26.02.2020:
+	increased length for filenames
+23.02.2020:
+	dump_cut references to the centre of mass of the reference molecule in the first step. much more convenient.
+17.02.2020:
+	New command line feature: '-r', which enables molecule recognition from a sorted lammps trajectory.
+15.02.2020:
+	Included new keyword 'contact_distance'
+13.02.2020:
+	Fixed issue with cubic_box_edge
+08.02.2020:
+	Program stops after encountering too many errors (currently, too many=500)
+05.02.2020:
+	added the druded molecular input file to the developers version hack mode.
+	Also, added cubic_box_edge to manual user input.
+05.02.2020:
+	included the possibility to manually set box dimensions (for xyz files)
+	via the new keyword 'cubic_box_edge'
+04.02.2020:
+	performance fixes
+29.01.2020:
+	new keyword: remove_drudes, which writes a trajectory with the drude particles merged into cores (mass-weighted)
+27.01.2020:
+	fixed bug in diffusion module / user input
+21.01.2020:
+	bug fixes
+20.01.2020:
+	bug fixes
+19.01.2020:
+	Introduced radius of gyration
+14.01.2020:
+	Fixed issue in manual user input
+	solved issue with f2003 compatibility
+	I/O is now flushed after every analysis and before reading the trajectory
+12.12.2019:
+	Minor adjustments (mostly nicer output)
+11.12.2019:
+	Introduced feature to compute the effective temperature for centre of mass, whole trajectory, and drude particles.
+06.12.2019:
+	Added assignment of drude particles - both manual and automatic.
+16.11.2019:
+	Added missing question in user_reorientation_input
+	cleaned up VERBOSE_OUTPUT in all modules
+15.11.2019:
+	Included copyright information and reference to GNU General Public License, version 3
+14.11.2019:
+	improved error handling when reading the whole trajectory at once (can deal with EOF while reading header now)
+	also, added some descriptions for the reorientational time correlation feature.
+12.11.2019:
+	Added feature: reorientational time correlation function / vector orientation dynamics.
+28.10.2019:
+	Added the keyword 'dump_cut', which writes a trajectory of a certain molecule including its neighbours.
+	(within a specified cutoff, and including periodic boundary conditions).
+04.10.2019:
+	Added 'export' to the dihedral autocorrelation module.
+02.10.2019:
+	Added flag '-d', which redirects the standard output (unit 6) to an output file.
+	The standard output file is 'output.dat', but this can be changed by just appending the filename to the flag:
+	'-dmyoutput' thus produces an output file 'myoutput', '-doutput.dat' is equal to the default.
+01.10.2019:
+	Added inofficial parallel conversion tool to developers version. Performance gain is pretty much nonexistent.
+26.09.2019:
+	changes in the temperature module, included function for the total temperature, included drudes
+25.09.2019:
+	changed the temperature calculation (constraints correction is now reported separately).
+	In the developers version, TLAMMPS, TN as well as the two corrections are also reported.
+03.09.2019:
+	minor bugfixes, release information is now included in the output to ease identification of issues in retrospect.
+23.08.2019:
+	minor bugfixes. 'convert' now writes lower and upper box bounds, not just upper.
+12.08.2019:
+	load_trajectory_header_information now checks whether the element names in the first step are consistent.
+	fixed bug (wrong sum formulae)
+	introduced support for wrapping of molecules into the box. (using centre of mass, not cutting molecules.)
+10.08.2019:
+	Changed to fortran 2003 standard
+	Added the keyword 'dump_single', which allows one to write a trajectory for one specific molecule.
+08.08.2019:
+	It is now possible to read (multiple!) general input files from the command line.
+	Furthermore, the subroutine report_trajectory_properties now also prints the sum formulae.
+07.08.2019:
+	Fixed bug which would give the wrong check temperature in module 'Autocorrelation'
+	(though results are not biased)
+	trajectory type can now be recognised based on file extension '.xyz' or '.lmp'
+	in addition to custom masses, constraints can now be specified (for correct temperature output).
+	Also changed custom masses and constraints input to free format.
+06.08.2019:
+	included error handling for the 'temperature' keyword.
+	cleared up some output.
+	Turned on support for drude particle by means of specification of a custom mass for 'X'
+05.08.2019:
+	custom masses might now be specified as optional lines in the molecular input file.
+04.08.2019:
+	minor changes, like a more readable temperature output
+03.08.2019:
+	For velocity trajectories, the keyword 'temperature' is now available, which computes kinetic temperatures, including a drift correction.
+30.07.2019:
+	Decreased the accuracy in convert to single precision,
+	minor bugfixes
+29.07.2019:
+	Added keyword 'convert', which produces a new trajectory containing only the centre of mass for every molecule.
+	changed trajectory types to lowercase ('xyz' and 'lmp')
+	turned on support for different trajectory types
+	Temperature is predicted from the velocity correlation functions as a check.
+25.07.2019:
+	Increased accuracy of VCF output.
+18.07.2019:
+	Added the sampling_interval switch to the self-contributions.
+	checks the trajectory header whether velocities or cartesians are present
+16.07.2019:
+	first (sort of) useful version.

@@ -1,4 +1,4 @@
-! RELEASED ON 18_Jan_2026 AT 18:00
+! RELEASED ON 21_Jan_2026 AT 13:48
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2026 Frederik Philippi
@@ -2070,7 +2070,7 @@ MODULE MOLECULAR ! Copyright (C) 2026 Frederik Philippi
  PRIVATE :: mass_of_tip_fragment,mass_of_base_fragment,molecule_type_index_for_fragments,custom_constraints
  PRIVATE :: custom_atom_masses,use_firstatom_as_com
  !PRIVATE/PUBLIC declarations
- PRIVATE :: report_trajectory_properties,reset_trajectory_file,wrap_full,wrap_snap,unwrap_full
+ PRIVATE :: report_trajectory_properties,reset_trajectory_file,wrap_full,wrap_snap
  PUBLIC :: atomic_weight,load_trajectory,initialise_molecular,finalise_molecular,write_molecule,give_temperature
  PUBLIC :: give_dihedrals,initialise_dihedrals,give_number_of_molecule_types,give_number_of_atoms_per_molecule
  PUBLIC :: give_number_of_molecules_per_step,give_mass_of_molecule,show_molecular_settings,print_memory_requirement
@@ -3230,124 +3230,6 @@ MODULE MOLECULAR ! Copyright (C) 2026 Frederik Philippi
   END SUBROUTINE wrap_vector
 
   !UNwrap the molecules - full trajectory.
-  !This routine can be parallelised, but seems pretty fast to me.
-  !at least much slower than reading the trajectory.
-  SUBROUTINE unwrap_full()
-  IMPLICIT NONE
-  INTEGER :: allocstatus,deallocstatus
-  INTEGER :: molecule_type_index,molecule_index,stepcounter,shiftlistcounter,atom_index,jumpcounter
-  REAL(KIND=WORKING_PRECISION) :: current_distance_squared,link_vector(3),jump_threshold(3),largest_link_vector_squared
-  REAL(KIND=WORKING_PRECISION) :: largest_observed_distance_squared,smallest_observed_distance_squared
-  TYPE :: unique_molecule
-   INTEGER :: molecule_type_index_local
-   INTEGER :: molecule_index_local
-   REAL(KIND=WORKING_PRECISION) :: accumulated_shift(3)
-   LOGICAL :: molecule_jumped
-  END TYPE unique_molecule
-  TYPE(unique_molecule),DIMENSION(:),ALLOCATABLE :: shiftlist
-   !Allocate memory for the array which stores the shift required to unwrap
-   !The way this works:
-   !I have decided to make one entry for each unique molecule.
-   !It is not perfect with array access, but this way I can potentially parallelise over the molecules.
-   !This would avoid racing conditions etc compared to parallelising over the snapshots / timesteps
-   ALLOCATE(shiftlist(give_total_number_of_molecules_per_step()),STAT=allocstatus)
-   IF (allocstatus/=0) CALL report_error(22,exit_status=allocstatus)
-   !if any molecule jumps more than box/2, it has probably been wrapped.
-   jump_threshold(:)=box_size(:)/2.0d0
-   !Initialise shiftlist
-   shiftlistcounter=0
-   !initialise largest / smallest jump distances and jump counter for statistics
-   jumpcounter=0
-   largest_link_vector_squared=0.0d0
-   largest_observed_distance_squared=0.0d0
-   smallest_observed_distance_squared=maximum_distance_squared
-   DO molecule_type_index=1,number_of_molecule_types,1
-    DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
-     shiftlistcounter=shiftlistcounter+1
-     shiftlist(shiftlistcounter)%molecule_type_index_local=molecule_type_index
-     shiftlist(shiftlistcounter)%molecule_index_local=molecule_index
-     shiftlist(shiftlistcounter)%accumulated_shift(:)=0.0d0
-     shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
-    ENDDO
-   ENDDO
-   !sanity checks, should not give any output.
-   IF (READ_SEQUENTIAL) CALL report_error(0)
-   IF (give_total_number_of_molecules_per_step()/=shiftlistcounter) CALL report_error(0)
-   !start the unwrapping - outer loop goes over unique molecules.
-   IF (VERBOSE_OUTPUT) CALL print_progress(give_total_number_of_molecules_per_step())
-   DO shiftlistcounter=1,give_total_number_of_molecules_per_step(),1
-    molecule_type_index=shiftlist(shiftlistcounter)%molecule_type_index_local
-    molecule_index=shiftlist(shiftlistcounter)%molecule_index_local
-    !inner loop over timesteps
-    DO stepcounter=1,number_of_steps-1,1
-     !shift the molecule (accumulated shift from previous steps)
-     IF (shiftlist(shiftlistcounter)%molecule_jumped) THEN
-      IF (SUM(shiftlist(shiftlistcounter)%accumulated_shift(:)**2)<0.001d0) THEN
-       !apparently, the molecule does not need moving - moved back
-       shiftlist(shiftlistcounter)%molecule_jumped=.FALSE.
-      ELSE
-       DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
-        !the current molecule, which was stepcounter+1 in the previous iteration, has already been moved by link_vector.
-        !However, the molecule after that will need moving too! Unless it jumped back of course.
-        molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
-        &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
-        &shiftlist(shiftlistcounter)%accumulated_shift(:)
-       ENDDO 
-      ENDIF
-     ENDIF
-
-     !check if there is a jump. Always compare to the next molecule in the step,
-     !which if necessary will be moved in the next iteration of the inner loop over "stepcounter"
-     current_distance_squared=give_smallest_distance_squared&
-     &(stepcounter,stepcounter+1,molecule_type_index,molecule_type_index,molecule_index,molecule_index,&
-     &translation=link_vector(:))
-     !keep track of smallest / largest distances
-     IF (current_distance_squared>largest_observed_distance_squared) THEN
-      largest_observed_distance_squared=current_distance_squared
-     ENDIF
-     IF (current_distance_squared<smallest_observed_distance_squared) THEN
-      smallest_observed_distance_squared=current_distance_squared
-     ENDIF
-     !check and unwrap if necessary
-     IF ((ABS(link_vector(1))>jump_threshold(1)).OR.&
-     &(ABS(link_vector(2))>jump_threshold(2)).OR.&
-     &(ABS(link_vector(3))>jump_threshold(3))) THEN
-      IF (SUM(link_vector(:)**2)>largest_link_vector_squared) THEN
-       largest_link_vector_squared=SUM(link_vector(:)**2)
-      ENDIF
-      jumpcounter=jumpcounter+1
-      !Move the molecule in the next step accordingly.
-      DO atom_index=1,molecule_list(molecule_type_index)%number_of_atoms,1
-       !should never be called with read sequential! thus, only the trajectory is required.
-       molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)=&
-       &molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,stepcounter+1)%coordinates(:)+&
-       &link_vector(:)
-      ENDDO
-      !Update accumuted shift
-      shiftlist(shiftlistcounter)%molecule_jumped=.TRUE.
-      shiftlist(shiftlistcounter)%accumulated_shift(:)=&
-      &shiftlist(shiftlistcounter)%accumulated_shift(:)+link_vector(:)
-     ENDIF
-    ENDDO
-    IF (VERBOSE_OUTPUT) CALL print_progress()
-   ENDDO
-   IF ((give_total_number_of_molecules_per_step()>100).AND.(VERBOSE_OUTPUT)) WRITE(*,*)
-   IF (VERBOSE_OUTPUT) THEN
-    WRITE(*,'(A,E9.3)') "   Largest jump distance:  ",SQRT(largest_observed_distance_squared)
-    WRITE(*,'(A,E9.3)') "   Smallest jump distance: ",SQRT(smallest_observed_distance_squared)
-    WRITE(*,'(A,E9.3)') "   Largest link vector:    ",SQRT(largest_link_vector_squared)
-    WRITE(*,'(A,I0)')   "   Total number of jumps:  ",jumpcounter
-    IF (jumpcounter==0) THEN
-     WRITE(*,*) "No jumps - trajectory very likely was already unwrapped."
-    ELSE
-     WRITE(*,*) "Trajectory is now unwrapped."
-    ENDIF
-   ENDIF
-   DEALLOCATE(shiftlist,STAT=deallocstatus)
-   IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
-  END SUBROUTINE unwrap_full
-
-  !UNwrap the molecules - full trajectory.
   !This routine will never benefit from parallelisation.
   SUBROUTINE unwrap_full_SEQUENTIAL()
   IMPLICIT NONE
@@ -3362,6 +3244,7 @@ MODULE MOLECULAR ! Copyright (C) 2026 Frederik Philippi
    LOGICAL :: molecule_jumped
   END TYPE unique_molecule
   TYPE(unique_molecule),DIMENSION(:),ALLOCATABLE :: shiftlist
+   IF (.NOT.(BOX_VOLUME_GIVEN)) CALL report_error(41)
    !Allocate memory for the array which stores the shift required to unwrap
    !I have decided to make one entry for each unique molecule.
    ALLOCATE(shiftlist(give_total_number_of_molecules_per_step()),STAT=allocstatus)
@@ -3471,6 +3354,7 @@ MODULE MOLECULAR ! Copyright (C) 2026 Frederik Philippi
   !$  INTEGER :: OMP_get_num_threads
   !$  END FUNCTION OMP_get_num_threads
   !$ END INTERFACE
+   IF (.NOT.(BOX_VOLUME_GIVEN)) CALL report_error(41)
    !$OMP PARALLEL IF(PARALLEL_OPERATION) PRIVATE(molecule_type_index,molecule_index,centre_of_mass,xyzcounter)
    !$OMP SINGLE
    !start the timer for the parallel section.
@@ -6564,6 +6448,9 @@ checkstring:   DO m=1,give_elements_in_simulation_box
      ENDIF
      !IF necessary, unwrap trajectory
      IF (UNWRAP_TRAJECTORY) THEN
+      IF (VERBOSE_OUTPUT) WRITE(*,*) "Preparing a clean trajectory before unwrapping..."
+      !wrap first...
+      CALL wrap_full()
       IF (VERBOSE_OUTPUT) WRITE(*,*) "UNwrapping centres of mass of each specified molecule *now*."
       CALL unwrap_full_SEQUENTIAL()
       IF (DEVELOPERS_VERSION) THEN
@@ -6627,7 +6514,6 @@ checkstring:   DO m=1,give_elements_in_simulation_box
        CALL report_error(54)
       ENDIF
      CASE ("xyz")
-      BOX_VOLUME_GIVEN=.FALSE.
       headerlines_to_skip=2
       READ(3,IOSTAT=ios,FMT=*) dummy
       IF (ios/=0) THEN
@@ -6640,7 +6526,7 @@ checkstring:   DO m=1,give_elements_in_simulation_box
       ! we need to get an estimate of the maximum_distance as well...
       maximum_distance_squared=22500.0
       maximum_distance=SQRT(maximum_distance_squared)
-      CALL report_error(168,exit_status=INT(maximum_distance))
+      IF (.NOT.(BOX_VOLUME_GIVEN)) CALL report_error(168,exit_status=INT(maximum_distance))
      CASE DEFAULT
       IF (DEVELOPERS_VERSION) WRITE(*,'("  ! load_trajectory_header_information is faulty")') skipped_charges
       CALL report_error(0)!unknown trajectory format, which should never be passed to this subroutine.
@@ -21565,6 +21451,23 @@ MODULE CLUSTER ! Copyright (C) 2026 Frederik Philippi
    ENDIF
    PRINT *,"Do you want to print detailed statistics? (y/n)"
    WRITE(8,'(" print_statistics ",L1)')user_input_logical()
+   PRINT *,"Now let's talk about cluster lifetimes."
+   PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
+   calculate_autocorrelation=user_input_logical()
+   IF (calculate_autocorrelation) THEN
+    WRITE(8,'(" autocorrelation T ### calculate cluster time correlation")')
+    PRINT *,"Do you want to use logarithmic spacing of timesteps (ca 8-10x faster) (y/n)?"
+    IF (user_input_logical()) THEN
+     WRITE(8,'(" use_log T ### logarithmic spacing of timesteps for autocorrelation")')
+    ELSE
+     WRITE(8,'(" use_log F ### linear spacing of timesteps for autocorrelation, maximum resolution")')
+    ENDIF
+    PRINT *,"Please enter the maximum time shift of the correlation function."
+    tmax=user_input_integer(1,nsteps-1)
+    WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+   ELSE
+    WRITE(8,'(" autocorrelation F ### skip the autocorrelation")')
+   ENDIF
    IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
     PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
     parallelisation_requested=user_input_logical()
@@ -23390,16 +23293,16 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2026 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 18_Jan_2026"
+ PRINT *, "   Date of Release: 21_Jan_2026"
  PRINT *, "   Please consider citing our work."
  PRINT *
- IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
-  PRINT *, "   Imperial College London"
-  PRINT *, "   MSRH Room 601"
-  PRINT *, "   White City Campus"
-  PRINT *, "   82 Wood Lane"
-  PRINT *, "   W12 0BZ London"
-  PRINT *, "   f.philippi18"," at ","imperial.ac.uk"
+ IF (.TRUE.) THEN
+  PRINT *, "   Laboratoire de Chimie ENS Lyon"
+  PRINT *, "   Campus Monod - M6.056"
+  PRINT *, "   46 Allée d'Italie"
+  PRINT *, "   69364 Lyon Cedex 07"
+  PRINT *, "   FRANCE"
+  PRINT *, "   contact"," at ","ionic-liquids.com"
   PRINT *
  ENDIF
  ! first, check if file exists. If not, switch to user input for this part.
@@ -23438,6 +23341,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
   INTEGER :: ios,n
   CHARACTER(LEN=32) :: inputstring
   CHARACTER(LEN=3) :: trajectory_type_input
+  REAL :: lower,upper
   LOGICAL :: input_condition,trajectory_statement_absent
    IF (VERBOSE_OUTPUT) WRITE(*,*) "reading file '",TRIM(FILENAME_GENERAL_INPUT),"'"
    INQUIRE(UNIT=7,OPENED=connected)
@@ -23508,14 +23412,18 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
       IF (ios/=0) THEN
        IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting trajectory_type to default."
        TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!setting to default
+       BOX_VOLUME_GIVEN=.FALSE.
       ELSE
        SELECT CASE (trajectory_type_input)
        CASE ("lmp")
         TRAJECTORY_TYPE="lmp"
+        BOX_VOLUME_GIVEN=.TRUE.
        CASE ("xyz")
         TRAJECTORY_TYPE="xyz"
+        BOX_VOLUME_GIVEN=.FALSE.
        CASE DEFAULT
         CALL report_error(51)!unknown trajectory format.
+        BOX_VOLUME_GIVEN=.FALSE.
        END SELECT
       ENDIF
       EXIT
@@ -23530,13 +23438,50 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
     CASE (".lmp",".LMP")
      PRINT *,"Assuming lammps trajectory based on file extension."
      TRAJECTORY_TYPE="lmp"
+     BOX_VOLUME_GIVEN=.TRUE.
     CASE (".xyz",".XYZ")
      PRINT *,"Assuming xyz trajectory based on file extension."
      TRAJECTORY_TYPE="xyz"
+     BOX_VOLUME_GIVEN=.FALSE.
     CASE DEFAULT
      CALL report_error(51)!unknown trajectory format.
+     BOX_VOLUME_GIVEN=.FALSE.
     END SELECT
    ENDIF
+   REWIND 7
+   !look if there was a box size specified
+   inputstring=""
+   DO n=1,MAXITERATIONS,1
+    READ(7,IOSTAT=ios,FMT=*) inputstring
+    IF (ios<0) THEN
+     !end of file encountered
+     EXIT
+    ENDIF
+    IF (ios==0) THEN
+     IF ((TRIM(inputstring)=="cubic_box_edge").OR.(TRIM(inputstring)=="cubic_box")) THEN
+      WRITE(*,'(A54,I0)') " found a 'cubic_box' (=cell vector) statement in line ",n
+      BACKSPACE 7
+      READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
+      IF (ios==0) THEN
+       IF (lower>upper) THEN
+        CALL report_error(93)
+       ELSE
+        IF (BOX_VOLUME_GIVEN) CALL report_error(92)
+        CALL set_cubic_box(lower,upper)
+        WRITE(*,'(" Box boundaries set to:")') 
+        WRITE(*,'("   lower bound: ",E12.6)') lower
+        WRITE(*,'("   upper bound: ",E12.6)') upper
+        BOX_VOLUME_GIVEN=.TRUE.
+       ENDIF
+      ELSE
+       CALL report_error(19,exit_status=ios)
+      ENDIF
+      EXIT
+     ELSEIF (TRIM(inputstring)=="quit") THEN
+      EXIT
+     ENDIF
+    ENDIF
+   ENDDO
    REWIND 7
    !search for a 'wrap' statement
    WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
@@ -23934,8 +23879,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"Each line contains a switch or keyword, followed by an argument (if required)"
    PRINT *,"Only the necessary information is read from any line, with the rest being ignored."
    PRINT *,"Be aware that keywords affect only the lines below them."
-   PRINT *,"This is with the exception of sequential_read, trajectory_type and wrap_trajectory / unwrap_trajectory."
-   PRINT *,"These latter three act on the whole analysis, no matter where specified."
+   PRINT *,"This is with the exception of sequential_read, trajectory_type, cubic_box_edge, and wrap_trajectory / unwrap_trajectory."
+   PRINT *,"These latter four act on the whole analysis, no matter where specified."
    PRINT *,"Only their first occurence matters - everything afterwards is ignored."
    PRINT *,"An incorrectly formatted 'general.inp' is not tolerated (read the error messages)."
    PRINT *,"For many switches, a simple mode that doesn't require additional input is available."
@@ -24472,6 +24417,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
    PRINT *,"    (or until a new 'custom_weight' switch is encountered)"
    PRINT *,"    This affects the weight_average in the statistics output."
    PRINT *,"    By default, the full molecule charge is used, even if more than one atom is specified."
+   PRINT *," - 'autocorrelation': expects a logical ('T' or 'F'). If 'T', then the"
+   PRINT *,"    binary intermittent autocorrelation function for each species is calculated and reported."
+   PRINT *," - 'log_spacing': expects a logical ('T' or 'F'). If 'T', then the time steps"
+   PRINT *,"    of the autocorrelation function are printed logarithmically (warmly recommended)."
+   PRINT *," - 'tmax': Expects an integer, which is then taken as the maximum number of steps"
+   PRINT *,"    into the future for the time correlation function."
    PRINT *,"    Only for the 'GLOBAL' operation mode:"
    PRINT *,"      - 'add_atom_index': expects two integers:"
    PRINT *,"         The molecule type index and the atom index of the atom to be considered for the analysis."
@@ -26169,7 +26120,6 @@ INTEGER :: ios,n
   INTEGER :: inputinteger,startstep,endstep,inputinteger2,inputinteger3,inputinteger4,counter
   LOGICAL :: inputlogical
   REAL(KIND=WORKING_PRECISION) :: inputreal
-  REAL :: lower,upper
    DO n=1,MAXITERATIONS,1
     READ(7,IOSTAT=ios,FMT=*) inputstring
     IF (ios<0) THEN
@@ -26489,21 +26439,7 @@ INTEGER :: ios,n
       CALL report_error(41)
      ENDIF
     CASE ("cubic_box_edge","cubic_box")
-     IF (BOX_VOLUME_GIVEN) CALL report_error(92)
-     BACKSPACE 7
-     READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
-     IF (ios/=0) THEN
-      CALL report_error(19,exit_status=ios)
-      EXIT
-     ENDIF
-     IF (lower>upper) THEN
-      CALL report_error(93)
-     ELSE
-      CALL set_cubic_box(lower,upper)
-      WRITE(*,'(" Box boundaries set to:")') 
-      WRITE(*,'("   lower bound: ",E12.6)') lower
-      WRITE(*,'("   upper bound: ",E12.6)') upper
-     ENDIF
+     IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (cubic_box)"
     CASE ("cubic_box_edge_simple")
      CALL report_error(113)
     CASE ("convert","convert_com","convert_COM") !Module DEBUG
@@ -26850,6 +26786,8 @@ INTEGER :: ios,n
       WRITE(*,*) "setting 'ERROR_OUTPUT' to ",ERROR_OUTPUT
      ENDIF
     CASE ("parallel_operation")
+     !TODO TO DO TODO TO DO
+     !IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (parallel_operation)"
      BACKSPACE 7
      READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
      IF (ios/=0) THEN
