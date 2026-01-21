@@ -60,13 +60,13 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 	PRINT *, "   Date of Release: !RELEASEDATE!"
 	PRINT *, "   Please consider citing our work."
 	PRINT *
-	IF (DEVELOPERS_VERSION) THEN!only people who actually read the code get my contacts.
-		PRINT *, "   Imperial College London"
-		PRINT *, "   MSRH Room 601"
-		PRINT *, "   White City Campus"
-		PRINT *, "   82 Wood Lane"
-		PRINT *, "   W12 0BZ London"
-		PRINT *, "   f.philippi18"," at ","imperial.ac.uk"
+	IF (.TRUE.) THEN
+		PRINT *, "   Laboratoire de Chimie ENS Lyon"
+		PRINT *, "   Campus Monod - M6.056"
+		PRINT *, "   46 Allée d'Italie"
+		PRINT *, "   69364 Lyon Cedex 07"
+		PRINT *, "   FRANCE"
+		PRINT *, "   contact"," at ","ionic-liquids.com"
 		PRINT *
 	ENDIF
 	! first, check if file exists. If not, switch to user input for this part.
@@ -105,6 +105,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 		INTEGER :: ios,n
 		CHARACTER(LEN=32) :: inputstring
 		CHARACTER(LEN=3) :: trajectory_type_input
+		REAL :: lower,upper
 		LOGICAL :: input_condition,trajectory_statement_absent
 			IF (VERBOSE_OUTPUT) WRITE(*,*) "reading file '",TRIM(FILENAME_GENERAL_INPUT),"'"
 			INQUIRE(UNIT=7,OPENED=connected)
@@ -175,14 +176,18 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 						IF (ios/=0) THEN
 							IF (VERBOSE_OUTPUT) PRINT *,"Can't interpret line - setting trajectory_type to default."
 							TRAJECTORY_TYPE=TRAJECTORY_TYPE_DEFAULT!setting to default
+							BOX_VOLUME_GIVEN=.FALSE.
 						ELSE
 							SELECT CASE (trajectory_type_input)
 							CASE ("lmp")
 								TRAJECTORY_TYPE="lmp"
+								BOX_VOLUME_GIVEN=.TRUE.
 							CASE ("xyz")
 								TRAJECTORY_TYPE="xyz"
+								BOX_VOLUME_GIVEN=.FALSE.
 							CASE DEFAULT
 								CALL report_error(51)!unknown trajectory format.
+								BOX_VOLUME_GIVEN=.FALSE.
 							END SELECT
 						ENDIF
 						EXIT
@@ -197,13 +202,50 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 				CASE (".lmp",".LMP")
 					PRINT *,"Assuming lammps trajectory based on file extension."
 					TRAJECTORY_TYPE="lmp"
+					BOX_VOLUME_GIVEN=.TRUE.
 				CASE (".xyz",".XYZ")
 					PRINT *,"Assuming xyz trajectory based on file extension."
 					TRAJECTORY_TYPE="xyz"
+					BOX_VOLUME_GIVEN=.FALSE.
 				CASE DEFAULT
 					CALL report_error(51)!unknown trajectory format.
+					BOX_VOLUME_GIVEN=.FALSE.
 				END SELECT
 			ENDIF
+			REWIND 7
+			!look if there was a box size specified
+			inputstring=""
+			DO n=1,MAXITERATIONS,1
+				READ(7,IOSTAT=ios,FMT=*) inputstring
+				IF (ios<0) THEN
+					!end of file encountered
+					EXIT
+				ENDIF
+				IF (ios==0) THEN
+					IF ((TRIM(inputstring)=="cubic_box_edge").OR.(TRIM(inputstring)=="cubic_box")) THEN
+						WRITE(*,'(A54,I0)') " found a 'cubic_box' (=cell vector) statement in line ",n
+						BACKSPACE 7
+						READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
+						IF (ios==0) THEN
+							IF (lower>upper) THEN
+								CALL report_error(93)
+							ELSE
+								IF (BOX_VOLUME_GIVEN) CALL report_error(92)
+								CALL set_cubic_box(lower,upper)
+								WRITE(*,'(" Box boundaries set to:")') 
+								WRITE(*,'("   lower bound: ",E12.6)') lower
+								WRITE(*,'("   upper bound: ",E12.6)') upper
+								BOX_VOLUME_GIVEN=.TRUE.
+							ENDIF
+						ELSE
+							CALL report_error(19,exit_status=ios)
+						ENDIF
+						EXIT
+					ELSEIF (TRIM(inputstring)=="quit") THEN
+						EXIT
+					ENDIF
+				ENDIF
+			ENDDO
 			REWIND 7
 			!search for a 'wrap' statement
 			WRAP_TRAJECTORY=WRAP_TRAJECTORY_DEFAULT
@@ -601,8 +643,8 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"Each line contains a switch or keyword, followed by an argument (if required)"
 			PRINT *,"Only the necessary information is read from any line, with the rest being ignored."
 			PRINT *,"Be aware that keywords affect only the lines below them."
-			PRINT *,"This is with the exception of sequential_read, trajectory_type and wrap_trajectory / unwrap_trajectory."
-			PRINT *,"These latter three act on the whole analysis, no matter where specified."
+			PRINT *,"This is with the exception of sequential_read, trajectory_type, cubic_box_edge, and wrap_trajectory / unwrap_trajectory."
+			PRINT *,"These latter four act on the whole analysis, no matter where specified."
 			PRINT *,"Only their first occurence matters - everything afterwards is ignored."
 			PRINT *,"An incorrectly formatted 'general.inp' is not tolerated (read the error messages)."
 			PRINT *,"For many switches, a simple mode that doesn't require additional input is available."
@@ -1139,6 +1181,12 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
 			PRINT *,"    (or until a new 'custom_weight' switch is encountered)"
 			PRINT *,"    This affects the weight_average in the statistics output."
 			PRINT *,"    By default, the full molecule charge is used, even if more than one atom is specified."
+			PRINT *," - 'autocorrelation': expects a logical ('T' or 'F'). If 'T', then the"
+			PRINT *,"    binary intermittent autocorrelation function for each species is calculated and reported."
+			PRINT *," - 'log_spacing': expects a logical ('T' or 'F'). If 'T', then the time steps"
+			PRINT *,"    of the autocorrelation function are printed logarithmically (warmly recommended)."
+			PRINT *," - 'tmax': Expects an integer, which is then taken as the maximum number of steps"
+			PRINT *,"    into the future for the time correlation function."
 			PRINT *,"    Only for the 'GLOBAL' operation mode:"
 			PRINT *,"      - 'add_atom_index': expects two integers:"
 			PRINT *,"         The molecule type index and the atom index of the atom to be considered for the analysis."
@@ -2836,7 +2884,6 @@ INTEGER :: ios,n
 		INTEGER :: inputinteger,startstep,endstep,inputinteger2,inputinteger3,inputinteger4,counter
 		LOGICAL :: inputlogical
 		REAL(KIND=WORKING_PRECISION) :: inputreal
-		REAL :: lower,upper
 			DO n=1,MAXITERATIONS,1
 				READ(7,IOSTAT=ios,FMT=*) inputstring
 				IF (ios<0) THEN
@@ -3156,21 +3203,7 @@ INTEGER :: ios,n
 						CALL report_error(41)
 					ENDIF
 				CASE ("cubic_box_edge","cubic_box")
-					IF (BOX_VOLUME_GIVEN) CALL report_error(92)
-					BACKSPACE 7
-					READ(7,IOSTAT=ios,FMT=*) inputstring,lower,upper
-					IF (ios/=0) THEN
-						CALL report_error(19,exit_status=ios)
-						EXIT
-					ENDIF
-					IF (lower>upper) THEN
-						CALL report_error(93)
-					ELSE
-						CALL set_cubic_box(lower,upper)
-						WRITE(*,'(" Box boundaries set to:")') 
-						WRITE(*,'("   lower bound: ",E12.6)') lower
-						WRITE(*,'("   upper bound: ",E12.6)') upper
-					ENDIF
+					IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (cubic_box)"
 				CASE ("cubic_box_edge_simple")
 					CALL report_error(113)
 				CASE ("convert","convert_com","convert_COM") !Module DEBUG
@@ -3517,6 +3550,8 @@ INTEGER :: ios,n
 						WRITE(*,*) "setting 'ERROR_OUTPUT' to ",ERROR_OUTPUT
 					ENDIF
 				CASE ("parallel_operation")
+					!TODO TO DO TODO TO DO
+					!IF (VERBOSE_OUTPUT) WRITE(*,*) "skip line (parallel_operation)"
 					BACKSPACE 7
 					READ(7,IOSTAT=ios,FMT=*) inputstring,inputlogical
 					IF (ios/=0) THEN

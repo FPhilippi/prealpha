@@ -168,6 +168,23 @@ MODULE CLUSTER ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			ENDIF
 			PRINT *,"Do you want to print detailed statistics? (y/n)"
 			WRITE(8,'(" print_statistics ",L1)')user_input_logical()
+			PRINT *,"Now let's talk about cluster lifetimes."
+			PRINT *,"Do you want to calculate the intermittent binary autocorrelation function (y/n)?"
+			calculate_autocorrelation=user_input_logical()
+			IF (calculate_autocorrelation) THEN
+				WRITE(8,'(" autocorrelation T ### calculate cluster time correlation")')
+				PRINT *,"Do you want to use logarithmic spacing of timesteps (ca 8-10x faster) (y/n)?"
+				IF (user_input_logical()) THEN
+					WRITE(8,'(" use_log T ### logarithmic spacing of timesteps for autocorrelation")')
+				ELSE
+					WRITE(8,'(" use_log F ### linear spacing of timesteps for autocorrelation, maximum resolution")')
+				ENDIF
+				PRINT *,"Please enter the maximum time shift of the correlation function."
+				tmax=user_input_integer(1,nsteps-1)
+				WRITE(8,'(" tmax ",I0," ### maximum time shift of the correlation function")') tmax
+			ELSE
+				WRITE(8,'(" autocorrelation F ### skip the autocorrelation")')
+			ENDIF
 			IF (.NOT.(parallelisation_requested)) THEN!... but hasn't been requested so far. Thus, ask for it.
 				PRINT *,"The requested feature benefits from parallelisation. Would you like to turn on parallelisation? (y/n)"
 				parallelisation_requested=user_input_logical()
