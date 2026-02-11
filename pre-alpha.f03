@@ -1,4 +1,4 @@
-! RELEASED ON 21_Jan_2026 AT 13:48
+! RELEASED ON 11_Feb_2026 AT 15:10
 
     ! prealpha - a tool to extract information from molecular dynamics trajectories.
     ! Copyright (C) 2026 Frederik Philippi
@@ -22660,18 +22660,12 @@ check_B:        DO pair_counter=1,current_pair-1,1
    N_largest_cluster=0
    !opening the units for the time series
    IF (calculate_autocorrelation) THEN
-    IF (N_cutoffs==1) THEN
-     !I need to write a scratch file with one row for each timestep, and as many columns as there are possible cluster members.
-     !the entries are cluster sizes (integer, i.e. 1 if it is a monomer, and so on)
-     INQUIRE(UNIT=11,OPENED=connected)
-     IF (connected) CALL report_error(27,exit_status=11)
-     OPEN(UNIT=11,STATUS="SCRATCH",IOSTAT=ios)
-     IF (ios/=0) CALL report_error(26,exit_status=ios)
-    ELSE
-     !Turn off autocorrelation
-     calculate_autocorrelation=.FALSE.
-     CALL report_error(180,exit_status=N_cutoffs)
-    ENDIF
+    !I need to write a scratch file with one row for each timestep, and as many columns as there are possible cluster members.
+    !the entries are cluster sizes (integer, i.e. 1 if it is a monomer, and so on)
+    INQUIRE(UNIT=11,OPENED=connected)
+    IF (connected) CALL report_error(27,exit_status=11)
+    OPEN(UNIT=11,STATUS="SCRATCH",IOSTAT=ios)
+    IF (ios/=0) CALL report_error(26,exit_status=ios)
    ENDIF
    !$OMP PARALLEL IF((PARALLEL_OPERATION).AND.(.NOT.(READ_SEQUENTIAL)))&
    !$OMP PRIVATE(list_of_clusters,cluster_number,m,n,i,current_cluster,pair_counter,cluster_todelete,cluster_counts)
@@ -22712,6 +22706,9 @@ check_B:        DO pair_counter=1,current_pair-1,1
         &list_of_atoms(m)%molecule_index,list_of_atoms(n)%molecule_index,&
         &list_of_atoms(m)%atom_index,list_of_atoms(n)%atom_index)&
         &<squared_cutoff_list(pair_counter)) THEN
+         IF ((list_of_atoms(m)%molecule_type_index==list_of_atoms(n)%molecule_type_index).AND.&
+         &(list_of_atoms(m)%molecule_index==list_of_atoms(n)%molecule_index).AND.&
+         &(list_of_atoms(m)%atom_index==list_of_atoms(n)%atom_index)) CYCLE
          IF (cluster_number(m)==0) THEN
          ! m is a monomer!
           IF (cluster_number(n)==0) THEN
@@ -22785,6 +22782,14 @@ check_B:        DO pair_counter=1,current_pair-1,1
       ENDDO
      ENDDO
     ENDDO !end of pair counter loop
+    ! IF (remove_double_counts) THEN
+     ! DO i=1,current_cluster,1
+      
+      ! IF () THEN
+       ! list_of_clusters(i)%members=list_of_clusters(i)%members-1
+      ! ENDIF
+     ! ENDDO
+    ! ENDIF
     !Here, all the clusters should be identified
     IF (N_largest_cluster<MAXVAL(list_of_clusters(:)%members)) THEN
      !$OMP CRITICAL(update_largest_cluster)
@@ -23293,7 +23298,7 @@ INTEGER :: nsteps!nsteps is required again for checks (tmax...), and is initiali
  PRINT *, "   Copyright (C) 2026 Frederik Philippi"
  PRINT *, "   Please report any bugs."
  PRINT *, "   Suggestions and questions are also welcome. Thanks."
- PRINT *, "   Date of Release: 21_Jan_2026"
+ PRINT *, "   Date of Release: 11_Feb_2026"
  PRINT *, "   Please consider citing our work."
  PRINT *
  IF (.TRUE.) THEN

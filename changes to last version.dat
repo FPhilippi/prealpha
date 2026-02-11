@@ -1,3 +1,5 @@
+11.02.2026:
+	Bug fixes for pair mode of cluster algorithm
 21.01.2026:
 	Finishing touches to cluster autocorrelation function. Works best for GLOBAL but implemented for PAIRS, too.
 	Also I improved the wrapping/unwrapping procedure and implemented compatibility with xyz trajectories in this case.
