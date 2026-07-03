@@ -1252,8 +1252,13 @@ check_B:								DO pair_counter=1,current_pair-1,1
 										!here, cluster "m" has "i" members, now find all the atoms that belong to it
 										DO n=1,N_atoms,1
 											IF (cluster_number(n)==m) THEN
-												CALL add_print_member&
-												&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+												IF (DEVELOPERS_VERSION) THEN
+													CALL add_print_member&
+													&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index,cluster_number=m)
+												ELSE
+													CALL add_print_member&
+													&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+												ENDIF
 											ENDIF
 										ENDDO
 										!here we have added all atoms belonging to that cluster to print_members
@@ -1591,8 +1596,13 @@ check_B:								DO pair_counter=1,current_pair-1,1
 									!here, cluster "m" has "i" members, now find all the atoms that belong to it
 									DO n=1,N_atoms,1
 										IF (cluster_number(n)==m) THEN
-											CALL add_print_member&
-											&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+											IF (DEVELOPERS_VERSION) THEN
+												CALL add_print_member&
+												&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index,cluster_number=m)
+											ELSE
+												CALL add_print_member&
+												&(list_of_atoms(n)%molecule_type_index,list_of_atoms(n)%molecule_index)
+											ENDIF
 										ENDIF
 									ENDDO
 									!here we have added all atoms belonging to that cluster to print_members

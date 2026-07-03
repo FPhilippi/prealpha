@@ -395,6 +395,7 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 		TYPE(atom),DIMENSION(:,:),ALLOCATABLE :: snapshot_2 !alternative storage if position and velocity are required simultaneously
 		TYPE(atom),DIMENSION(:,:,:),ALLOCATABLE :: trajectory_2 !alternative storage if position and velocity are required simultaneously
 		LOGICAL,DIMENSION(:),ALLOCATABLE :: molecules_to_print
+		INTEGER,DIMENSION(:),ALLOCATABLE :: molecules_to_print_clusternumber
 	END TYPE molecule
 	REAL(KIND=WORKING_PRECISION) :: box_dimensions(2,3)!low and high for x,y,z
 	REAL(KIND=WORKING_PRECISION) :: box_size(3) !size of the box.
@@ -467,6 +468,21 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 					molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
 				ENDDO
 				printmember_output_atom_count=0
+				IF (DEVELOPERS_VERSION) THEN
+					IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print_clusternumber)) THEN
+						CALL report_error(0)
+					ELSE
+						ALLOCATE(molecule_list(molecule_type_index)%molecules_to_print_clusternumber(&
+						&molecule_list(molecule_type_index)%total_molecule_count),STAT=allocstatus)
+						IF (allocstatus/=0) THEN
+							CALL report_error(22,exit_status=allocstatus)
+							RETURN
+						ENDIF
+					ENDIF
+					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
+						molecule_list(molecule_type_index)%molecules_to_print_clusternumber(molecule_index)=0
+					ENDDO
+				ENDIF
 			ENDDO
 		END SUBROUTINE initialise_print_members
 
@@ -476,6 +492,9 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 			DO molecule_type_index=1,give_number_of_molecule_types(),1
 				DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
 					molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.FALSE.
+					IF (DEVELOPERS_VERSION) THEN
+						molecule_list(molecule_type_index)%molecules_to_print_clusternumber(molecule_index)=0
+					ENDIF
 				ENDDO
 			ENDDO
 			printmember_output_atom_count=0
@@ -510,7 +529,12 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				DO molecule_type_index=1,give_number_of_molecule_types(),1
 					DO molecule_index=1,molecule_list(molecule_type_index)%total_molecule_count,1
 						IF (molecule_list(molecule_type_index)%molecules_to_print(molecule_index)) THEN
-							CALL write_molecule(4,timestep,molecule_type_index,molecule_index,include_header=.FALSE.)
+							IF (DEVELOPERS_VERSION) THEN
+								CALL write_molecule(4,timestep,molecule_type_index,molecule_index,include_header=.FALSE.,&
+								&include_clusternumber=.TRUE.)
+							ELSE
+								CALL write_molecule(4,timestep,molecule_type_index,molecule_index,include_header=.FALSE.)
+							ENDIF
 						ENDIF
 					ENDDO
 				ENDDO
@@ -531,16 +555,28 @@ MODULE MOLECULAR ! Copyright (C) !RELEASEYEAR! Frederik Philippi
 				ELSE
 					CALL report_error(0)
 				ENDIF
+				IF (DEVELOPERS_VERSION) THEN
+					IF (ALLOCATED(molecule_list(molecule_type_index)%molecules_to_print_clusternumber)) THEN
+						DEALLOCATE(molecule_list(molecule_type_index)%molecules_to_print_clusternumber,STAT=deallocstatus)
+						IF (deallocstatus/=0) CALL report_error(23,exit_status=deallocstatus)
+					ELSE
+						CALL report_error(0)
+					ENDIF
+				ENDIF
 			ENDDO
 		END SUBROUTINE finalise_print_members
 
-		SUBROUTINE add_print_member(molecule_type_index,molecule_index)
+		SUBROUTINE add_print_member(molecule_type_index,molecule_index,cluster_number)
 		IMPLICIT NONE
+		INTEGER,INTENT(IN),OPTIONAL :: cluster_number
 		INTEGER :: molecule_type_index,molecule_index
 			IF (.NOT.(molecule_list(molecule_type_index)%molecules_to_print(molecule_index))) THEN
 				molecule_list(molecule_type_index)%molecules_to_print(molecule_index)=.TRUE.
 				printmember_output_atom_count=printmember_output_atom_count+&
 				&give_number_of_atoms_per_molecule(molecule_type_index)
+				IF ((DEVELOPERS_VERSION).AND.(PRESENT(cluster_number))) THEN
+					molecule_list(molecule_type_index)%molecules_to_print_clusternumber(molecule_index)=cluster_number
+				ENDIF
 			ENDIF
 		END SUBROUTINE add_print_member
 
@@ -3134,9 +3170,11 @@ checkstring:			DO m=1,give_elements_in_simulation_box
 		!the blanks are not added!
 		!If include_header=.TRUE. (which is the default), then the first two lines for an xyz file are added.
 		SUBROUTINE write_molecule(unit_number,timestep_in,molecule_type_index,molecule_index,include_header,&
-		&custom_header,translate_by)
+		&custom_header,translate_by,include_clusternumber)
 		IMPLICIT NONE
 		LOGICAL,INTENT(IN),OPTIONAL :: include_header
+		LOGICAL,INTENT(IN),OPTIONAL :: include_clusternumber
+		LOGICAL :: extra_column
 		INTEGER,INTENT(IN) :: unit_number,molecule_type_index,molecule_index,timestep_in
 		INTEGER :: atom_index,natoms,timestep
 		CHARACTER(LEN=*),OPTIONAL :: custom_header
@@ -3176,13 +3214,31 @@ checkstring:			DO m=1,give_elements_in_simulation_box
 					WRITE(unit_number,'(" Molecular weight = ",F0.4)') molecule_list(molecule_type_index)%mass
 				ENDIF
 			ENDIF
+			extra_column=.FALSE.
+			IF ((DEVELOPERS_VERSION).AND.(PRESENT(include_clusternumber))) THEN
+				IF (include_clusternumber) THEN
+					extra_column=.TRUE.
+				ENDIF
+			ENDIF
 			DO atom_index=1,natoms,1
-				IF (READ_SEQUENTIAL) THEN
-					WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-					&SNGL(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:))
+				IF (extra_column) THEN
+					IF (READ_SEQUENTIAL) THEN
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:)),&
+						&molecule_list(molecule_type_index)%molecules_to_print_clusternumber(molecule_index)
+					ELSE
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:)),&
+						&molecule_list(molecule_type_index)%molecules_to_print_clusternumber(molecule_index)
+					ENDIF
 				ELSE
-					WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
-					&SNGL(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:))
+					IF (READ_SEQUENTIAL) THEN
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%snapshot(atom_index,molecule_index)%coordinates(:)+shift(:))
+					ELSE
+						WRITE(unit_number,*) molecule_list(molecule_type_index)%list_of_elements(MODULO(atom_index-1,natoms)+1),&
+						&SNGL(molecule_list(molecule_type_index)%trajectory(atom_index,molecule_index,timestep)%coordinates(:)+shift(:))
+					ENDIF
 				ENDIF
 			ENDDO
 		END SUBROUTINE write_molecule
