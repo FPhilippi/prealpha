@@ -1,3 +1,5 @@
+03.07.2026:
+	Now possible to print an extra column in write_molecule in the developers version.
 11.02.2026:
 	Bug fixes for pair mode of cluster algorithm
 21.01.2026:
